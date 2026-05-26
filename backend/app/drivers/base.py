@@ -130,6 +130,88 @@ class LogEntry:
 
 
 @dataclass(slots=True)
+class IpRoute:
+    id: str | None
+    dst_address: str                       # "0.0.0.0/0", "192.168.1.0/24", ...
+    gateway: str | None = None
+    distance: int | None = None
+    routing_table: str | None = None       # "main" by default
+    pref_src: str | None = None
+    vrf_interface: str | None = None
+    active: bool | None = None
+    dynamic: bool | None = None
+    static: bool | None = None
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class IpAddress:
+    id: str | None
+    address: str                           # e.g. "192.168.1.1/24"
+    network: str | None = None
+    interface: str | None = None
+    disabled: bool = False
+    invalid: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ArpEntry:
+    id: str | None
+    address: str
+    mac_address: str | None = None
+    interface: str | None = None
+    complete: bool | None = None
+    dynamic: bool | None = None
+    invalid: bool | None = None
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class BridgeHost:
+    id: str | None
+    mac_address: str
+    on_interface: str | None = None        # the bridge port the MAC was learned on
+    bridge: str | None = None
+    age: str | None = None                 # e.g. "2m34s"
+    dynamic: bool | None = None
+    external: bool | None = None           # learned from another switch
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class Interface:
+    id: str | None
+    name: str
+    type: str                              # "ether", "wireguard", "vlan", "bridge", "ppp-out", ...
+    running: bool | None = None
+    disabled: bool = False
+    mac_address: str | None = None
+    mtu: int | None = None
+    actual_mtu: int | None = None
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class VlanInterface:
+    id: str | None
+    name: str
+    interface: str                         # parent interface
+    vlan_id: int
+    mtu: int | None = None
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class NtpClient:
     """RouterOS /system/ntp/client (singleton)."""
 
@@ -291,6 +373,26 @@ class VendorDriver(Protocol):
         topics: str | None = None,
         limit: int = 200,
     ) -> list[LogEntry]: ...
+
+    # IP routes
+    async def ip_routes_list(self, creds: DeviceCredentials) -> list[IpRoute]: ...
+    async def ip_route_add(self, creds: DeviceCredentials, route: IpRoute) -> str: ...
+    async def ip_route_remove(self, creds: DeviceCredentials, route_id: str) -> None: ...
+
+    # IP addresses
+    async def ip_addresses_list(self, creds: DeviceCredentials) -> list[IpAddress]: ...
+
+    # ARP
+    async def ip_arp_list(self, creds: DeviceCredentials) -> list[ArpEntry]: ...
+
+    # Bridge hosts
+    async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]: ...
+
+    # Interfaces + VLANs
+    async def interfaces_list(self, creds: DeviceCredentials) -> list[Interface]: ...
+    async def vlan_list(self, creds: DeviceCredentials) -> list[VlanInterface]: ...
+    async def vlan_add(self, creds: DeviceCredentials, vlan: VlanInterface) -> str: ...
+    async def vlan_remove(self, creds: DeviceCredentials, vlan_id: str) -> None: ...
 
     # NTP
     async def ntp_client_get(self, creds: DeviceCredentials) -> NtpClient: ...

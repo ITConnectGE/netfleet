@@ -14,12 +14,17 @@ from typing import Any
 import structlog
 
 from app.drivers.base import (
+    ArpEntry,
     BackupArtifact,
+    BridgeHost,
     Capability,
     DeviceCredentials,
     DeviceUser,
     DhcpLease,
     FilterRule,
+    Interface,
+    IpAddress,
+    IpRoute,
     IpService,
     LogEntry,
     NatRule,
@@ -29,6 +34,7 @@ from app.drivers.base import (
     SnmpSettings,
     SystemInfo,
     VendorDriver,
+    VlanInterface,
     WireguardInterface,
     WireguardPeer,
 )
@@ -203,6 +209,187 @@ class MikrotikDriver:
         self, creds: DeviceCredentials, rule_id: str
     ) -> None:
         await self._call(creds, "/ip/firewall/filter/remove", **{".id": rule_id})
+
+    # ============== IP routes ==============
+
+    async def ip_routes_list(self, creds: DeviceCredentials) -> list[IpRoute]:
+        rows = await self._call(creds, "/ip/route/print")
+        out: list[IpRoute] = []
+        for r in rows:
+            dist_raw = r.get("distance")
+            try:
+                distance = int(dist_raw) if dist_raw is not None else None
+            except (TypeError, ValueError):
+                distance = None
+            out.append(
+                IpRoute(
+                    id=r.get(".id"),
+                    dst_address=str(r.get("dst-address", "")),
+                    gateway=r.get("gateway"),
+                    distance=distance,
+                    routing_table=r.get("routing-table") or r.get("routing-mark") or "main",
+                    pref_src=r.get("pref-src"),
+                    vrf_interface=r.get("vrf-interface"),
+                    active=_to_bool(r.get("active")),
+                    dynamic=_to_bool(r.get("dynamic")),
+                    static=_to_bool(r.get("static")),
+                    disabled=_to_bool(r.get("disabled")),
+                    comment=r.get("comment"),
+                    raw=r,
+                )
+            )
+        return out
+
+    async def ip_route_add(self, creds: DeviceCredentials, route: IpRoute) -> str:
+        params: dict[str, Any] = {"dst-address": route.dst_address}
+        for k, v in {
+            "gateway": route.gateway,
+            "distance": route.distance,
+            "routing-table": route.routing_table,
+            "pref-src": route.pref_src,
+            "comment": route.comment,
+        }.items():
+            if v is not None:
+                params[k] = v
+        if route.disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/ip/route/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def ip_route_remove(self, creds: DeviceCredentials, route_id: str) -> None:
+        await self._call(creds, "/ip/route/remove", **{".id": route_id})
+
+    # ============== IP addresses ==============
+
+    async def ip_addresses_list(self, creds: DeviceCredentials) -> list[IpAddress]:
+        rows = await self._call(creds, "/ip/address/print")
+        return [
+            IpAddress(
+                id=r.get(".id"),
+                address=str(r.get("address", "")),
+                network=r.get("network"),
+                interface=r.get("interface"),
+                disabled=_to_bool(r.get("disabled")),
+                invalid=_to_bool(r.get("invalid")),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    # ============== ARP ==============
+
+    async def ip_arp_list(self, creds: DeviceCredentials) -> list[ArpEntry]:
+        rows = await self._call(creds, "/ip/arp/print")
+        return [
+            ArpEntry(
+                id=r.get(".id"),
+                address=str(r.get("address", "")),
+                mac_address=r.get("mac-address"),
+                interface=r.get("interface"),
+                complete=_to_bool(r.get("complete")),
+                dynamic=_to_bool(r.get("dynamic")),
+                invalid=_to_bool(r.get("invalid")),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    # ============== Bridge hosts ==============
+
+    async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]:
+        rows = await self._call(creds, "/interface/bridge/host/print")
+        return [
+            BridgeHost(
+                id=r.get(".id"),
+                mac_address=str(r.get("mac-address", "")),
+                on_interface=r.get("on-interface"),
+                bridge=r.get("bridge"),
+                age=r.get("age"),
+                dynamic=_to_bool(r.get("dynamic")),
+                external=_to_bool(r.get("external")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    # ============== Interfaces + VLANs ==============
+
+    async def interfaces_list(self, creds: DeviceCredentials) -> list[Interface]:
+        rows = await self._call(creds, "/interface/print")
+
+        def _int_or_none(v: Any) -> int | None:
+            try:
+                return int(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        return [
+            Interface(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                type=str(r.get("type", "")),
+                running=_to_bool(r.get("running")),
+                disabled=_to_bool(r.get("disabled")),
+                mac_address=r.get("mac-address"),
+                mtu=_int_or_none(r.get("mtu")),
+                actual_mtu=_int_or_none(r.get("actual-mtu")),
+                rx_bytes=_int_or_none(r.get("rx-byte")),
+                tx_bytes=_int_or_none(r.get("tx-byte")),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def vlan_list(self, creds: DeviceCredentials) -> list[VlanInterface]:
+        rows = await self._call(creds, "/interface/vlan/print")
+
+        def _int_or_zero(v: Any) -> int:
+            try:
+                return int(v) if v is not None else 0
+            except (TypeError, ValueError):
+                return 0
+
+        out: list[VlanInterface] = []
+        for r in rows:
+            mtu_val = r.get("mtu")
+            try:
+                mtu = int(mtu_val) if mtu_val is not None else None
+            except (TypeError, ValueError):
+                mtu = None
+            out.append(
+                VlanInterface(
+                    id=r.get(".id"),
+                    name=str(r.get("name", "")),
+                    interface=str(r.get("interface", "")),
+                    vlan_id=_int_or_zero(r.get("vlan-id")),
+                    mtu=mtu,
+                    disabled=_to_bool(r.get("disabled")),
+                    comment=r.get("comment"),
+                    raw=r,
+                )
+            )
+        return out
+
+    async def vlan_add(self, creds: DeviceCredentials, vlan: VlanInterface) -> str:
+        params: dict[str, Any] = {
+            "name": vlan.name,
+            "interface": vlan.interface,
+            "vlan-id": vlan.vlan_id,
+        }
+        if vlan.mtu is not None:
+            params["mtu"] = vlan.mtu
+        if vlan.comment is not None:
+            params["comment"] = vlan.comment
+        if vlan.disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/interface/vlan/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def vlan_remove(self, creds: DeviceCredentials, vlan_id: str) -> None:
+        await self._call(creds, "/interface/vlan/remove", **{".id": vlan_id})
 
     # ============== NTP ==============
 
