@@ -7,6 +7,7 @@ from app.api.v1 import (
     device_ops,
     devices,
     drivers,
+    firewall,
     oidc,
     roles,
     setup,
@@ -27,6 +28,7 @@ router.include_router(sites.router, prefix="/sites", tags=["sites"])
 router.include_router(devices.router, prefix="/devices", tags=["devices"])
 router.include_router(device_ops.router, prefix="/devices", tags=["device-ops"])
 router.include_router(vpn.router, prefix="/devices", tags=["vpn"])
+router.include_router(firewall.router, prefix="/devices", tags=["firewall"])
 router.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(users.router, prefix="/users", tags=["users"])

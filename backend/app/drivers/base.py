@@ -96,6 +96,40 @@ class NatRule:
 
 
 @dataclass(slots=True)
+class FilterRule:
+    """A /ip/firewall/filter rule. Same shape on most vendors."""
+
+    id: str | None
+    chain: str                              # input | forward | output (+ custom)
+    action: str                             # accept | drop | reject | log | jump | return
+    src_address: str | None = None
+    dst_address: str | None = None
+    src_address_list: str | None = None
+    dst_address_list: str | None = None
+    protocol: str | None = None
+    src_port: str | None = None
+    dst_port: str | None = None
+    in_interface: str | None = None
+    out_interface: str | None = None
+    connection_state: str | None = None     # new,established,related,invalid
+    log: bool = False
+    log_prefix: str | None = None
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LogEntry:
+    """One line from /log/print on RouterOS."""
+
+    time: str                               # native string (jan/02 15:04:05 etc.)
+    topics: str                             # comma-separated topics
+    message: str
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class IpService:
     name: str                  # "api", "ssh", "www", "winbox", …
     port: int
@@ -201,6 +235,25 @@ class VendorDriver(Protocol):
     async def firewall_nat_list(self, creds: DeviceCredentials) -> list[NatRule]: ...
     async def firewall_nat_add(self, creds: DeviceCredentials, rule: NatRule) -> str: ...
     async def firewall_nat_remove(self, creds: DeviceCredentials, rule_id: str) -> None: ...
+    async def firewall_filter_list(self, creds: DeviceCredentials) -> list[FilterRule]: ...
+    async def firewall_filter_add(
+        self, creds: DeviceCredentials, rule: FilterRule
+    ) -> str: ...
+    async def firewall_filter_set(
+        self, creds: DeviceCredentials, rule_id: str, *, disabled: bool | None = None
+    ) -> None: ...
+    async def firewall_filter_remove(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None: ...
+
+    # System logs
+    async def log_list(
+        self,
+        creds: DeviceCredentials,
+        *,
+        topics: str | None = None,
+        limit: int = 200,
+    ) -> list[LogEntry]: ...
 
     # IP services
     async def ip_services_list(self, creds: DeviceCredentials) -> list[IpService]: ...

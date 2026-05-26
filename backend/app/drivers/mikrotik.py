@@ -19,7 +19,9 @@ from app.drivers.base import (
     DeviceCredentials,
     DeviceUser,
     DhcpLease,
+    FilterRule,
     IpService,
+    LogEntry,
     NatRule,
     PppSecret,
     SystemInfo,
@@ -152,6 +154,79 @@ class MikrotikDriver:
 
     async def firewall_nat_remove(self, creds: DeviceCredentials, rule_id: str) -> None:
         await self._call(creds, "/ip/firewall/nat/remove", **{".id": rule_id})
+
+    # ============== Firewall filter ==============
+
+    async def firewall_filter_list(self, creds: DeviceCredentials) -> list[FilterRule]:
+        rows = await self._call(creds, "/ip/firewall/filter/print")
+        return [_row_to_filter_rule(r) for r in rows]
+
+    async def firewall_filter_add(
+        self, creds: DeviceCredentials, rule: FilterRule
+    ) -> str:
+        params: dict[str, Any] = {"chain": rule.chain, "action": rule.action}
+        for k, v in {
+            "src-address": rule.src_address,
+            "dst-address": rule.dst_address,
+            "src-address-list": rule.src_address_list,
+            "dst-address-list": rule.dst_address_list,
+            "protocol": rule.protocol,
+            "src-port": rule.src_port,
+            "dst-port": rule.dst_port,
+            "in-interface": rule.in_interface,
+            "out-interface": rule.out_interface,
+            "connection-state": rule.connection_state,
+            "log-prefix": rule.log_prefix,
+            "comment": rule.comment,
+        }.items():
+            if v is not None:
+                params[k] = v
+        if rule.log:
+            params["log"] = "yes"
+        if rule.disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/ip/firewall/filter/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def firewall_filter_set(
+        self, creds: DeviceCredentials, rule_id: str, *, disabled: bool | None = None
+    ) -> None:
+        params: dict[str, Any] = {".id": rule_id}
+        if disabled is not None:
+            params["disabled"] = "yes" if disabled else "no"
+        await self._call(creds, "/ip/firewall/filter/set", **params)
+
+    async def firewall_filter_remove(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None:
+        await self._call(creds, "/ip/firewall/filter/remove", **{".id": rule_id})
+
+    # ============== System log ==============
+
+    async def log_list(
+        self,
+        creds: DeviceCredentials,
+        *,
+        topics: str | None = None,
+        limit: int = 200,
+    ) -> list[LogEntry]:
+        rows = await self._call(creds, "/log/print")
+        out: list[LogEntry] = []
+        for r in rows:
+            row_topics = str(r.get("topics", ""))
+            if topics and topics.lower() not in row_topics.lower():
+                continue
+            out.append(
+                LogEntry(
+                    time=str(r.get("time", "")),
+                    topics=row_topics,
+                    message=str(r.get("message", "")),
+                    raw=r,
+                )
+            )
+        # RouterOS log is oldest-first; we want newest-first, capped.
+        out.reverse()
+        return out[:limit]
 
     # ============== IP services ==============
 
@@ -462,6 +537,29 @@ class MikrotikDriver:
 
 
 # ---------------- helpers ----------------
+
+
+def _row_to_filter_rule(r: dict[str, Any]) -> FilterRule:
+    return FilterRule(
+        id=r.get(".id"),
+        chain=str(r.get("chain", "")),
+        action=str(r.get("action", "")),
+        src_address=r.get("src-address"),
+        dst_address=r.get("dst-address"),
+        src_address_list=r.get("src-address-list"),
+        dst_address_list=r.get("dst-address-list"),
+        protocol=r.get("protocol"),
+        src_port=r.get("src-port"),
+        dst_port=r.get("dst-port"),
+        in_interface=r.get("in-interface"),
+        out_interface=r.get("out-interface"),
+        connection_state=r.get("connection-state"),
+        log=_to_bool(r.get("log")),
+        log_prefix=r.get("log-prefix"),
+        disabled=_to_bool(r.get("disabled")),
+        comment=r.get("comment"),
+        raw=r,
+    )
 
 
 def _row_to_ppp_secret(r: dict[str, Any]) -> PppSecret:
