@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
 import { createSite, listSites, type Site } from "@/lib/sites";
@@ -67,7 +68,11 @@ export default function SitesPage() {
             )}
             {sites?.map((s) => (
               <tr key={s.id} className="hover:bg-accent/30">
-                <td className="px-4 py-3 font-medium">{s.name}</td>
+                <td className="px-4 py-3 font-medium">
+                  <Link href={`/dashboard/sites/${s.id}`} className="hover:underline">
+                    {s.name}
+                  </Link>
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.slug}</td>
                 <td className="px-4 py-3">{s.device_count}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">

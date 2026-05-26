@@ -3,17 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 
 import { StatusPill } from "@/components/status-pill";
 import {
   deleteDevice,
   getDevice,
   testDeviceConnection,
+  updateDevice,
   type Device,
   type TestConnectionResult,
 } from "@/lib/devices";
 import { listDrivers, type Driver } from "@/lib/drivers";
-import { getSite, type Site } from "@/lib/sites";
+import { getSite, listSites, type Site } from "@/lib/sites";
 import { useRouter } from "next/navigation";
 
 export default function DeviceDetailPage() {
@@ -32,7 +34,20 @@ export default function DeviceDetailPage() {
     queryFn: () => getSite(device!.site_id),
     enabled: Boolean(device?.site_id),
   });
+  const { data: sites } = useQuery<Site[]>({
+    queryKey: ["sites"],
+    queryFn: listSites,
+  });
   const { data: drivers } = useQuery<Driver[]>({ queryKey: ["drivers"], queryFn: listDrivers });
+
+  const moveSite = useMutation({
+    mutationFn: (newSiteId: string) => updateDevice(id, { site_id: newSiteId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["device", id] });
+      qc.invalidateQueries({ queryKey: ["devices"] });
+      qc.invalidateQueries({ queryKey: ["sites"] });
+    },
+  });
 
   const test = useMutation<TestConnectionResult>({
     mutationFn: () => testDeviceConnection(id),
@@ -61,17 +76,25 @@ export default function DeviceDetailPage() {
             ← Devices
           </Link>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">{device.name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {driver?.display_name ?? device.vendor}
+          <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+            <span>{driver?.display_name ?? device.vendor}</span>
             {site && (
               <>
-                {" · "}
-                <Link href="/dashboard/sites" className="hover:underline">
+                <span>·</span>
+                <Link href={`/dashboard/sites/${site.id}`} className="hover:underline">
                   {site.name}
                 </Link>
               </>
             )}
-          </p>
+            {sites && sites.length > 1 && (
+              <MoveSiteControl
+                currentSiteId={device.site_id}
+                sites={sites}
+                onMove={(newId) => moveSite.mutate(newId)}
+                pending={moveSite.isPending}
+              />
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -197,5 +220,62 @@ function Pill({ children }: { children: React.ReactNode }) {
     <span className="inline-flex rounded-md bg-muted px-2 py-0.5 font-mono text-xs">
       {children}
     </span>
+  );
+}
+
+function MoveSiteControl({
+  currentSiteId,
+  sites,
+  onMove,
+  pending,
+}: {
+  currentSiteId: string;
+  sites: Site[];
+  onMove: (newSiteId: string) => void;
+  pending: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="rounded-md border border-input bg-background px-2 py-0.5 text-xs font-medium transition hover:bg-accent"
+      >
+        Move…
+      </button>
+    );
+  }
+  const others = sites.filter((s) => s.id !== currentSiteId);
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        defaultValue=""
+        disabled={pending}
+        onChange={(e) => {
+          const target = e.target.value;
+          if (!target) return;
+          if (confirm(`Move this device to "${sites.find((s) => s.id === target)?.name}"?`)) {
+            onMove(target);
+          }
+          setEditing(false);
+        }}
+        className="rounded-md border border-input bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="">— move to site —</option>
+        {others.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => setEditing(false)}
+        className="rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        cancel
+      </button>
+    </div>
   );
 }
