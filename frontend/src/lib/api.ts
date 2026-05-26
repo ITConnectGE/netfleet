@@ -74,7 +74,7 @@ export function isHttpError(e: unknown): e is HTTPError {
 export async function readErrorMessage(e: unknown): Promise<string> {
   if (isHttpError(e)) {
     try {
-      const body = await e.response.clone().json<{ detail?: string }>();
+      const body = (await e.response.clone().json()) as { detail?: string };
       if (body.detail) return body.detail;
     } catch {
       /* fallthrough */
