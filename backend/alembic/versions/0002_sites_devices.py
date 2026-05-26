@@ -41,11 +41,7 @@ def upgrade() -> None:
 
     # --- devices ---
     device_status_enum = sa.Enum("unknown", "online", "offline", "error", name="device_status")
-    device_status_enum.create(op.get_bind())
-
     device_transport_enum = sa.Enum("api", "rest", "ssh", "netconf", name="device_transport")
-    device_transport_enum.create(op.get_bind())
-
     op.create_table(
         "devices",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),

@@ -27,8 +27,6 @@ def upgrade() -> None:
         "other",
         name="secret_kind",
     )
-    secret_kind_enum.create(op.get_bind())
-
     op.create_table(
         "secret_reveals",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),

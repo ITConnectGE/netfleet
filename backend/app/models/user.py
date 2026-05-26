@@ -50,7 +50,7 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
     oidc_provider: Mapped[str | None] = mapped_column(String(64))
 
     auth_method: Mapped[AuthMethod] = mapped_column(
-        Enum(AuthMethod, name="auth_method"),
+        Enum(AuthMethod, name="auth_method", values_callable=lambda c: [e.value for e in c]),
         default=AuthMethod.LOCAL,
         nullable=False,
     )

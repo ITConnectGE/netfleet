@@ -2,8 +2,10 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import __version__
@@ -53,6 +55,20 @@ app.add_middleware(
 )
 
 app.include_router(v1_router, prefix="/api/v1")
+
+
+@app.exception_handler(RequestValidationError)
+async def _log_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Default FastAPI behavior plus a structured log line so 422s in prod are
+    # diagnosable from logs alone. We log only `loc` + `msg` (never the raw
+    # body or `input`) so passwords/tokens never reach the log sink.
+    log.warning(
+        "validation.failed",
+        method=request.method,
+        path=request.url.path,
+        errors=[{"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()],
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.get("/", include_in_schema=False)

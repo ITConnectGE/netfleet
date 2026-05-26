@@ -33,8 +33,6 @@ def upgrade() -> None:
     op.create_index("ix_organizations_slug", "organizations", ["slug"])
 
     auth_method_enum = sa.Enum("local", "oidc", name="auth_method")
-    auth_method_enum.create(op.get_bind())
-
     op.create_table(
         "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -82,8 +80,6 @@ def upgrade() -> None:
     op.create_index("ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"])
 
     audit_outcome_enum = sa.Enum("ok", "denied", "failed", name="audit_outcome")
-    audit_outcome_enum.create(op.get_bind())
-
     op.create_table(
         "audit_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),

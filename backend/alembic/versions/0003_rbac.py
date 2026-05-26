@@ -37,8 +37,6 @@ def upgrade() -> None:
 
     # --- permissions ---
     permission_action_enum = sa.Enum("read", "write", "execute", name="permission_action")
-    permission_action_enum.create(op.get_bind())
-
     op.create_table(
         "permissions",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -55,8 +53,6 @@ def upgrade() -> None:
 
     # --- role_assignments ---
     assignment_scope_enum = sa.Enum("organization", "site", "device", name="assignment_scope")
-    assignment_scope_enum.create(op.get_bind())
-
     op.create_table(
         "role_assignments",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),

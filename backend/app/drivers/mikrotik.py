@@ -487,7 +487,7 @@ def _to_bool(v: Any) -> bool:
 def _try_read_file(file_row: dict[str, Any]) -> bytes:
     """Stub: librouteros doesn't ship binary file download. Returns the size-only sentinel."""
     # TODO Phase 7: implement actual file download (sftp or /file/read pagination).
-    return b"# netfleet backup placeholder — actual binary download lands in Phase 7\n"
+    return b"# netfleet backup placeholder - actual binary download lands in Phase 7\n"
 
 
 def _try_read_file_text(file_row: dict[str, Any]) -> str:

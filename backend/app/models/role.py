@@ -73,7 +73,7 @@ class Permission(IdMixin, Base):
     )
     section: Mapped[str] = mapped_column(String(64), nullable=False)
     action: Mapped[PermissionAction] = mapped_column(
-        Enum(PermissionAction, name="permission_action"), nullable=False
+        Enum(PermissionAction, name="permission_action", values_callable=lambda c: [e.value for e in c]), nullable=False
     )
 
     role: Mapped[Role] = relationship("Role", back_populates="permissions")
@@ -102,7 +102,7 @@ class RoleAssignment(IdMixin, TimestampsMixin, TableNameMixin, Base):
         index=True,
     )
     scope_type: Mapped[AssignmentScope] = mapped_column(
-        Enum(AssignmentScope, name="assignment_scope"),
+        Enum(AssignmentScope, name="assignment_scope", values_callable=lambda c: [e.value for e in c]),
         nullable=False,
         default=AssignmentScope.ORGANIZATION,
     )

@@ -36,7 +36,7 @@ class AuditLog(IdMixin, Base):
     section: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     outcome: Mapped[AuditOutcome] = mapped_column(
-        Enum(AuditOutcome, name="audit_outcome"), nullable=False
+        Enum(AuditOutcome, name="audit_outcome", values_callable=lambda c: [e.value for e in c]), nullable=False
     )
 
     # where (optional device scope)

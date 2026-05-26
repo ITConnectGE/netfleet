@@ -31,7 +31,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 # ----- Production -----
 FROM deps AS prod
 COPY . .
-RUN useradd --create-home --shell /bin/bash netfleet && \
+RUN chmod +x /app/docker-entrypoint.sh && \
+    useradd --create-home --shell /bin/bash netfleet && \
     chown -R netfleet:netfleet /app
 USER netfleet
 EXPOSE 8000

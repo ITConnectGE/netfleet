@@ -57,7 +57,7 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=8728)
     transport: Mapped[DeviceTransport] = mapped_column(
-        Enum(DeviceTransport, name="device_transport"),
+        Enum(DeviceTransport, name="device_transport", values_callable=lambda c: [e.value for e in c]),
         nullable=False,
         default=DeviceTransport.API,
     )
@@ -75,7 +75,7 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
 
     # runtime status — updated by worker poller and test-connection calls
     status: Mapped[DeviceStatus] = mapped_column(
-        Enum(DeviceStatus, name="device_status"),
+        Enum(DeviceStatus, name="device_status", values_callable=lambda c: [e.value for e in c]),
         nullable=False,
         default=DeviceStatus.UNKNOWN,
     )

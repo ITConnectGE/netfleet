@@ -57,7 +57,7 @@ class SecretReveal(IdMixin, Base):
     )
 
     secret_kind: Mapped[SecretKind] = mapped_column(
-        Enum(SecretKind, name="secret_kind"), nullable=False, index=True
+        Enum(SecretKind, name="secret_kind", values_callable=lambda c: [e.value for e in c]), nullable=False, index=True
     )
     # Stable per-device identifier for the secret — e.g. ppp_secret_id, wireguard_peer_id,
     # device_user_name. Used to link reveals to subsequent rotations.
@@ -95,7 +95,7 @@ class SecretRotation(IdMixin, Base):
     )
 
     secret_kind: Mapped[SecretKind] = mapped_column(
-        Enum(SecretKind, name="secret_kind"), nullable=False, index=True
+        Enum(SecretKind, name="secret_kind", values_callable=lambda c: [e.value for e in c]), nullable=False, index=True
     )
     secret_identifier: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     note: Mapped[str | None] = mapped_column(String(512))
