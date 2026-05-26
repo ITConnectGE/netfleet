@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-import { StatusPill } from "@/app/dashboard/devices/page";
+import { StatusPill } from "@/components/status-pill";
 import {
   deleteDevice,
   getDevice,
