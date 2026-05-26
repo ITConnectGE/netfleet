@@ -1,0 +1,104 @@
+import { api, readErrorMessage } from "@/lib/api";
+
+export type DeviceStatus = "unknown" | "online" | "offline" | "error";
+export type DeviceTransport = "api" | "rest" | "ssh" | "netconf";
+
+export interface Device {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  vendor: string;
+  name: string;
+  host: string;
+  port: number;
+  transport: DeviceTransport;
+  verify_tls: boolean;
+  username: string;
+  has_password: boolean;
+  has_api_key: boolean;
+  model: string | null;
+  serial: string | null;
+  firmware: string | null;
+  status: DeviceStatus;
+  status_error: string | null;
+  last_seen_at: string | null;
+  is_enabled: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeviceCreate {
+  site_id: string;
+  vendor: string;
+  name: string;
+  host: string;
+  port?: number;
+  transport?: DeviceTransport;
+  verify_tls?: boolean;
+  username: string;
+  password?: string | null;
+  api_key?: string | null;
+  notes?: string | null;
+}
+
+export interface DeviceUpdate {
+  name?: string;
+  host?: string;
+  port?: number;
+  transport?: DeviceTransport;
+  verify_tls?: boolean;
+  username?: string;
+  password?: string | null;
+  api_key?: string | null;
+  site_id?: string;
+  is_enabled?: boolean;
+  notes?: string | null;
+}
+
+export interface TestConnectionResult {
+  ok: boolean;
+  status: "online" | "offline" | "error";
+  error: string | null;
+  identity: string | null;
+  model: string | null;
+  firmware: string | null;
+  uptime_seconds: number | null;
+}
+
+export async function listDevices(siteId?: string): Promise<Device[]> {
+  const searchParams = siteId ? { site_id: siteId } : undefined;
+  return api.get("devices", { searchParams }).json<Device[]>();
+}
+
+export async function getDevice(id: string): Promise<Device> {
+  return api.get(`devices/${id}`).json<Device>();
+}
+
+export async function createDevice(payload: DeviceCreate): Promise<Device> {
+  try {
+    return await api.post("devices", { json: payload }).json<Device>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function updateDevice(id: string, payload: DeviceUpdate): Promise<Device> {
+  try {
+    return await api.patch(`devices/${id}`, { json: payload }).json<Device>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function deleteDevice(id: string): Promise<void> {
+  try {
+    await api.delete(`devices/${id}`);
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function testDeviceConnection(id: string): Promise<TestConnectionResult> {
+  return api.post(`devices/${id}/test-connection`).json<TestConnectionResult>();
+}

@@ -15,32 +15,32 @@ certs/
 *.sql.gz
 *.dump
 
-# --- Python ---
+# --- Python (anchored to backend/ so we don't clash with frontend/src/lib) ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+backend/build/
+backend/develop-eggs/
+backend/downloads/
+backend/eggs/
+backend/.eggs/
+backend/lib64/
+backend/parts/
+backend/sdist/
+backend/var/
+backend/wheels/
+backend/*.egg-info/
+backend/.installed.cfg
+backend/*.egg
+backend/MANIFEST
 
-# venvs
+# venvs (be specific — don't match frontend/src/lib/)
 .venv/
 venv/
+backend/lib/
+backend/lib64/
 env/
 ENV/
 

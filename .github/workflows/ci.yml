@@ -62,8 +62,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          # cache disabled until pnpm-lock.yaml is committed (post-v0.1.0)
 
       - run: pnpm install --frozen-lockfile
         continue-on-error: true   # lockfile arrives on first dev install
