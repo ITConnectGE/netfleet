@@ -38,6 +38,7 @@ APP_SECTIONS: dict[str, list[str]] = {
     "users": ["read", "write"],
     "roles": ["read", "write"],
     "audit": ["read"],
+    "settings": ["read", "write"],
 }
 
 # "Driver" sections — what the vendor drivers expose. Kept in sync with

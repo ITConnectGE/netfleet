@@ -16,6 +16,7 @@ const NAV = [
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/roles", label: "Roles" },
   { href: "/dashboard/audit", label: "Audit log" },
+  { href: "/dashboard/settings", label: "Settings" },
 ] as const;
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {

@@ -130,6 +130,43 @@ class LogEntry:
 
 
 @dataclass(slots=True)
+class NtpClient:
+    """RouterOS /system/ntp/client (singleton)."""
+
+    enabled: bool
+    mode: str | None = None
+    servers: str | None = None           # comma-separated server-dns-names (RouterOS 7)
+    primary: str | None = None           # legacy 6.x primary-ntp
+    secondary: str | None = None         # legacy 6.x secondary-ntp
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SnmpSettings:
+    """RouterOS /snmp (singleton)."""
+
+    enabled: bool
+    contact: str | None = None
+    location: str | None = None
+    trap_target: str | None = None
+    trap_version: str | None = None      # "1" | "2" | "3"
+    engine_id: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SnmpCommunity:
+    id: str | None
+    name: str
+    addresses: str | None = None
+    security: str | None = None          # "none" | "authorized" | "private"
+    read_access: bool = True
+    write_access: bool = False
+    disabled: bool = False
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class IpService:
     name: str                  # "api", "ssh", "www", "winbox", …
     port: int
@@ -254,6 +291,39 @@ class VendorDriver(Protocol):
         topics: str | None = None,
         limit: int = 200,
     ) -> list[LogEntry]: ...
+
+    # NTP
+    async def ntp_client_get(self, creds: DeviceCredentials) -> NtpClient: ...
+    async def ntp_client_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        mode: str | None = None,
+        servers: str | None = None,
+        primary: str | None = None,
+        secondary: str | None = None,
+    ) -> None: ...
+
+    # SNMP
+    async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings: ...
+    async def snmp_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        contact: str | None = None,
+        location: str | None = None,
+        trap_target: str | None = None,
+        trap_version: str | None = None,
+    ) -> None: ...
+    async def snmp_community_list(self, creds: DeviceCredentials) -> list[SnmpCommunity]: ...
+    async def snmp_community_add(
+        self, creds: DeviceCredentials, community: SnmpCommunity
+    ) -> str: ...
+    async def snmp_community_remove(
+        self, creds: DeviceCredentials, community_id: str
+    ) -> None: ...
 
     # IP services
     async def ip_services_list(self, creds: DeviceCredentials) -> list[IpService]: ...

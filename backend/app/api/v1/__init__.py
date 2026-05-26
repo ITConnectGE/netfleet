@@ -10,6 +10,8 @@ from app.api.v1 import (
     firewall,
     oidc,
     roles,
+    router_system,
+    settings as settings_api,
     setup,
     sites,
     system,
@@ -29,10 +31,12 @@ router.include_router(devices.router, prefix="/devices", tags=["devices"])
 router.include_router(device_ops.router, prefix="/devices", tags=["device-ops"])
 router.include_router(vpn.router, prefix="/devices", tags=["vpn"])
 router.include_router(firewall.router, prefix="/devices", tags=["firewall"])
+router.include_router(router_system.router, prefix="/devices", tags=["router-system"])
 router.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(audit.router, prefix="/audit", tags=["audit"])
+router.include_router(settings_api.router, prefix="/settings", tags=["settings"])
 
 # Health is at the root of /api/v1 for easy probe endpoints
 router.add_api_route("/health", system.health, methods=["GET"], tags=["system"])

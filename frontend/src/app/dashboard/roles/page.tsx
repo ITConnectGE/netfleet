@@ -8,6 +8,7 @@ import {
   deleteRole,
   listRoles,
   listSections,
+  updateRole,
   type Permission,
   type PermissionAction,
   type Role,
@@ -67,6 +68,7 @@ export default function RolesPage() {
     queryFn: listSections,
   });
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const del = useMutation({
     mutationFn: (id: string) => deleteRole(id),
@@ -93,53 +95,76 @@ export default function RolesPage() {
       {showForm && sections && (
         <RoleForm
           sections={sections}
-          onCreated={() => {
+          onDone={() => {
             qc.invalidateQueries({ queryKey: ["roles"] });
             setShowForm(false);
           }}
+          onCancel={() => setShowForm(false)}
         />
       )}
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {roles?.map((r) => (
-          <div key={r.id} className="rounded-lg border border-border bg-card p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium">{r.name}</h3>
-                  {r.is_system && (
-                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                      system
-                    </span>
+        {roles?.map((r) =>
+          editingId === r.id && sections ? (
+            <div key={r.id} className="md:col-span-2">
+              <RoleForm
+                sections={sections}
+                existing={r}
+                onDone={() => {
+                  qc.invalidateQueries({ queryKey: ["roles"] });
+                  setEditingId(null);
+                }}
+                onCancel={() => setEditingId(null)}
+              />
+            </div>
+          ) : (
+            <div key={r.id} className="rounded-lg border border-border bg-card p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium">{r.name}</h3>
+                    {r.is_system && (
+                      <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                        system
+                      </span>
+                    )}
+                  </div>
+                  {r.description && (
+                    <p className="mt-1 text-xs text-muted-foreground">{r.description}</p>
                   )}
                 </div>
-                {r.description && (
-                  <p className="mt-1 text-xs text-muted-foreground">{r.description}</p>
+                {!r.is_system && (
+                  <div className="flex shrink-0 items-center gap-3 text-xs">
+                    <button
+                      onClick={() => setEditingId(r.id)}
+                      className="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete role "${r.name}"?`)) del.mutate(r.id);
+                      }}
+                      className="text-destructive hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 )}
               </div>
-              {!r.is_system && (
-                <button
-                  onClick={() => {
-                    if (confirm(`Delete role "${r.name}"?`)) del.mutate(r.id);
-                  }}
-                  className="text-xs text-destructive hover:underline"
-                >
-                  Delete
-                </button>
-              )}
+              <div className="mt-3 flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {r.permissions.length} permission{r.permissions.length === 1 ? "" : "s"}
+                </span>
+                <span className="text-muted-foreground">
+                  {r.assignment_count} assignment{r.assignment_count === 1 ? "" : "s"}
+                </span>
+              </div>
+              <PermissionMatrix permissions={r.permissions} />
             </div>
-            <div className="mt-3 flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">
-                {r.permissions.length} permission{r.permissions.length === 1 ? "" : "s"}
-              </span>
-              <span className="text-muted-foreground">
-                {r.assignment_count} assignment{r.assignment_count === 1 ? "" : "s"}
-              </span>
-            </div>
-            <PermissionMatrix permissions={r.permissions} />
-          </div>
-        ))}
+          ),
+        )}
       </div>
     </div>
   );
@@ -147,15 +172,21 @@ export default function RolesPage() {
 
 function RoleForm({
   sections,
-  onCreated,
+  existing,
+  onDone,
+  onCancel,
 }: {
   sections: SectionInfo[];
-  onCreated: () => void;
+  existing?: Role;
+  onDone: () => void;
+  onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  // Set<`${section}:${action}`>
-  const [grants, setGrants] = useState<Set<string>>(new Set());
+  const isEdit = Boolean(existing);
+  const [name, setName] = useState(existing?.name ?? "");
+  const [description, setDescription] = useState(existing?.description ?? "");
+  const [grants, setGrants] = useState<Set<string>>(
+    () => new Set(existing?.permissions.map((p) => `${p.section}:${p.action}`) ?? []),
+  );
   const [error, setError] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
@@ -166,16 +197,25 @@ function RoleForm({
   }, [sections]);
 
   const m = useMutation({
-    mutationFn: () =>
-      createRole({
+    mutationFn: () => {
+      const permissions = Array.from(grants).map((g) => {
+        const [section, action] = g.split(":");
+        return { section, action: action as PermissionAction };
+      });
+      if (existing) {
+        return updateRole(existing.id, {
+          name,
+          description: description || null,
+          permissions,
+        });
+      }
+      return createRole({
         name,
         description: description || null,
-        permissions: Array.from(grants).map((g) => {
-          const [section, action] = g.split(":");
-          return { section, action: action as PermissionAction };
-        }),
-      }),
-    onSuccess: () => onCreated(),
+        permissions,
+      });
+    },
+    onSuccess: () => onDone(),
     onError: (e: Error) => setError(e.message),
   });
 
@@ -197,12 +237,25 @@ function RoleForm({
 
   return (
     <form onSubmit={onSubmit} className="mt-6 rounded-lg border border-border bg-card p-5">
+      <div className="flex items-start justify-between">
+        <h3 className="text-sm font-semibold">
+          {isEdit ? `Editing "${existing!.name}"` : "New role"}
+        </h3>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Cancel
+        </button>
+      </div>
+
       {error && (
-        <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="space-y-1.5">
           <span className="text-sm font-medium">Role name</span>
           <input
@@ -216,7 +269,7 @@ function RoleForm({
         <label className="space-y-1.5">
           <span className="text-sm font-medium">Description</span>
           <input
-            value={description}
+            value={description ?? ""}
             onChange={(e) => setDescription(e.target.value)}
             className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             placeholder="optional"
@@ -241,7 +294,7 @@ function RoleForm({
           disabled={m.isPending || grants.size === 0}
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
-          {m.isPending ? "Creating…" : "Create role"}
+          {m.isPending ? (isEdit ? "Saving…" : "Creating…") : isEdit ? "Save changes" : "Create role"}
         </button>
       </div>
     </form>

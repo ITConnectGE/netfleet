@@ -23,7 +23,10 @@ from app.drivers.base import (
     IpService,
     LogEntry,
     NatRule,
+    NtpClient,
     PppSecret,
+    SnmpCommunity,
+    SnmpSettings,
     SystemInfo,
     VendorDriver,
     WireguardInterface,
@@ -200,6 +203,120 @@ class MikrotikDriver:
         self, creds: DeviceCredentials, rule_id: str
     ) -> None:
         await self._call(creds, "/ip/firewall/filter/remove", **{".id": rule_id})
+
+    # ============== NTP ==============
+
+    async def ntp_client_get(self, creds: DeviceCredentials) -> NtpClient:
+        rows = await self._call(creds, "/system/ntp/client/print")
+        r = rows[0] if rows else {}
+        return NtpClient(
+            enabled=_to_bool(r.get("enabled")),
+            mode=r.get("mode"),
+            servers=r.get("server-dns-names") or r.get("servers"),
+            primary=r.get("primary-ntp"),
+            secondary=r.get("secondary-ntp"),
+            raw=r,
+        )
+
+    async def ntp_client_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        mode: str | None = None,
+        servers: str | None = None,
+        primary: str | None = None,
+        secondary: str | None = None,
+    ) -> None:
+        params: dict[str, Any] = {}
+        if enabled is not None:
+            params["enabled"] = "yes" if enabled else "no"
+        if mode is not None:
+            params["mode"] = mode
+        if servers is not None:
+            # RouterOS 7 uses server-dns-names; we set both for cross-version safety
+            params["server-dns-names"] = servers
+        if primary is not None:
+            params["primary-ntp"] = primary
+        if secondary is not None:
+            params["secondary-ntp"] = secondary
+        await self._call(creds, "/system/ntp/client/set", **params)
+
+    # ============== SNMP ==============
+
+    async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings:
+        rows = await self._call(creds, "/snmp/print")
+        r = rows[0] if rows else {}
+        return SnmpSettings(
+            enabled=_to_bool(r.get("enabled")),
+            contact=r.get("contact"),
+            location=r.get("location"),
+            trap_target=r.get("trap-target"),
+            trap_version=r.get("trap-version"),
+            engine_id=r.get("engine-id"),
+            raw=r,
+        )
+
+    async def snmp_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        contact: str | None = None,
+        location: str | None = None,
+        trap_target: str | None = None,
+        trap_version: str | None = None,
+    ) -> None:
+        params: dict[str, Any] = {}
+        if enabled is not None:
+            params["enabled"] = "yes" if enabled else "no"
+        if contact is not None:
+            params["contact"] = contact
+        if location is not None:
+            params["location"] = location
+        if trap_target is not None:
+            params["trap-target"] = trap_target
+        if trap_version is not None:
+            params["trap-version"] = trap_version
+        await self._call(creds, "/snmp/set", **params)
+
+    async def snmp_community_list(self, creds: DeviceCredentials) -> list[SnmpCommunity]:
+        rows = await self._call(creds, "/snmp/community/print")
+        return [
+            SnmpCommunity(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                addresses=r.get("addresses"),
+                security=r.get("security"),
+                read_access=_to_bool(r.get("read-access")),
+                write_access=_to_bool(r.get("write-access")),
+                disabled=_to_bool(r.get("disabled")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def snmp_community_add(
+        self, creds: DeviceCredentials, community: SnmpCommunity
+    ) -> str:
+        params: dict[str, Any] = {
+            "name": community.name,
+            "read-access": "yes" if community.read_access else "no",
+            "write-access": "yes" if community.write_access else "no",
+        }
+        if community.addresses:
+            params["addresses"] = community.addresses
+        if community.security:
+            params["security"] = community.security
+        if community.disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/snmp/community/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def snmp_community_remove(
+        self, creds: DeviceCredentials, community_id: str
+    ) -> None:
+        await self._call(creds, "/snmp/community/remove", **{".id": community_id})
 
     # ============== System log ==============
 
