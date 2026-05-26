@@ -92,7 +92,7 @@ export default function SetupPage() {
             <input
               id="org-slug"
               required
-              pattern="^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+              pattern="^[a-z0-9][-a-z0-9]*[a-z0-9]$"
               minLength={2}
               maxLength={63}
               value={orgSlug}
