@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { listDevices, type Device } from "@/lib/devices";
+import { getFleetFirmwareSummary, type FleetFirmwareSummary } from "@/lib/firmware";
 import { listSites, type Site } from "@/lib/sites";
 
 export default function DashboardPage() {
@@ -11,6 +12,10 @@ export default function DashboardPage() {
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["devices"],
     queryFn: () => listDevices(),
+  });
+  const { data: fw } = useQuery<FleetFirmwareSummary>({
+    queryKey: ["firmware-summary"],
+    queryFn: getFleetFirmwareSummary,
   });
 
   const total = devices?.length ?? 0;
@@ -38,8 +43,19 @@ export default function DashboardPage() {
           href="/dashboard/devices"
           hint={`${online} online · ${offline} offline · ${errors} error`}
         />
-        <Card title="Active sessions" value="—" hint="Real-time in Phase 6" />
-        <Card title="Audit events (24h)" value="—" hint="Coming in Phase 4" />
+        <Card
+          title="Firmware updates"
+          value={fw?.updates_available ?? "—"}
+          href="/dashboard/devices"
+          hint={
+            fw
+              ? `${fw.checked_ever} of ${fw.total} checked${
+                  fw.never_checked > 0 ? ` · ${fw.never_checked} never checked` : ""
+                }`
+              : "checked nightly"
+          }
+        />
+        <Card title="Audit events (24h)" value="—" hint="Coming in Phase 8" />
       </div>
 
       {total === 0 && (

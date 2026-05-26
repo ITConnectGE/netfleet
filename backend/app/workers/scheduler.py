@@ -22,6 +22,7 @@ from app.core.database import get_session, init_db
 from app.core.logging import configure_logging
 from app.models.organization import Organization
 from app.services import backups as backup_svc
+from app.services import firmware as firmware_svc
 
 log = structlog.get_logger("netfleet.scheduler")
 
@@ -57,6 +58,20 @@ async def job_nightly_backups(session: AsyncSession) -> None:
         )
 
 
+async def job_firmware_check(session: AsyncSession) -> None:
+    """Refresh firmware-update status for every enabled device, every org."""
+    orgs = list((await session.execute(select(Organization))).scalars())
+    for org in orgs:
+        ok, failed = await firmware_svc.check_fleet_firmware(session, org.id)
+        await session.commit()
+        log.info(
+            "scheduler.firmware_check.done",
+            organization_id=str(org.id),
+            ok=ok,
+            failed=failed,
+        )
+
+
 async def job_backup_retention(session: AsyncSession) -> None:
     """Apply retention to every org's backup history."""
     keep_days = int(os.environ.get("NETFLEET_BACKUP_RETENTION_DAYS", "30"))
@@ -83,6 +98,11 @@ JOBS: list[ScheduledJob] = [
         name="backup-retention",
         interval_seconds=int(os.environ.get("NETFLEET_RETENTION_INTERVAL_SECONDS", str(24 * 3600))),
         handler=job_backup_retention,
+    ),
+    ScheduledJob(
+        name="firmware-check",
+        interval_seconds=int(os.environ.get("NETFLEET_FIRMWARE_INTERVAL_SECONDS", str(24 * 3600))),
+        handler=job_firmware_check,
     ),
 ]
 

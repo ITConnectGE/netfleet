@@ -501,12 +501,15 @@ class MikrotikDriver:
     async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings:
         rows = await self._call(creds, "/snmp/print")
         r = rows[0] if rows else {}
+        # librouteros decodes numeric RouterOS values to int (e.g. trap-version=1),
+        # but our schema models trap_version as `"1" | "2" | "3"`. Coerce to str.
+        raw_tv = r.get("trap-version")
         return SnmpSettings(
             enabled=_to_bool(r.get("enabled")),
             contact=r.get("contact"),
             location=r.get("location"),
             trap_target=r.get("trap-target"),
-            trap_version=r.get("trap-version"),
+            trap_version=str(raw_tv) if raw_tv is not None else None,
             engine_id=r.get("engine-id"),
             raw=r,
         )

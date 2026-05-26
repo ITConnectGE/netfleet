@@ -212,6 +212,19 @@ class VlanInterface:
 
 
 @dataclass(slots=True)
+class FirmwareInfo:
+    """Result of asking the device about pending firmware updates."""
+
+    current_version: str | None
+    available_version: str | None
+    channel: str | None                    # "stable" | "long-term" | "testing" | "development"
+    routerboard_current: str | None = None
+    routerboard_available: str | None = None
+    status: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SimpleQueue:
     """/queue/simple — per-IP or per-subnet bandwidth limit."""
 
@@ -407,6 +420,9 @@ class VendorDriver(Protocol):
 
     # Bridge hosts
     async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]: ...
+
+    # Firmware (check only — upgrade lands in Phase 8)
+    async def firmware_check_updates(self, creds: DeviceCredentials) -> FirmwareInfo: ...
 
     # Queues
     async def queue_simple_list(self, creds: DeviceCredentials) -> list[SimpleQueue]: ...

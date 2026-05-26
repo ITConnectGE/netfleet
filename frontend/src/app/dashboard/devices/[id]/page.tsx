@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { FirmwareCard } from "@/components/firmware-card";
 import { StatusPill } from "@/components/status-pill";
 import {
   deleteDevice,
@@ -140,6 +141,10 @@ export default function DeviceDetailPage() {
           )}
         </div>
       )}
+
+      <div className="mt-6">
+        <FirmwareCard deviceId={device.id} />
+      </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Section title="Connection">

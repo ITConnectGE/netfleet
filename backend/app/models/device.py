@@ -82,6 +82,13 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     status_error: Mapped[str | None] = mapped_column(String(1024))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Firmware-update tracking (refreshed nightly by the scheduler)
+    firmware_available: Mapped[str | None] = mapped_column(String(64))
+    firmware_channel: Mapped[str | None] = mapped_column(String(32))
+    firmware_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    routerboard_current: Mapped[str | None] = mapped_column(String(64))
+    routerboard_available: Mapped[str | None] = mapped_column(String(64))
+
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(String(2048))
 
