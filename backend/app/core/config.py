@@ -1,0 +1,71 @@
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="NETFLEET_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # --- Application ---
+    ENV: Literal["development", "production"] = "production"
+    PUBLIC_URL: str = "http://localhost:8000"
+
+    # --- Secrets ---
+    JWT_SECRET: str = Field(min_length=32)
+    FERNET_KEY: str = Field(min_length=32)
+    UPDATER_TOKEN: str = Field(default="changeme", min_length=8)
+
+    # --- Database & cache ---
+    DATABASE_URL: str
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # --- Tokens ---
+    ACCESS_TOKEN_TTL: int = 900
+    REFRESH_TOKEN_TTL: int = 2_592_000
+
+    # --- OIDC ---
+    OIDC_ENABLED: bool = False
+    OIDC_PROVIDER_NAME: str = "Microsoft"
+    OIDC_ISSUER: str = ""
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    OIDC_REDIRECT_URI: str = ""
+    OIDC_SCOPES: str = "openid profile email"
+
+    # --- SMTP ---
+    SMTP_ENABLED: bool = False
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_TLS: bool = True
+
+    # --- Workers ---
+    POLLER_INTERVAL_SECONDS: int = 60
+    POLLER_CONCURRENCY: int = 16
+    DEVICE_CONNECT_TIMEOUT: int = 10
+    DEVICE_READ_TIMEOUT: int = 30
+
+    # --- Logging ---
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    LOG_FORMAT: Literal["json", "console"] = "json"
+
+    # --- CORS ---
+    CORS_ORIGINS: str = ""
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
+
+
+settings = get_settings()

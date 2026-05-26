@@ -1,0 +1,165 @@
+name: netfleet
+
+# ---------------------------------------------------------------
+#  NetFleet — production Docker Compose stack
+#  See: README.md · .env.example · docs/installation.md
+# ---------------------------------------------------------------
+
+x-api-env: &api-env
+  NETFLEET_ENV: ${NETFLEET_ENV:-production}
+  NETFLEET_PUBLIC_URL: ${NETFLEET_PUBLIC_URL}
+  NETFLEET_JWT_SECRET: ${NETFLEET_JWT_SECRET}
+  NETFLEET_FERNET_KEY: ${NETFLEET_FERNET_KEY}
+  NETFLEET_UPDATER_TOKEN: ${NETFLEET_UPDATER_TOKEN}
+  NETFLEET_DATABASE_URL: ${NETFLEET_DATABASE_URL}
+  NETFLEET_REDIS_URL: ${NETFLEET_REDIS_URL}
+  NETFLEET_OIDC_ENABLED: ${NETFLEET_OIDC_ENABLED:-false}
+  NETFLEET_OIDC_PROVIDER_NAME: ${NETFLEET_OIDC_PROVIDER_NAME:-Microsoft}
+  NETFLEET_OIDC_ISSUER: ${NETFLEET_OIDC_ISSUER:-}
+  NETFLEET_OIDC_CLIENT_ID: ${NETFLEET_OIDC_CLIENT_ID:-}
+  NETFLEET_OIDC_CLIENT_SECRET: ${NETFLEET_OIDC_CLIENT_SECRET:-}
+  NETFLEET_OIDC_REDIRECT_URI: ${NETFLEET_OIDC_REDIRECT_URI:-}
+  NETFLEET_OIDC_SCOPES: ${NETFLEET_OIDC_SCOPES:-openid profile email}
+  NETFLEET_ACCESS_TOKEN_TTL: ${NETFLEET_ACCESS_TOKEN_TTL:-900}
+  NETFLEET_REFRESH_TOKEN_TTL: ${NETFLEET_REFRESH_TOKEN_TTL:-2592000}
+  NETFLEET_SMTP_ENABLED: ${NETFLEET_SMTP_ENABLED:-false}
+  NETFLEET_SMTP_HOST: ${NETFLEET_SMTP_HOST:-}
+  NETFLEET_SMTP_PORT: ${NETFLEET_SMTP_PORT:-587}
+  NETFLEET_SMTP_USER: ${NETFLEET_SMTP_USER:-}
+  NETFLEET_SMTP_PASSWORD: ${NETFLEET_SMTP_PASSWORD:-}
+  NETFLEET_SMTP_FROM: ${NETFLEET_SMTP_FROM:-}
+  NETFLEET_SMTP_TLS: ${NETFLEET_SMTP_TLS:-true}
+  NETFLEET_POLLER_INTERVAL_SECONDS: ${NETFLEET_POLLER_INTERVAL_SECONDS:-60}
+  NETFLEET_POLLER_CONCURRENCY: ${NETFLEET_POLLER_CONCURRENCY:-16}
+  NETFLEET_DEVICE_CONNECT_TIMEOUT: ${NETFLEET_DEVICE_CONNECT_TIMEOUT:-10}
+  NETFLEET_DEVICE_READ_TIMEOUT: ${NETFLEET_DEVICE_READ_TIMEOUT:-30}
+  NETFLEET_LOG_LEVEL: ${NETFLEET_LOG_LEVEL:-INFO}
+  NETFLEET_LOG_FORMAT: ${NETFLEET_LOG_FORMAT:-json}
+  NETFLEET_CORS_ORIGINS: ${NETFLEET_CORS_ORIGINS:-}
+
+services:
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/netfleet/data/caddy:/data
+      - /opt/netfleet/data/caddy-config:/config
+    environment:
+      NETFLEET_DOMAIN: ${NETFLEET_DOMAIN}
+    networks:
+      - public
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NETFLEET_DB_NAME:-netfleet}
+      POSTGRES_USER: ${NETFLEET_DB_USER:-netfleet}
+      POSTGRES_PASSWORD: ${NETFLEET_DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - /opt/netfleet/data/postgres:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NETFLEET_DB_USER:-netfleet} -d ${NETFLEET_DB_NAME:-netfleet}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - /opt/netfleet/data/redis:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    image: ghcr.io/itconnectge/netfleet-api:${VERSION:-latest}
+    restart: unless-stopped
+    environment: *api-env
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s   # alembic migrations run on startup
+
+  worker:
+    image: ghcr.io/itconnectge/netfleet-api:${VERSION:-latest}
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.poller"]
+    environment: *api-env
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/itconnectge/netfleet-web:${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-NetFleet}
+      NODE_ENV: production
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+
+  updater:
+    image: ghcr.io/itconnectge/netfleet-updater:stable
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/netfleet:/workdir
+      - /opt/netfleet/data/backups:/backups
+    environment:
+      NETFLEET_UPDATER_TOKEN: ${NETFLEET_UPDATER_TOKEN}
+      NETFLEET_UPDATE_CHANNEL: ${NETFLEET_UPDATE_CHANNEL:-stable}
+      NETFLEET_GITHUB_REPO: ${NETFLEET_GITHUB_REPO:-ITConnectGE/netfleet}
+      NETFLEET_AUTO_BACKUP_ON_UPDATE: ${NETFLEET_AUTO_BACKUP_ON_UPDATE:-true}
+      NETFLEET_LOG_LEVEL: ${NETFLEET_LOG_LEVEL:-INFO}
+    networks:
+      - internal
+
+networks:
+  public:
+    name: netfleet_public
+  internal:
+    name: netfleet_internal
+    internal: false   # set true once everything that needs outbound is verified

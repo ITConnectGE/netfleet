@@ -1,0 +1,57 @@
+# ----------------------------------------------------------------
+#  NetFleet — Dev overrides
+#  Usage:  docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# ----------------------------------------------------------------
+
+services:
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    image: netfleet-api:dev
+    volumes:
+      - ./backend:/app:cached
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    image: netfleet-api:dev
+    volumes:
+      - ./backend:/app:cached
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    image: netfleet-web:dev
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    command: ["pnpm", "dev"]
+
+  updater:
+    build:
+      context: ./updater
+      dockerfile: Dockerfile
+    image: netfleet-updater:dev
+    volumes:
+      - ./updater:/app:cached
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

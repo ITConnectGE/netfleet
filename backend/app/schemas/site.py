@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+class SiteBase(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+    address: str | None = Field(default=None, max_length=512)
+    contact_email: EmailStr | None = None
+    contact_phone: str | None = Field(default=None, max_length=64)
+    notes: str | None = Field(default=None, max_length=2048)
+
+
+class SiteCreate(SiteBase):
+    pass
+
+
+class SiteUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    address: str | None = Field(default=None, max_length=512)
+    contact_email: EmailStr | None = None
+    contact_phone: str | None = Field(default=None, max_length=64)
+    notes: str | None = Field(default=None, max_length=2048)
+
+
+class SitePublic(SiteBase):
+    id: UUID
+    organization_id: UUID
+    device_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

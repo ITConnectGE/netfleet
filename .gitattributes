@@ -1,0 +1,16 @@
+# Always normalize line endings on commit
+* text=auto
+
+# Shell scripts must stay LF — they're executed by bash inside Docker/Linux
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.mako text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.backup binary

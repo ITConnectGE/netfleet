@@ -1,0 +1,78 @@
+# ----------------------------------------------------------------
+#  NetFleet — Caddy reverse proxy
+#  · Auto-HTTPS via Let's Encrypt (provide a real domain in .env)
+#  · HTTP/2 + HTTP/3 enabled
+#  · API at /api/*, Web everywhere else
+# ----------------------------------------------------------------
+
+{
+	# Global options
+	email admin@{$NETFLEET_DOMAIN}
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$NETFLEET_DOMAIN} {
+
+	encode zstd gzip
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+
+	# API — REST + WebSocket (FastAPI)
+	handle_path /api/* {
+		reverse_proxy api:8000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			# WebSocket support
+			header_up Connection {>Connection}
+			header_up Upgrade {>Upgrade}
+		}
+		rewrite * /api{uri}
+	}
+
+	# OpenAPI / Swagger UI
+	handle /docs* {
+		reverse_proxy api:8000
+	}
+	handle /redoc* {
+		reverse_proxy api:8000
+	}
+	handle /openapi.json {
+		reverse_proxy api:8000
+	}
+
+	# Everything else → Next.js
+	handle {
+		reverse_proxy web:3000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+# Optional: local-dev mode (no TLS, plain HTTP on :80)
+# Uncomment the block below if NETFLEET_DOMAIN is "localhost"
+#
+# :80 {
+#     handle_path /api/* {
+#         reverse_proxy api:8000
+#     }
+#     handle {
+#         reverse_proxy web:3000
+#     }
+# }

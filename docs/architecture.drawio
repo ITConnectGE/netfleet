@@ -1,0 +1,722 @@
+<mxfile host="app.diagrams.net" agent="Claude Code" version="24.0.0">
+
+  <diagram name="01-System-Overview" id="page1">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p1-title" value="MikroTik Central — System Architecture Overview" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-ext" value="External Services" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="600" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-github" value="GitHub Releases&#xa;(version metadata + changelog)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-ghcr" value="ghcr.io&#xa;(container image registry)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="250" y="100" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-entra" value="Microsoft Entra ID&#xa;(OIDC / SSO)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="440" y="100" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-users" value="Users" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="200" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-admin" value="MSP Admin&#xa;(browser)" style="shape=mxgraph.bootstrap.user;html=1;labelPosition=right;align=left;spacingLeft=10;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="40" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-admin-label" value="MSP Admin" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="110" y="250" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-support" value="" style="shape=mxgraph.bootstrap.user;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="320" width="40" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-support-label" value="IT Support&#xa;(scoped RBAC)" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="110" y="320" width="120" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-host" value="Host: Ubuntu Server (Docker)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=13;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="300" y="200" width="780" height="560" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-caddy" value="Caddy&#xa;(reverse proxy, TLS)&#xa;:443 / :80" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="330" y="240" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-web" value="web&#xa;Next.js 15&#xa;:3000 (internal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="330" y="350" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-api" value="api&#xa;FastAPI + Casbin&#xa;:8000 (internal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="540" y="350" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-updater" value="updater&#xa;(docker.sock mounted)&#xa;:8080 (internal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="750" y="240" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-worker" value="worker&#xa;device poller + audit&#xa;(internal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="750" y="350" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-pg" value="postgres:16&#xa;:5432 (internal)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="340" y="460" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-redis" value="redis:7&#xa;:6379 (internal)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="550" y="460" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-vol" value="Host volumes:&#xa;/opt/mikrotik-central/data/{postgres,redis,backups}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="580" width="500" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-net-label" value="Docker networks:  public  (caddy only)   ·   internal  (everything else)" style="text;html=1;align=center;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="330" y="700" width="700" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-routers" value="Managed Devices" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="200" width="220" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-r1" value="MikroTik #1&#xa;Site A · CCR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="240" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-r2" value="MikroTik #2&#xa;Site A · hAP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="310" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-r3" value="MikroTik #3&#xa;Site B · RB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="380" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-rn" value="...N devices&#xa;(REST API / API)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="450" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#6c8ebf;" edge="1" parent="1" source="p1-admin" target="p1-caddy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e1l" value="HTTPS" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" vertex="1" connectable="0" parent="p1-e1">
+          <mxGeometry x="-0.2" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#6c8ebf;" edge="1" parent="1" source="p1-support" target="p1-caddy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p1-caddy" target="p1-web">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p1-caddy" target="p1-api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p1-web" target="p1-api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e5l" value="REST + WS" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e5">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d79b00;" edge="1" parent="1" source="p1-api" target="p1-pg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d79b00;" edge="1" parent="1" source="p1-api" target="p1-redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d79b00;" edge="1" parent="1" source="p1-worker" target="p1-pg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d79b00;" edge="1" parent="1" source="p1-worker" target="p1-redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#9673a6;dashed=1;" edge="1" parent="1" source="p1-api" target="p1-updater">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e10l" value="trigger update" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e10">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#b85450;" edge="1" parent="1" source="p1-worker" target="p1-r1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e11l" value="poll (RouterOS API)" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e11">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#b85450;" edge="1" parent="1" source="p1-api" target="p1-r2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e12l" value="on-demand" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e12">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d6b656;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="p1-updater" target="p1-github">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="840" y="180" />
+              <mxPoint x="150" y="180" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1-e13l" value="version check" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e13">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d6b656;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="p1-updater" target="p1-ghcr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e14l" value="docker pull" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e14">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeColor=#d6b656;dashed=1;" edge="1" parent="1" source="p1-api" target="p1-entra">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="160" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="p1-e15l" value="OIDC" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p1-e15">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1-legend" value="Legend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#aaaaaa;verticalAlign=top;align=left;fontStyle=1;spacingLeft=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="700" width="260" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-blue" value="" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="50" y="725" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-blue-l" value="Frontend / Users" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="720" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-green" value="" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="50" y="745" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-green-l" value="Backend / API" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="740" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-orange" value="" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="50" y="765" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-orange-l" value="Data / Storage" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="760" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-purple" value="" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="50" y="785" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-purple-l" value="Workers / Updater" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="780" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-yellow" value="" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="50" y="805" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-yellow-l" value="External SaaS" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="800" width="180" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-red" value="" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="50" y="825" width="20" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="p1-lg-red-l" value="MikroTik Devices" style="text;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="80" y="820" width="180" height="20" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <diagram name="02-Docker-Compose" id="page2">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p2-title" value="Docker Compose — Services, Networks &amp; Volumes" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-pub" value="Network: public  (only caddy exposes ports to host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6f2ff;strokeColor=#6c8ebf;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="1320" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-caddy" value="caddy&#xa;image: caddy:2-alpine&#xa;ports: 80:80, 443:443&#xa;volumes: caddy_data, caddy_config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="600" y="100" width="220" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-int" value="Network: internal  (no host-mapped ports)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff5e6;strokeColor=#d79b00;dashed=1;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="1320" height="540" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-web" value="web&#xa;image: ghcr.io/itconnectge/mikrotik-central-web:${VERSION}&#xa;env: NEXT_PUBLIC_API_URL&#xa;depends_on: api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="280" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-api" value="api&#xa;image: ghcr.io/itconnectge/mikrotik-central-api:${VERSION}&#xa;env: DATABASE_URL, REDIS_URL, JWT_SECRET, OIDC_*&#xa;entrypoint: alembic upgrade head &amp;&amp; uvicorn&#xa;depends_on: postgres (healthy), redis" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="400" y="280" width="320" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-worker" value="worker&#xa;image: ghcr.io/itconnectge/mikrotik-central-api:${VERSION}&#xa;command: python -m app.workers.poller&#xa;env: same as api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=10;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="760" y="280" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-updater" value="updater&#xa;image: ghcr.io/itconnectge/mikrotik-central-updater:stable&#xa;volumes:&#xa;  · /var/run/docker.sock:/var/run/docker.sock&#xa;  · /opt/mikrotik-central:/workdir&#xa;  · /opt/mikrotik-central/data/backups:/backups&#xa;env: UPDATE_CHANNEL, GITHUB_REPO, UPDATER_TOKEN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=10;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="280" width="280" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-pg" value="postgres&#xa;image: postgres:16-alpine&#xa;env: POSTGRES_*&#xa;healthcheck: pg_isready" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=18;verticalAlign=top;spacingTop=10;size=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="460" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-pg-vol" value="bind mount&#xa;/opt/mikrotik-central/data/postgres" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="600" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-redis" value="redis&#xa;image: redis:7-alpine&#xa;cmd: redis-server --appendonly yes" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=18;verticalAlign=top;spacingTop=10;size=15;" vertex="1" parent="1">
+          <mxGeometry x="400" y="460" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-redis-vol" value="bind mount&#xa;/opt/mikrotik-central/data/redis" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="600" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-backups" value="backups&#xa;(host directory)&#xa;/opt/mikrotik-central/data/backups" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="460" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-backups-note" value="· pre-update pg_dump dumps here&#xa;· cron daily dumps + 30d retention&#xa;· accessible to host for rsync/S3 push" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="720" y="560" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-cmd" value=".env  →  docker compose up -d  →  alembic migrations run on api startup  →  ready" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="700" width="900" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2-ec1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-caddy" target="p2-web">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-caddy" target="p2-api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-api" target="p2-pg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-api" target="p2-redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-worker" target="p2-pg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="p2-worker" target="p2-redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec7" style="edgeStyle=none;html=1;endArrow=none;strokeColor=#666666;dashed=1;" edge="1" parent="1" source="p2-pg" target="p2-pg-vol">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec8" style="edgeStyle=none;html=1;endArrow=none;strokeColor=#666666;dashed=1;" edge="1" parent="1" source="p2-redis" target="p2-redis-vol">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec9" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#9673a6;dashed=1;" edge="1" parent="1" source="p2-updater" target="p2-backups">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2-ec9l" value="pre-update dump" style="edgeLabel;html=1;align=center;fontSize=10;" vertex="1" connectable="0" parent="p2-ec9">
+          <mxGeometry x="0" relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <diagram name="03-Authentication" id="page3">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p3-title" value="Authentication — Local (+TOTP)  &amp;  Entra ID OIDC" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p3-h-user" value="User" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p3-h-web" value="web (Next.js)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="60" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p3-h-api" value="api (FastAPI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="60" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p3-h-db" value="postgres" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="60" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p3-h-entra" value="Entra ID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="60" width="160" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p3-line-user" style="endArrow=none;dashed=1;html=1;strokeColor=#6c8ebf;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="140" y="100" as="sourcePoint"/><mxPoint x="140" y="860" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="p3-line-web" style="endArrow=none;dashed=1;html=1;strokeColor=#6c8ebf;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="360" y="100" as="sourcePoint"/><mxPoint x="360" y="860" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="p3-line-api" style="endArrow=none;dashed=1;html=1;strokeColor=#82b366;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="600" y="100" as="sourcePoint"/><mxPoint x="600" y="860" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="p3-line-db" style="endArrow=none;dashed=1;html=1;strokeColor=#d79b00;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="840" y="100" as="sourcePoint"/><mxPoint x="840" y="860" as="targetPoint"/></mxGeometry>
+        </mxCell>
+        <mxCell id="p3-line-entra" style="endArrow=none;dashed=1;html=1;strokeColor=#d6b656;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry"><mxPoint x="1080" y="100" as="sourcePoint"/><mxPoint x="1080" y="860" as="targetPoint"/></mxGeometry>
+        </mxCell>
+
+        <mxCell id="p3-section-local" value="A. Local Authentication + TOTP" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="130" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p3-l1" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="190" as="sourcePoint"/><mxPoint x="360" y="190" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l1-l" value="email + password" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l1"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l2" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="360" y="220" as="sourcePoint"/><mxPoint x="600" y="220" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l2-l" value="POST /auth/login" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l2"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l3" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="250" as="sourcePoint"/><mxPoint x="840" y="250" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l3-l" value="SELECT user, argon2 verify" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l3"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l4" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="840" y="280" as="sourcePoint"/><mxPoint x="600" y="280" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l4-l" value="user row + totp_secret" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l4"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l5" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="310" as="sourcePoint"/><mxPoint x="360" y="310" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l5-l" value="200 { mfa_required: true, temp_token }" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l5"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l6" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="360" y="340" as="sourcePoint"/><mxPoint x="140" y="340" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l6-l" value="prompt: TOTP 6-digit" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l6"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l7" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="370" as="sourcePoint"/><mxPoint x="600" y="370" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l7-l" value="POST /auth/totp { code, temp_token }" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l7"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-l8" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="400" as="sourcePoint"/><mxPoint x="140" y="400" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-l8-l" value="200 { access_token (JWT), refresh_token }" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-l8"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-section-oidc" value="B. Entra ID OIDC (SSO + MFA enforced upstream)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="440" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p3-o1" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="500" as="sourcePoint"/><mxPoint x="360" y="500" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o1-l" value="click &quot;Sign in with Microsoft&quot;" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o1"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o2" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="360" y="530" as="sourcePoint"/><mxPoint x="600" y="530" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o2-l" value="GET /auth/oidc/start" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o2"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o3" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="560" as="sourcePoint"/><mxPoint x="140" y="560" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o3-l" value="302 redirect → login.microsoftonline.com (PKCE)" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o3"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o4" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="590" as="sourcePoint"/><mxPoint x="1080" y="590" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o4-l" value="authenticate + MFA (Authenticator app push/TOTP)" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o4"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o5" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1080" y="620" as="sourcePoint"/><mxPoint x="600" y="620" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o5-l" value="callback?code=... (to /auth/oidc/callback)" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o5"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o6" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="650" as="sourcePoint"/><mxPoint x="1080" y="650" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o6-l" value="POST /token  (exchange code for id_token + access_token)" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o6"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o7" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1080" y="680" as="sourcePoint"/><mxPoint x="600" y="680" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o7-l" value="id_token { sub, email, name, groups }" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o7"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o8" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="710" as="sourcePoint"/><mxPoint x="840" y="710" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o8-l" value="UPSERT user (by sub), map groups → roles" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o8"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-o9" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="600" y="740" as="sourcePoint"/><mxPoint x="140" y="740" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p3-o9-l" value="302 → /dashboard  + Set-Cookie: access_token (JWT)" style="edgeLabel;html=1;fontSize=10;align=center;" vertex="1" connectable="0" parent="p3-o9"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p3-note" value="Token strategy: api issues its own JWT after either flow (single auth model downstream).&#xa;Refresh tokens are httpOnly cookies. JWT carries: user_id, org_id, role_ids — not permissions (those are resolved live by Casbin)." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6f2ff;strokeColor=#6c8ebf;dashed=1;align=left;spacingLeft=10;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="780" width="1100" height="70" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <diagram name="04-RBAC-Model" id="page4">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p4-title" value="RBAC — Data Model &amp; Casbin Policy Example" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-er-title" value="Entity-Relationship" style="text;html=1;align=left;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="60" y="60" width="300" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-org" value="Organization&#xa;(MSP itself)&#xa;―――――――――――&#xa;id, name, slug" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-user" value="User&#xa;―――――――――――&#xa;id, org_id, email,&#xa;password_hash,&#xa;totp_secret, oidc_sub,&#xa;is_active" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="180" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-site" value="Site&#xa;(MSP&apos;s client)&#xa;―――――――――――&#xa;id, org_id, name,&#xa;address, contact" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="100" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-device" value="Device (MikroTik)&#xa;―――――――――――&#xa;id, site_id, name,&#xa;host, port, transport,&#xa;creds_enc, model,&#xa;serial, last_seen,&#xa;status" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="100" width="180" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-role" value="Role&#xa;―――――――――――&#xa;id, org_id, name,&#xa;description,&#xa;is_system" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="280" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-assign" value="RoleAssignment&#xa;―――――――――――&#xa;id, user_id, role_id,&#xa;scope_type (site/device/*),&#xa;scope_id (nullable)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="320" y="430" width="220" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-perm" value="Permission&#xa;―――――――――――&#xa;id, role_id, section,&#xa;action (read/write/exec),&#xa;allow (bool)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="430" width="220" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-audit" value="AuditLog&#xa;―――――――――――&#xa;id, ts, user_id, device_id,&#xa;section, action, request,&#xa;outcome, ip, ua" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="430" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-r1" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-org" target="p4-user"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r2" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-org" target="p4-site"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r3" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-site" target="p4-device"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r4" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-org" target="p4-role"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r5" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-user" target="p4-assign"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r6" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-role" target="p4-assign"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r7" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-role" target="p4-perm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r8" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-user" target="p4-audit"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-r9" style="endArrow=ERmany;startArrow=ERone;html=1;" edge="1" parent="1" source="p4-device" target="p4-audit"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p4-cas-title" value="Casbin Policy — Example: &quot;DHCP-Manager&quot; role" style="text;html=1;align=left;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="850" y="60" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-cas-model" value="Model (RBAC with domains + section):&#xa;&#xa;[request_definition]&#xa;r = sub, dom, obj, act, section&#xa;&#xa;[policy_definition]&#xa;p = sub, dom, obj, act, section&#xa;&#xa;[role_definition]&#xa;g = _, _, _   ; user, role, scope&#xa;&#xa;[matchers]&#xa;m = g(r.sub, p.sub, r.dom) &amp;&amp;&#xa;    (p.obj == &quot;*&quot; || r.obj == p.obj) &amp;&amp;&#xa;    p.section == r.section &amp;&amp;&#xa;    p.act == r.act" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontFamily=Courier New;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="850" y="100" width="500" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-cas-policy" value="Policy rules:&#xa;&#xa;p, dhcp-manager, site:client-a, *, read, ip.dhcp&#xa;p, dhcp-manager, site:client-a, *, write, ip.dhcp&#xa;p, dhcp-manager, site:client-a, *, read, ip.firewall.nat&#xa;p, dhcp-manager, site:client-a, *, write, ip.firewall.nat&#xa;p, dhcp-manager, site:client-a, *, read, system.identity&#xa;&#xa;g, user:42, dhcp-manager, site:client-a&#xa;&#xa;Result: user 42 can manage DHCP &amp; NAT on every device of&#xa;site client-a, see system identity, nothing else." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6ffe6;strokeColor=#82b366;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontFamily=Courier New;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="850" y="400" width="500" height="240" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-sections" value="Available sections (RouterOS-aligned)" style="text;html=1;align=left;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="60" y="580" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="p4-sec-list" value="· system.*           (identity, resource, clock, reboot)&#xa;· interface.*        (ethernet, wireless, bridge, vlan)&#xa;· ip.address         · ip.route&#xa;· ip.dhcp            (server, lease, network)&#xa;· ip.firewall.filter · ip.firewall.nat · ip.firewall.mangle&#xa;· ip.pool            · ip.arp&#xa;· queue.simple       · queue.tree&#xa;· ppp.*              (secret, profile, active)&#xa;· user.*             (router user mgmt — admin only)&#xa;· tool.*             (ping, traceroute, fetch)&#xa;· file.*             (config backups, scripts)&#xa;· log.*              (read-only by default)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;fontFamily=Courier New;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="620" width="500" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4-flow" value="Request flow: API receives call → resolves user roles from JWT → loads scope (site/device) → asks Casbin enforcer: enforce(sub, dom, obj, act, section) → allow/deny → audit log → execute or 403" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6f2ff;strokeColor=#6c8ebf;dashed=1;align=left;spacingLeft=10;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="580" y="660" width="770" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <diagram name="05-Update-Flow" id="page5">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p5-title" value="Update / Upgrade Flow — GitHub Releases → Updater → Docker" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p5-h-admin" value="Admin" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-web" value="web" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="240" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-api" value="api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-upd" value="updater" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-gh" value="GitHub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-ghcr" value="ghcr.io" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="880" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-docker" value="dockerd" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-h-pg" value="postgres" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p5-la" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="100" as="sourcePoint"/><mxPoint x="140" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lw" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="100" as="sourcePoint"/><mxPoint x="300" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lapi" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="460" y="100" as="sourcePoint"/><mxPoint x="460" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lu" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="100" as="sourcePoint"/><mxPoint x="620" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lgh" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="780" y="100" as="sourcePoint"/><mxPoint x="780" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lghcr" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="940" y="100" as="sourcePoint"/><mxPoint x="940" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-ld" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1100" y="100" as="sourcePoint"/><mxPoint x="1100" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-lpg" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1260" y="100" as="sourcePoint"/><mxPoint x="1260" y="860" as="targetPoint"/></mxGeometry></mxCell>
+
+        <mxCell id="p5-s1" value="1. Periodic check (every 1h)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="130" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-1a" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="170" as="sourcePoint"/><mxPoint x="780" y="170" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-1al" value="GET /repos/.../releases/latest" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-1a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-1b" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="780" y="200" as="sourcePoint"/><mxPoint x="620" y="200" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-1bl" value="{ tag: v1.2.0, body, prerelease: false }" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-1b"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s2" value="2. UI checks &amp; shows banner" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="230" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-2a" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="270" as="sourcePoint"/><mxPoint x="460" y="270" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-2al" value="GET /api/v1/system/version" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-2a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-2b" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="460" y="295" as="sourcePoint"/><mxPoint x="620" y="295" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-2bl" value="(internal) GET /status" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-2b"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-2c" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="460" y="320" as="sourcePoint"/><mxPoint x="300" y="320" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-2cl" value="{ current: v1.1.5, available: v1.2.0, changelog }" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-2c"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-2d" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="345" as="sourcePoint"/><mxPoint x="140" y="345" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-2dl" value="banner: &quot;Update available v1.2.0&quot;" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-2d"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s3" value="3. Admin triggers update" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="370" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-3a" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="140" y="410" as="sourcePoint"/><mxPoint x="300" y="410" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-3al" value="click [Update Now] (confirm backup)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-3a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-3b" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="435" as="sourcePoint"/><mxPoint x="460" y="435" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-3bl" value="POST /api/v1/system/update {version:v1.2.0}" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-3b"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-3c" style="endArrow=classic;html=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="460" y="460" as="sourcePoint"/><mxPoint x="620" y="460" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-3cl" value="POST /update (with INTERNAL_TOKEN)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-3c"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s4" value="4. Updater: pre-flight + backup" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="485" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-4a" style="endArrow=classic;html=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="525" as="sourcePoint"/><mxPoint x="1260" y="525" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-4al" value="pg_dump → /backups/pre-update-v1.2.0-2026-05-26.sql.gz" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-4a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s5" value="5. Pull images + recreate" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="555" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-5a" style="endArrow=classic;html=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="595" as="sourcePoint"/><mxPoint x="940" y="595" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-5al" value="docker pull mikrotik-central-{api,web}:v1.2.0" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-5a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-5b" style="endArrow=classic;html=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="625" as="sourcePoint"/><mxPoint x="1100" y="625" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-5bl" value="docker compose up -d (recreate api, web, worker)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-5b"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s6" value="6. Alembic migration on api startup" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="655" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-6a" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="460" y="695" as="sourcePoint"/><mxPoint x="1260" y="695" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-6al" value="alembic upgrade head" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-6a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-s7" value="7. Frontend polls updater /status (works even while api restarts)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="725" width="1240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="p5-7a" style="endArrow=classic;html=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="300" y="765" as="sourcePoint"/><mxPoint x="620" y="765" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-7al" value="GET /updater/status (every 2s)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-7a"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+        <mxCell id="p5-7b" style="endArrow=classic;html=1;dashed=1;strokeColor=#9673a6;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="620" y="790" as="sourcePoint"/><mxPoint x="300" y="790" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p5-7bl" value="{ step: &apos;health-check&apos;, progress: 5/6, log: &apos;...&apos; }" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p5-7b"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p5-rb" value="On failure (any step 4-6) → Updater rolls back: re-tag previous images, pg_restore from backup, docker compose up -d → notify admin (email/webhook) → status=ROLLED_BACK" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2f2;strokeColor=#b85450;dashed=1;align=left;spacingLeft=10;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="815" width="1240" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+
+  <diagram name="06-MikroTik-API-Call" id="page6">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p6-title" value="MikroTik API Proxy — &quot;IT Support views DHCP leases on Device X&quot;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p6-h-user" value="IT Support" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-web" value="web" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-api" value="api endpoint" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="60" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-cas" value="Casbin enforcer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="60" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-pool" value="Connection pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="740" y="60" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-cache" value="Redis cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="920" y="60" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-mt" value="MikroTik Device X" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="60" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6-h-audit" value="AuditLog (db)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="60" width="100" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p6-l1" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="120" y="100" as="sourcePoint"/><mxPoint x="120" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l2" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="280" y="100" as="sourcePoint"/><mxPoint x="280" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l3" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="100" as="sourcePoint"/><mxPoint x="450" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l4" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="630" y="100" as="sourcePoint"/><mxPoint x="630" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l5" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="810" y="100" as="sourcePoint"/><mxPoint x="810" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l6" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="980" y="100" as="sourcePoint"/><mxPoint x="980" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l7" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1160" y="100" as="sourcePoint"/><mxPoint x="1160" y="860" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-l8" style="endArrow=none;dashed=1;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1330" y="100" as="sourcePoint"/><mxPoint x="1330" y="860" as="targetPoint"/></mxGeometry></mxCell>
+
+        <mxCell id="p6-m1" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="120" y="140" as="sourcePoint"/><mxPoint x="280" y="140" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m1l" value="navigate /devices/X/dhcp" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m1"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m2" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="280" y="170" as="sourcePoint"/><mxPoint x="450" y="170" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m2l" value="GET /api/v1/devices/X/dhcp/leases  +  JWT" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m2"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m3" value="decode JWT → user_id, org_id, role_ids&#xa;load assignments(scope: site/device)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6ffe6;strokeColor=#82b366;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="370" y="200" width="220" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p6-m4" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="260" as="sourcePoint"/><mxPoint x="630" y="260" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m4l" value="enforce(user:42, site:client-a, device:X, read, ip.dhcp)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m4"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m5" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="630" y="290" as="sourcePoint"/><mxPoint x="450" y="290" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m5l" value="ALLOW" style="edgeLabel;html=1;fontSize=10;fontStyle=1;" vertex="1" connectable="0" parent="p6-m5"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m6" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="320" as="sourcePoint"/><mxPoint x="980" y="320" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m6l" value="GET cache: leases:device:X (ttl 5s)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m6"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m7" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="980" y="350" as="sourcePoint"/><mxPoint x="450" y="350" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m7l" value="MISS" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m7"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m8" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="380" as="sourcePoint"/><mxPoint x="810" y="380" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m8l" value="pool.get(device_id=X)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m8"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m9" value="reuse keepalive conn or open new&#xa;(decrypt creds via Fernet, connect TLS)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6ffe6;strokeColor=#82b366;dashed=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="690" y="400" width="240" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p6-m10" style="endArrow=classic;html=1;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="810" y="460" as="sourcePoint"/><mxPoint x="1160" y="460" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m10l" value="/ip/dhcp-server/lease/print  (RouterOS API or REST)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m10"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m11" style="endArrow=classic;html=1;dashed=1;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="1160" y="490" as="sourcePoint"/><mxPoint x="810" y="490" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m11l" value="lease list [{ mac, ip, host, status, expires }, ...]" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m11"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m12" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="810" y="520" as="sourcePoint"/><mxPoint x="450" y="520" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m12l" value="parsed Pydantic models" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m12"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m13" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="550" as="sourcePoint"/><mxPoint x="980" y="550" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m13l" value="SETEX cache: leases:device:X TTL=5s" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m13"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m14" style="endArrow=classic;html=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="580" as="sourcePoint"/><mxPoint x="1330" y="580" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m14l" value="INSERT audit_log (user, device, section=ip.dhcp, action=read, outcome=ok)" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m14"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m15" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="450" y="610" as="sourcePoint"/><mxPoint x="280" y="610" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m15l" value="200 JSON [{ ... leases ... }]" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m15"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-m16" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="280" y="640" as="sourcePoint"/><mxPoint x="120" y="640" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="p6-m16l" value="render DataTable" style="edgeLabel;html=1;fontSize=10;" vertex="1" connectable="0" parent="p6-m16"><mxGeometry x="0" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="p6-deny" value="If Casbin returns DENY  →  403 Forbidden  +  audit_log(outcome=denied) — no MikroTik call is made.&#xa;If MikroTik unreachable  →  502 with cached snapshot if &lt; 60s old, else 503; status flips to &quot;unreachable&quot; in device list." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2f2;strokeColor=#b85450;dashed=1;align=left;spacingLeft=10;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="700" width="1280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p6-write" value="Write actions (e.g., add NAT rule) follow the same pipeline but: section=ip.firewall.nat, action=write, body=schema-validated, audit_log stores full request payload for compliance." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6f2ff;strokeColor=#6c8ebf;dashed=1;align=left;spacingLeft=10;spacingTop=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="780" width="1280" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>

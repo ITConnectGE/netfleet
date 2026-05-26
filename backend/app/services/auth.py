@@ -1,0 +1,246 @@
+"""Authentication service — orchestrates login, TOTP, refresh.
+
+Endpoints stay thin; this module owns the business logic and makes it testable.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Literal
+
+import pyotp
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.security import (
+    decode_jwt,
+    decrypt_field,
+    encrypt_field,
+    hash_password,
+    hash_refresh_token,
+    issue_jwt,
+    new_refresh_token,
+    password_needs_rehash,
+    verify_password,
+)
+from app.models.refresh_token import RefreshToken
+from app.models.user import AuthMethod, User
+
+log = structlog.get_logger(__name__)
+
+
+class AuthError(Exception):
+    """Raised for any auth failure. API layer maps to 401/403."""
+
+
+class TotpRequired(Exception):
+    """Raised when login succeeds password check but user has TOTP enrolled."""
+
+    def __init__(self, user_id: str, organization_id: str) -> None:
+        self.user_id = user_id
+        self.organization_id = organization_id
+
+
+# ---------------- Login ----------------
+
+
+async def authenticate_local(
+    session: AsyncSession,
+    *,
+    email: str,
+    password: str,
+) -> User:
+    """Verify email + password. Raises AuthError on failure, TotpRequired on success-pending-MFA."""
+    stmt = select(User).where(User.email == email.lower(), User.is_active.is_(True))
+    user = (await session.execute(stmt)).scalar_one_or_none()
+
+    if user is None or user.auth_method != AuthMethod.LOCAL:
+        # Same timing as a failed verify_password call — argon2 returns in ~50ms
+        verify_password(password, None)
+        raise AuthError("invalid email or password")
+
+    if not verify_password(password, user.password_hash):
+        raise AuthError("invalid email or password")
+
+    if password_needs_rehash(user.password_hash or ""):
+        user.password_hash = hash_password(password)
+        await session.flush()
+
+    if user.totp_enrolled:
+        raise TotpRequired(user_id=str(user.id), organization_id=str(user.organization_id))
+
+    return user
+
+
+# ---------------- TOTP ----------------
+
+
+def make_totp_secret() -> str:
+    return pyotp.random_base32()
+
+
+def make_otpauth_uri(secret: str, email: str, issuer: str = "NetFleet") -> str:
+    return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
+
+
+def verify_totp(secret_plain: str, code: str) -> bool:
+    return pyotp.TOTP(secret_plain).verify(code, valid_window=1)
+
+
+async def verify_totp_for_user(
+    session: AsyncSession,
+    *,
+    mfa_temp_token: str,
+    code: str,
+) -> User:
+    try:
+        payload = decode_jwt(mfa_temp_token, expected_type="mfa_temp")
+    except ValueError as e:
+        raise AuthError(str(e)) from e
+
+    user_id = payload["sub"]
+    stmt = select(User).where(User.id == user_id, User.is_active.is_(True))
+    user = (await session.execute(stmt)).scalar_one_or_none()
+    if user is None or not user.totp_enrolled or not user.totp_secret_encrypted:
+        raise AuthError("totp not configured for this user")
+
+    secret = decrypt_field(user.totp_secret_encrypted)
+    if not verify_totp(secret, code):
+        raise AuthError("invalid TOTP code")
+
+    return user
+
+
+# ---------------- Token issuance ----------------
+
+
+def issue_mfa_temp_token(user: User) -> tuple[str, datetime]:
+    return issue_mfa_temp_token_for_id(str(user.id), str(user.organization_id))
+
+
+def issue_mfa_temp_token_for_id(user_id: str, organization_id: str) -> tuple[str, datetime]:
+    return issue_jwt(
+        subject=user_id,
+        organization_id=organization_id,
+        token_type="mfa_temp",
+        ttl_seconds=300,  # 5 minutes to complete TOTP
+    )
+
+
+def issue_access_token(user: User) -> tuple[str, datetime]:
+    return issue_jwt(
+        subject=user.id,
+        organization_id=user.organization_id,
+        token_type="access",
+        extra_claims={"adm": user.is_admin},
+    )
+
+
+async def issue_refresh_token(
+    session: AsyncSession,
+    *,
+    user: User,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> tuple[str, datetime]:
+    raw, h = new_refresh_token()
+    expires_at = datetime.now(UTC) + timedelta(seconds=settings.REFRESH_TOKEN_TTL)
+    session.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=h,
+            expires_at=expires_at,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+    )
+    user.last_login_at = datetime.now(UTC)
+    await session.flush()
+    return raw, expires_at
+
+
+async def rotate_refresh_token(
+    session: AsyncSession,
+    *,
+    presented_raw: str,
+    user_agent: str | None,
+    ip_address: str | None,
+) -> tuple[User, str, datetime]:
+    h = hash_refresh_token(presented_raw)
+    stmt = select(RefreshToken).where(RefreshToken.token_hash == h)
+    rt = (await session.execute(stmt)).scalar_one_or_none()
+
+    if rt is None:
+        raise AuthError("unknown refresh token")
+    if rt.revoked_at is not None:
+        # Reuse of a revoked token — possible theft. Revoke everything for this user.
+        await _revoke_all_for_user(session, rt.user_id)
+        raise AuthError("refresh token reuse detected; all sessions revoked")
+    if rt.expires_at <= datetime.now(UTC):
+        raise AuthError("refresh token expired")
+
+    user = await session.get(User, rt.user_id)
+    if user is None or not user.is_active:
+        raise AuthError("user inactive")
+
+    # Rotate
+    new_raw, new_hash = new_refresh_token()
+    new_expires = datetime.now(UTC) + timedelta(seconds=settings.REFRESH_TOKEN_TTL)
+    new_rt = RefreshToken(
+        user_id=user.id,
+        token_hash=new_hash,
+        expires_at=new_expires,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+    session.add(new_rt)
+    await session.flush()
+
+    rt.revoked_at = datetime.now(UTC)
+    rt.replaced_by_id = new_rt.id
+    await session.flush()
+
+    return user, new_raw, new_expires
+
+
+async def revoke_refresh_token(session: AsyncSession, presented_raw: str) -> None:
+    h = hash_refresh_token(presented_raw)
+    stmt = select(RefreshToken).where(RefreshToken.token_hash == h)
+    rt = (await session.execute(stmt)).scalar_one_or_none()
+    if rt and rt.revoked_at is None:
+        rt.revoked_at = datetime.now(UTC)
+        await session.flush()
+
+
+async def _revoke_all_for_user(session: AsyncSession, user_id) -> None:
+    stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+    now = datetime.now(UTC)
+    for rt in (await session.execute(stmt)).scalars():
+        rt.revoked_at = now
+    await session.flush()
+
+
+# ---------------- TOTP enrollment ----------------
+
+
+async def begin_totp_enrollment(session: AsyncSession, user: User) -> tuple[str, str]:
+    """Generate a TOTP secret, store it (encrypted), return (secret, otpauth_uri).
+    The user must POST a valid code to confirm before totp_enrolled flips to True."""
+    secret = make_totp_secret()
+    user.totp_secret_encrypted = encrypt_field(secret)
+    user.totp_enrolled = False
+    await session.flush()
+    return secret, make_otpauth_uri(secret, user.email)
+
+
+async def confirm_totp_enrollment(session: AsyncSession, user: User, code: str) -> Literal[True]:
+    if not user.totp_secret_encrypted:
+        raise AuthError("no TOTP enrollment in progress")
+    secret = decrypt_field(user.totp_secret_encrypted)
+    if not verify_totp(secret, code):
+        raise AuthError("invalid TOTP code")
+    user.totp_enrolled = True
+    await session.flush()
+    return True
