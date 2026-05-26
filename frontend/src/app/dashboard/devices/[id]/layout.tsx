@@ -15,7 +15,8 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
     { href: base, label: "Overview" },
     { href: `${base}/services`, label: "IP services" },
     { href: `${base}/system-users`, label: "Device users" },
-    // VPN (Phase 6b) and Backups (Phase 7) will be added when those pages ship.
+    { href: `${base}/vpn`, label: "VPN" },
+    // Backups (Phase 7) will be added when that page ships.
   ] as const;
 
   return (

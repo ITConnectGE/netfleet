@@ -84,6 +84,9 @@ Thumbs.db
 # --- Docker ---
 docker-compose.override.yml
 
+# --- Local deployment helpers (machine-specific) ---
+.deploy/
+
 # --- Logs ---
 *.log
 logs/
