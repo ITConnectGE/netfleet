@@ -5,8 +5,15 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fetchMe, logout, type UserPublic } from "@/lib/auth";
+
+interface HealthResponse {
+  status: string;
+  version: string;
+  uptime_seconds: number;
+}
 
 const NAV = [
   { href: "/dashboard", label: "Overview" },
@@ -25,6 +32,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { data: me, isLoading } = useQuery<UserPublic | null>({
     queryKey: ["me"],
     queryFn: fetchMe,
+    retry: false,
+  });
+  const { data: health } = useQuery<HealthResponse>({
+    queryKey: ["health"],
+    queryFn: () => api.get("health").json<HealthResponse>(),
+    staleTime: 60_000,
     retry: false,
   });
 
@@ -50,8 +63,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-6">
             <Link href="/dashboard" className="flex items-center gap-2">
               <span className="text-base font-semibold">NetFleet</span>
-              <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                v0.1.0
+              <span
+                className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                title={health ? `running ${health.version}` : ""}
+              >
+                {health ? `v${health.version}` : "…"}
               </span>
             </Link>
             <nav className="flex items-center gap-1">
