@@ -3,9 +3,6 @@ const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
-  experimental: {
-    typedRoutes: true,
-  },
   async rewrites() {
     return [
       // Proxy /api/* to the API service when running outside the Caddy gateway

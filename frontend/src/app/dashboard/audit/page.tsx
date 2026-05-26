@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { queryAudit, type AuditFilters, type AuditOutcome, type AuditPage } from "@/lib/audit";
 
@@ -95,9 +95,8 @@ export default function AuditPage() {
               </tr>
             )}
             {data?.items.map((e) => (
-              <>
+              <Fragment key={e.id}>
                 <tr
-                  key={e.id}
                   onClick={() => setExpanded(expanded === e.id ? null : e.id)}
                   className="cursor-pointer hover:bg-accent/30"
                 >
@@ -115,7 +114,7 @@ export default function AuditPage() {
                   </td>
                 </tr>
                 {expanded === e.id && (
-                  <tr key={`${e.id}-detail`} className="bg-muted/20">
+                  <tr className="bg-muted/20">
                     <td colSpan={6} className="px-6 py-4">
                       <Detail label="User agent">
                         <span className="font-mono text-xs">{e.user_agent ?? "—"}</span>
@@ -154,7 +153,7 @@ export default function AuditPage() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
