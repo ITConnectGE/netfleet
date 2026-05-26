@@ -212,6 +212,26 @@ class VlanInterface:
 
 
 @dataclass(slots=True)
+class SimpleQueue:
+    """/queue/simple — per-IP or per-subnet bandwidth limit."""
+
+    id: str | None
+    name: str
+    target: str | None = None              # comma-separated IPs/subnets
+    max_limit: str | None = None           # "10M/10M" (upload/download)
+    burst_limit: str | None = None
+    burst_threshold: str | None = None
+    burst_time: str | None = None
+    parent: str | None = None              # for hierarchical queues
+    priority: str | None = None            # "8/8" default
+    bytes_in: int | None = None
+    bytes_out: int | None = None
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class NtpClient:
     """RouterOS /system/ntp/client (singleton)."""
 
@@ -387,6 +407,18 @@ class VendorDriver(Protocol):
 
     # Bridge hosts
     async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]: ...
+
+    # Queues
+    async def queue_simple_list(self, creds: DeviceCredentials) -> list[SimpleQueue]: ...
+    async def queue_simple_add(
+        self, creds: DeviceCredentials, queue: SimpleQueue
+    ) -> str: ...
+    async def queue_simple_remove(
+        self, creds: DeviceCredentials, queue_id: str
+    ) -> None: ...
+    async def queue_simple_reset_counters(
+        self, creds: DeviceCredentials, queue_id: str
+    ) -> None: ...
 
     # Interfaces + VLANs
     async def interfaces_list(self, creds: DeviceCredentials) -> list[Interface]: ...

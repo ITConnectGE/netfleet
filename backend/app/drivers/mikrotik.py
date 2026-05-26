@@ -30,6 +30,7 @@ from app.drivers.base import (
     NatRule,
     NtpClient,
     PppSecret,
+    SimpleQueue,
     SnmpCommunity,
     SnmpSettings,
     SystemInfo,
@@ -313,6 +314,72 @@ class MikrotikDriver:
             )
             for r in rows
         ]
+
+    # ============== Queues ==============
+
+    async def queue_simple_list(self, creds: DeviceCredentials) -> list[SimpleQueue]:
+        rows = await self._call(creds, "/queue/simple/print")
+        out: list[SimpleQueue] = []
+        for r in rows:
+            bytes_str = r.get("bytes")
+            bin_, bout = None, None
+            if isinstance(bytes_str, str) and "/" in bytes_str:
+                parts = bytes_str.split("/")
+                if len(parts) == 2:
+                    try:
+                        bin_, bout = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        pass
+            out.append(
+                SimpleQueue(
+                    id=r.get(".id"),
+                    name=str(r.get("name", "")),
+                    target=r.get("target"),
+                    max_limit=r.get("max-limit"),
+                    burst_limit=r.get("burst-limit"),
+                    burst_threshold=r.get("burst-threshold"),
+                    burst_time=r.get("burst-time"),
+                    parent=r.get("parent"),
+                    priority=r.get("priority"),
+                    bytes_in=bin_,
+                    bytes_out=bout,
+                    disabled=_to_bool(r.get("disabled")),
+                    comment=r.get("comment"),
+                    raw=r,
+                )
+            )
+        return out
+
+    async def queue_simple_add(
+        self, creds: DeviceCredentials, queue: SimpleQueue
+    ) -> str:
+        params: dict[str, Any] = {"name": queue.name}
+        for k, v in {
+            "target": queue.target,
+            "max-limit": queue.max_limit,
+            "burst-limit": queue.burst_limit,
+            "burst-threshold": queue.burst_threshold,
+            "burst-time": queue.burst_time,
+            "parent": queue.parent,
+            "priority": queue.priority,
+            "comment": queue.comment,
+        }.items():
+            if v is not None:
+                params[k] = v
+        if queue.disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/queue/simple/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def queue_simple_remove(
+        self, creds: DeviceCredentials, queue_id: str
+    ) -> None:
+        await self._call(creds, "/queue/simple/remove", **{".id": queue_id})
+
+    async def queue_simple_reset_counters(
+        self, creds: DeviceCredentials, queue_id: str
+    ) -> None:
+        await self._call(creds, "/queue/simple/reset-counters", **{".id": queue_id})
 
     # ============== Interfaces + VLANs ==============
 
