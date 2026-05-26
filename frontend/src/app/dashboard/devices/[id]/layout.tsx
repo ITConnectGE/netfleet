@@ -21,7 +21,7 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
     { href: `${base}/queues`, label: "Queues" },
     { href: `${base}/logs`, label: "Logs" },
     { href: `${base}/system`, label: "System" },
-    // Backups (Phase 7) will be added when that page ships.
+    { href: `${base}/backups`, label: "Backups" },
   ] as const;
 
   return (

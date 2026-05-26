@@ -45,6 +45,7 @@ fi
 # --- directories ---
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/"{postgres,redis,backups,caddy,caddy-config}
+mkdir -p "$INSTALL_DIR/data/backups/devices"
 chmod 700 "$INSTALL_DIR/data/postgres"
 # postgres:16-alpine runs as UID 70 — the data dir must be writable by it.
 chown -R 70:70 "$INSTALL_DIR/data/postgres"

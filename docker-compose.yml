@@ -103,6 +103,8 @@ services:
     image: ghcr.io/itconnectge/netfleet-api:${VERSION:-latest}
     restart: unless-stopped
     environment: *api-env
+    volumes:
+      - /opt/netfleet/data/backups/devices:/backups/devices
     networks:
       - internal
     depends_on:
@@ -120,8 +122,10 @@ services:
   worker:
     image: ghcr.io/itconnectge/netfleet-api:${VERSION:-latest}
     restart: unless-stopped
-    command: ["python", "-m", "app.workers.poller"]
+    command: ["python", "-m", "app.workers.scheduler"]
     environment: *api-env
+    volumes:
+      - /opt/netfleet/data/backups/devices:/backups/devices
     networks:
       - internal
     depends_on:

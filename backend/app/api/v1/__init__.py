@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     audit,
     auth,
+    backups,
     bulk,
     device_ops,
     devices,
@@ -36,6 +37,7 @@ router.include_router(firewall.router, prefix="/devices", tags=["firewall"])
 router.include_router(router_system.router, prefix="/devices", tags=["router-system"])
 router.include_router(network.router, prefix="/devices", tags=["network"])
 router.include_router(queues.router, prefix="/devices", tags=["queues"])
+router.include_router(backups.router, prefix="/devices", tags=["backups"])
 router.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(users.router, prefix="/users", tags=["users"])
