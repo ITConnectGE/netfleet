@@ -46,6 +46,8 @@ fi
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/"{postgres,redis,backups,caddy,caddy-config}
 chmod 700 "$INSTALL_DIR/data/postgres"
+# postgres:16-alpine runs as UID 70 — the data dir must be writable by it.
+chown -R 70:70 "$INSTALL_DIR/data/postgres"
 
 # --- secrets ---
 gen_hex() { openssl rand -hex 32; }
@@ -78,6 +80,7 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
     -e "s|^NETFLEET_DB_PASSWORD=.*|NETFLEET_DB_PASSWORD=$DB_PASS|" \
     -e "s|^NETFLEET_DATABASE_URL=.*|NETFLEET_DATABASE_URL=postgresql+asyncpg://netfleet:$DB_PASS@postgres:5432/netfleet|" \
     -e "s|^NETFLEET_OIDC_REDIRECT_URI=.*|NETFLEET_OIDC_REDIRECT_URI=https://$DOMAIN/api/v1/auth/oidc/callback|" \
+    -e "s|^NETFLEET_CORS_ORIGINS=.*|NETFLEET_CORS_ORIGINS=https://$DOMAIN|" \
     -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://$DOMAIN/api/v1|" \
     "$INSTALL_DIR/.env"
 
