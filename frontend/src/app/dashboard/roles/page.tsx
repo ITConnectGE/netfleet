@@ -8,10 +8,53 @@ import {
   deleteRole,
   listRoles,
   listSections,
+  type Permission,
   type PermissionAction,
   type Role,
   type SectionInfo,
 } from "@/lib/roles";
+
+const ACTION_STYLES: Record<PermissionAction, string> = {
+  read: "bg-sky-100 text-sky-900 dark:bg-sky-950/60 dark:text-sky-200",
+  write: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
+  execute: "bg-rose-100 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200",
+};
+
+function PermissionMatrix({ permissions }: { permissions: Permission[] }) {
+  if (permissions.length === 0) {
+    return (
+      <p className="mt-3 text-xs italic text-muted-foreground">No permissions granted.</p>
+    );
+  }
+  const bySection = new Map<string, PermissionAction[]>();
+  for (const p of permissions) {
+    const arr = bySection.get(p.section) ?? [];
+    arr.push(p.action);
+    bySection.set(p.section, arr);
+  }
+  const ordered = Array.from(bySection.entries()).sort(([a], [b]) => a.localeCompare(b));
+  return (
+    <div className="mt-3 space-y-1.5">
+      {ordered.map(([section, actions]) => (
+        <div key={section} className="flex items-baseline gap-2 text-xs">
+          <span className="min-w-[7rem] font-mono text-muted-foreground">{section}</span>
+          <div className="flex flex-wrap gap-1">
+            {(["read", "write", "execute"] as const)
+              .filter((a) => actions.includes(a))
+              .map((a) => (
+                <span
+                  key={a}
+                  className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] ${ACTION_STYLES[a]}`}
+                >
+                  {a}
+                </span>
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function RolesPage() {
   const qc = useQueryClient();
@@ -94,21 +137,7 @@ export default function RolesPage() {
                 {r.assignment_count} assignment{r.assignment_count === 1 ? "" : "s"}
               </span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-1">
-              {r.permissions.slice(0, 6).map((p) => (
-                <span
-                  key={p.id}
-                  className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]"
-                >
-                  {p.section}:{p.action}
-                </span>
-              ))}
-              {r.permissions.length > 6 && (
-                <span className="text-[10px] text-muted-foreground">
-                  + {r.permissions.length - 6} more
-                </span>
-              )}
-            </div>
+            <PermissionMatrix permissions={r.permissions} />
           </div>
         ))}
       </div>
