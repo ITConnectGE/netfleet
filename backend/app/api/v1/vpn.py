@@ -1,10 +1,11 @@
-"""VPN endpoints — PPP secrets (L2TP/PPTP/SSTP/OVPN) for now; WireGuard lands in Phase 6c."""
+"""VPN endpoints — PPP secrets (L2TP/PPTP/SSTP/OVPN) + WireGuard."""
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -20,10 +21,16 @@ from app.schemas.vpn import (
     PppSecretCreate,
     PppSecretPasswordReset,
     PppSecretPublic,
+    WireguardInterfaceCreate,
+    WireguardInterfacePublic,
+    WireguardPeerConfigRequest,
+    WireguardPeerCreate,
+    WireguardPeerPublic,
 )
 from app.services import audit as audit_svc
 from app.services import device as device_svc
 from app.services import vpn as vpn_svc
+from app.services import wireguard as wg
 
 router = APIRouter()
 
@@ -236,3 +243,394 @@ async def reveal_ppp_secret(
     )
     await session.commit()
     return {"password": password}
+
+
+# ---------------- WireGuard interfaces ----------------
+
+
+@router.get(
+    "/{device_id}/wireguard/interfaces", response_model=list[WireguardInterfacePublic]
+)
+async def list_wg_interfaces(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[WireguardInterfacePublic]:
+    try:
+        items = await vpn_svc.list_wg_interfaces(session, user.organization_id, device_id)
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        WireguardInterfacePublic(
+            id=i.id,
+            name=i.name,
+            listen_port=i.listen_port,
+            public_key=i.public_key,
+            mtu=i.mtu,
+            disabled=i.disabled,
+            comment=i.comment,
+        )
+        for i in items
+    ]
+
+
+@router.post(
+    "/{device_id}/wireguard/interfaces",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_wg_interface(
+    device_id: UUID,
+    payload: WireguardInterfaceCreate,
+    request: Request,
+    user: User = Depends(require_permission("vpn.wireguard.interface", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    # If user didn't bring a private key, generate one server-side.
+    private_key = payload.private_key
+    generated = False
+    if not private_key:
+        kp = wg.generate_keypair()
+        private_key = kp.private_b64
+        generated = True
+
+    try:
+        new_id = await vpn_svc.add_wg_interface(
+            session,
+            user.organization_id,
+            device_id,
+            name=payload.name,
+            listen_port=payload.listen_port,
+            private_key=private_key,
+            mtu=payload.mtu,
+            comment=payload.comment,
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="vpn.wireguard.interface",
+        action="create",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={
+            "name": payload.name,
+            "listen_port": payload.listen_port,
+            "key_source": "generated" if generated else "user-provided",
+        },
+        response_meta={"interface_id": new_id},
+    )
+    await session.commit()
+    return {"id": new_id}
+
+
+@router.delete(
+    "/{device_id}/wireguard/interfaces/{iface_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_wg_interface(
+    device_id: UUID,
+    iface_id: str,
+    request: Request,
+    user: User = Depends(require_permission("vpn.wireguard.interface", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await vpn_svc.remove_wg_interface(
+            session, user.organization_id, device_id, iface_id=iface_id
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="vpn.wireguard.interface",
+        action="delete",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"interface_id": iface_id},
+    )
+    await session.commit()
+
+
+# ---------------- WireGuard peers ----------------
+
+
+@router.get("/{device_id}/wireguard/peers", response_model=list[WireguardPeerPublic])
+async def list_wg_peers(
+    device_id: UUID,
+    interface: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[WireguardPeerPublic]:
+    try:
+        items = await vpn_svc.list_wg_peers(
+            session, user.organization_id, device_id, interface=interface
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        WireguardPeerPublic(
+            id=p.id,
+            interface=p.interface,
+            public_key=p.public_key,
+            allowed_address=p.allowed_address,
+            endpoint_address=p.endpoint_address,
+            endpoint_port=p.endpoint_port,
+            persistent_keepalive=p.persistent_keepalive,
+            disabled=p.disabled,
+            comment=p.comment,
+        )
+        for p in items
+    ]
+
+
+@router.post(
+    "/{device_id}/wireguard/peers",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_wg_peer(
+    device_id: UUID,
+    payload: WireguardPeerCreate,
+    request: Request,
+    user: User = Depends(require_permission("vpn.wireguard.peer", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    # Optionally generate a PSK if not provided
+    psk = payload.preshared_key
+    psk_generated = False
+    if psk is None:
+        psk = wg.generate_preshared_key()
+        psk_generated = True
+
+    try:
+        new_id = await vpn_svc.add_wg_peer(
+            session,
+            user.organization_id,
+            device_id,
+            user.id,
+            interface=payload.interface,
+            public_key=payload.public_key,
+            preshared_key=psk,
+            allowed_address=payload.allowed_address,
+            endpoint_address=payload.endpoint_address,
+            endpoint_port=payload.endpoint_port,
+            persistent_keepalive=payload.persistent_keepalive,
+            comment=payload.comment,
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="vpn.wireguard.peer",
+        action="create",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={
+            "interface": payload.interface,
+            "allowed_address": payload.allowed_address,
+            "psk_source": "generated" if psk_generated else "user-provided",
+        },
+        response_meta={"peer_id": new_id},
+    )
+    await session.commit()
+    # Return the (possibly generated) PSK so the admin can save it once.
+    return {"id": new_id, "preshared_key": psk}
+
+
+@router.delete(
+    "/{device_id}/wireguard/peers/{peer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_wg_peer(
+    device_id: UUID,
+    peer_id: str,
+    request: Request,
+    user: User = Depends(require_permission("vpn.wireguard.peer", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await vpn_svc.remove_wg_peer(
+            session, user.organization_id, device_id, user.id, peer_id=peer_id
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="vpn.wireguard.peer",
+        action="delete",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"peer_id": peer_id},
+    )
+    await session.commit()
+
+
+@router.post(
+    "/{device_id}/wireguard/peers/{peer_id}/reveal",
+    response_model=dict,
+)
+async def reveal_wg_peer_keys(
+    device_id: UUID,
+    peer_id: str,
+    payload: RevealRequest,
+    request: Request,
+    user: User = Depends(require_permission("secret.reveal", "execute")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    try:
+        peers = await vpn_svc.list_wg_peers(session, user.organization_id, device_id)
+        label = next(
+            (f"WG peer on {p.interface} ({p.public_key[:10]}…)" for p in peers if p.id == peer_id),
+            None,
+        )
+        keys = await vpn_svc.reveal_wg_peer_keys(
+            session,
+            user.organization_id,
+            device_id,
+            user.id,
+            peer_id=peer_id,
+            secret_label=label,
+            justification=payload.justification,
+            ip_address=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="secret.reveal",
+        action="wireguard_peer_keys",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"peer_id": peer_id, "justification": payload.justification},
+    )
+    await session.commit()
+    return keys
+
+
+@router.post(
+    "/{device_id}/wireguard/peers/{peer_id}/config",
+    response_class=PlainTextResponse,
+)
+async def generate_wg_client_config(
+    device_id: UUID,
+    peer_id: str,
+    payload: WireguardPeerConfigRequest,
+    request: Request,
+    user: User = Depends(require_permission("vpn.wireguard.peer", "read")),
+    session: AsyncSession = Depends(db_session),
+):
+    """Assemble a wg-quick client config from the peer + caller-supplied params.
+
+    The client's private key is generated server-side and shown ONCE in this
+    response (the audit log records that this user saw it). The server-stored
+    PSK is included if present.
+    """
+    try:
+        peers = await vpn_svc.list_wg_peers(session, user.organization_id, device_id)
+        peer = next((p for p in peers if p.id == peer_id), None)
+        if peer is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="peer not found")
+
+        # Find the parent interface's public key.
+        interfaces = await vpn_svc.list_wg_interfaces(session, user.organization_id, device_id)
+        iface = next((i for i in interfaces if i.name == peer.interface), None)
+        if iface is None or not iface.public_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"interface '{peer.interface}' has no public key on the device",
+            )
+
+        # PSK is server-stored; reveal it (audited).
+        keys = await vpn_svc.reveal_wg_peer_keys(
+            session,
+            user.organization_id,
+            device_id,
+            user.id,
+            peer_id=peer_id,
+            secret_label=f"WG peer config download ({peer.interface})",
+            justification="generate client .conf",
+            ip_address=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except vpn_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    # Server-side client key generation: the private key is shown once to admin.
+    client_kp = wg.generate_keypair()
+
+    conf = wg.build_client_config(
+        client_private_key=client_kp.private_b64,
+        client_address=payload.client_address,
+        client_dns=payload.client_dns,
+        server_public_key=iface.public_key,
+        preshared_key=keys.get("preshared_key"),
+        endpoint_host=payload.server_endpoint,
+        endpoint_port=payload.server_endpoint_port,
+        allowed_ips=payload.allowed_ips,
+        persistent_keepalive=payload.persistent_keepalive,
+    )
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="vpn.wireguard.peer",
+        action="generate_client_config",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(),
+        response_meta={"peer_id": peer_id, "client_pubkey": client_kp.public_b64},
+    )
+    await session.commit()
+
+    filename = f"netfleet-{peer.interface}-{peer_id}.conf"
+    return PlainTextResponse(
+        conf,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type="text/plain",
+    )
