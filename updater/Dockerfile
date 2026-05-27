@@ -1,17 +1,22 @@
-FROM docker:24-cli AS docker
-
 FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DEBIAN_FRONTEND=noninteractive
 
-# Bring the Docker CLI + compose plugin in from the official alpine image
-# rather than pulling Debian's older 'docker.io' (which lacks `docker compose`).
-COPY --from=docker /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker /usr/libexec/docker/cli-plugins/docker-compose \
-                  /usr/libexec/docker/cli-plugins/docker-compose
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client curl ca-certificates tini \
+# Install Docker CLI + Compose plugin v2 from Docker's official apt repo.
+# Debian's own `docker.io` ships only the legacy CLI without `docker compose`.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl ca-certificates gnupg postgresql-client tini \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && . /etc/os-release \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/debian $VERSION_CODENAME stable" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
