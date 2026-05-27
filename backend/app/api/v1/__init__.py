@@ -13,6 +13,7 @@ from app.api.v1 import (
     network,
     oidc,
     queues,
+    reports,
     roles,
     router_system,
     settings as settings_api,
@@ -47,6 +48,7 @@ router.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(audit.router, prefix="/audit", tags=["audit"])
+router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(settings_api.router, prefix="/settings", tags=["settings"])
 router.include_router(updates.router, prefix="/system/update", tags=["updates"])
 
