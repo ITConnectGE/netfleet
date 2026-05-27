@@ -20,7 +20,7 @@ export default function DevicesPage() {
     queryKey: ["devices"],
     queryFn: () => listDevices(),
   });
-  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: listSites });
+  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: () => listSites() });
   const { data: drivers } = useQuery<Driver[]>({ queryKey: ["drivers"], queryFn: listDrivers });
   const [showForm, setShowForm] = useState(false);
 

@@ -37,7 +37,7 @@ export default function DeviceDetailPage() {
   });
   const { data: sites } = useQuery<Site[]>({
     queryKey: ["sites"],
-    queryFn: listSites,
+    queryFn: () => listSites(),
   });
   const { data: drivers } = useQuery<Driver[]>({ queryKey: ["drivers"], queryFn: listDrivers });
 

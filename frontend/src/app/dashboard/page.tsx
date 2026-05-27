@@ -8,7 +8,7 @@ import { getFleetFirmwareSummary, type FleetFirmwareSummary } from "@/lib/firmwa
 import { listSites, type Site } from "@/lib/sites";
 
 export default function DashboardPage() {
-  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: listSites });
+  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: () => listSites() });
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["devices"],
     queryFn: () => listDevices(),

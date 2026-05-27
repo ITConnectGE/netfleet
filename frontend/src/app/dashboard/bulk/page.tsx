@@ -28,7 +28,7 @@ function BulkPasswordResetCard() {
     queryKey: ["devices"],
     queryFn: () => listDevices(),
   });
-  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: listSites });
+  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: () => listSites() });
   const siteIndex = useMemo(
     () => Object.fromEntries((sites ?? []).map((s) => [s.id, s.name])),
     [sites],
