@@ -16,7 +16,11 @@ export interface IpServiceUpdate {
 }
 
 export async function listIpServices(deviceId: string): Promise<IpService[]> {
-  return api.get(`devices/${deviceId}/ip-services`).json<IpService[]>();
+  try {
+    return await api.get(`devices/${deviceId}/ip-services`).json<IpService[]>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
 
 export async function updateIpService(
@@ -41,7 +45,11 @@ export interface DeviceUser {
 }
 
 export async function listDeviceUsers(deviceId: string): Promise<DeviceUser[]> {
-  return api.get(`devices/${deviceId}/system-users`).json<DeviceUser[]>();
+  try {
+    return await api.get(`devices/${deviceId}/system-users`).json<DeviceUser[]>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
 
 export async function resetDeviceUserPassword(

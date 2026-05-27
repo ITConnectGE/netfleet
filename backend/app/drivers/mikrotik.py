@@ -757,10 +757,13 @@ class MikrotikDriver:
         port: int | None = None,
         address: str | None = None,
     ) -> None:
-        rows = await self._call(creds, "/ip/service/print", **{"?name": name})
-        if not rows:
+        # /ip/service has 6-8 rows; cheaper to filter in Python than to
+        # wrangle librouteros' Query API across versions.
+        rows = await self._call(creds, "/ip/service/print")
+        match = next((r for r in rows if r.get("name") == name), None)
+        if not match:
             raise ValueError(f"ip service '{name}' not found on device")
-        svc_id = rows[0].get(".id")
+        svc_id = match.get(".id")
         if not svc_id:
             raise ValueError(f"ip service '{name}' has no .id")
 
@@ -770,6 +773,7 @@ class MikrotikDriver:
         if port is not None:
             params["port"] = port
         if address is not None:
+            # Empty string clears the whitelist on RouterOS; pass through.
             params["address"] = address
 
         await self._call(creds, "/ip/service/set", **params)
@@ -1069,11 +1073,20 @@ class MikrotikDriver:
             verb = cmd_parts[-1]
             cmd = conn.path(*cmd_parts[:-1])
             if verb == "print":
-                # `print` filters arrive as keys prefixed with "?"; everything else
-                # (".proplist" etc.) is ignored for now.
-                if params:
-                    return list(cmd.select(*[k.lstrip("?") for k in params if k.startswith("?")]))
-                return list(cmd)
+                # `print` filters arrive as keys prefixed with "?". librouteros'
+                # Path.select() is COLUMN projection, not row filter — using it
+                # for filtering silently returned the wrong row's .id and broke
+                # every set-by-name operation. Filter in Python instead; the
+                # tables we query (/ip/service, /user, /file, /ppp/secret) are
+                # all small enough for that to be free.
+                rows = list(cmd)
+                filters = {k[1:]: v for k, v in params.items() if k.startswith("?")}
+                if filters:
+                    rows = [
+                        r for r in rows
+                        if all(str(r.get(f)) == str(v) for f, v in filters.items())
+                    ]
+                return rows
             # librouteros 4.x's Path only exposes add/remove/update/select directly,
             # so `cmd.save(...)` / `cmd.export(...)` / `cmd.set(...)` all blow up
             # with AttributeError. The lower-level `Path.__call__(verb, **kwargs)`

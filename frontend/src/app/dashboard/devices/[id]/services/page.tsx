@@ -27,6 +27,12 @@ export default function DeviceServicesPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["device-services", deviceId] }),
   });
 
+  const addressMut = useMutation({
+    mutationFn: ({ name, address }: { name: string; address: string }) =>
+      updateIpService(deviceId, name, { address }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["device-services", deviceId] }),
+  });
+
   return (
     <div>
       <h2 className="text-lg font-semibold">IP services</h2>
@@ -34,10 +40,20 @@ export default function DeviceServicesPage() {
         RouterOS management protocols. Disable anything you don&apos;t need exposed —
         especially the non-TLS variants and Telnet.
       </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        <strong>Whitelist:</strong> in <code>Allowed from</code>, enter a comma-separated
+        list of IPs / subnets (e.g. <code>10.0.0.0/8,192.168.1.5</code>). Leave blank to
+        accept connections from anywhere.
+      </p>
 
       {error && (
         <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {(error as Error).message}
+        </div>
+      )}
+      {(toggleMut.error || portMut.error || addressMut.error) && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {((toggleMut.error || portMut.error || addressMut.error) as Error).message}
         </div>
       )}
 
@@ -48,7 +64,7 @@ export default function DeviceServicesPage() {
               <th className="px-4 py-2.5 font-medium">Service</th>
               <th className="px-4 py-2.5 font-medium">Port</th>
               <th className="px-4 py-2.5 font-medium">TLS</th>
-              <th className="px-4 py-2.5 font-medium">Bind address</th>
+              <th className="px-4 py-2.5 font-medium">Allowed from (whitelist)</th>
               <th className="px-4 py-2.5 font-medium text-right">Enabled</th>
             </tr>
           </thead>
@@ -95,8 +111,19 @@ export default function DeviceServicesPage() {
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {s.address ?? "any"}
+                  <td className="px-4 py-3">
+                    <input
+                      type="text"
+                      defaultValue={s.address ?? ""}
+                      placeholder="any"
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v !== (s.address ?? "")) {
+                          addressMut.mutate({ name: s.name, address: v });
+                        }
+                      }}
+                      className="w-56 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
