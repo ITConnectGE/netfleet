@@ -48,6 +48,27 @@ API_HEALTH_URL = os.getenv(
 HEALTH_TIMEOUT_SECONDS = 180
 
 
+def _normalize_image_tag(version: str) -> str:
+    """GitHub tags look like `v0.13.1` but our GHCR images publish without the
+    leading `v` (the release workflow's `type=semver,pattern={{version}}` strips
+    it). Compose interpolates whatever we set as VERSION into the image tag, so
+    we have to match the GHCR convention or the pull resolves to "not found"."""
+    return version.lstrip("v").strip()
+
+
+def _env_value(key: str, default: str) -> str:
+    """Read a single value from the workdir .env file (best-effort; falls back to default)."""
+    if not ENV_FILE.exists():
+        return default
+    try:
+        for ln in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            if ln.startswith(f"{key}="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return default
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NETFLEET_", case_sensitive=False, extra="ignore")
 
@@ -176,10 +197,15 @@ async def _backup_postgres(target_version: str) -> Path:
     out_path = BACKUPS_DIR / f"pre-update-{target_version}-{stamp}.sql.gz"
     _state.append_log(f"backup -> {out_path.name}")
 
+    # Read DB user/db from the host's .env (the updater container does NOT inherit
+    # the API's NETFLEET_DB_* env vars). Defaults match install.sh.
+    db_user = _env_value("NETFLEET_DB_USER", "netfleet")
+    db_name = _env_value("NETFLEET_DB_NAME", "netfleet")
+
     # Pipe `pg_dump | gzip` through bash since asyncio doesn't pipe processes natively.
     pipeline = (
         f"docker compose -f {shlex.quote(str(COMPOSE_FILE))} "
-        f"exec -T postgres pg_dump -U $NETFLEET_DB_USER $NETFLEET_DB_NAME "
+        f"exec -T postgres pg_dump -U {shlex.quote(db_user)} {shlex.quote(db_name)} "
         f"| gzip > {shlex.quote(str(out_path))}"
     )
     await _run(["bash", "-lc", pipeline])
@@ -233,21 +259,24 @@ async def _wait_for_health(timeout: int) -> None:
 
 
 async def _run_update(target_version: str, backup: bool) -> None:
+    # The release publishes images as `0.13.1`, but the GitHub tag is `v0.13.1`.
+    # Strip the prefix once and use the image tag everywhere from here on.
+    image_tag = _normalize_image_tag(target_version)
     _state.target_version = target_version
     _state.started_at_iso = datetime.now(UTC).isoformat()
     _state.finished_at_iso = None
     _state.last_error = None
     _state.log_lines.clear()
-    _state.append_log(f"=== Starting update to {target_version} ===")
+    _state.append_log(f"=== Starting update to {target_version} (image tag {image_tag}) ===")
 
     try:
         if backup and settings.AUTO_BACKUP_ON_UPDATE:
             _state.set_state(UpdateState.BACKING_UP, log_line="Backing up postgres…")
-            await _backup_postgres(target_version)
+            await _backup_postgres(image_tag)
 
-        env = {**os.environ, "VERSION": target_version}
+        env = {**os.environ, "VERSION": image_tag}
 
-        _state.set_state(UpdateState.PULLING, log_line=f"Pulling images @ {target_version}…")
+        _state.set_state(UpdateState.PULLING, log_line=f"Pulling images @ {image_tag}…")
         await _docker_compose(["pull", *RECREATE_SERVICES], env=env)
 
         _state.set_state(UpdateState.RECREATING, log_line="Recreating api/worker/web…")
@@ -262,7 +291,7 @@ async def _run_update(target_version: str, backup: bool) -> None:
         )
         await _wait_for_health(HEALTH_TIMEOUT_SECONDS)
 
-        await _persist_version(target_version)
+        await _persist_version(image_tag)
 
         _state.finished_at_iso = datetime.now(UTC).isoformat()
         _state.set_state(
