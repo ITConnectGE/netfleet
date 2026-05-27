@@ -64,6 +64,32 @@ export async function listArp(deviceId: string): Promise<ArpEntry[]> {
   return api.get(`devices/${deviceId}/arp`).json<ArpEntry[]>();
 }
 
+// ---------------- Neighbours (CDP / LLDP / MNDP) ----------------
+
+export interface Neighbor {
+  id: string | null;
+  interface: string | null;
+  address: string | null;
+  address6: string | null;
+  mac_address: string | null;
+  identity: string | null;
+  platform: string | null;
+  version: string | null;
+  board: string | null;
+  interface_name: string | null;
+  discovered_by: string | null;
+  age: string | null;
+  uptime: string | null;
+}
+
+export async function listNeighbors(deviceId: string): Promise<Neighbor[]> {
+  try {
+    return await api.get(`devices/${deviceId}/neighbors`).json<Neighbor[]>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 // ---------------- Bridge hosts ----------------
 
 export interface BridgeHost {

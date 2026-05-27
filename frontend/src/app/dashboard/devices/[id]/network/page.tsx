@@ -13,16 +13,18 @@ import {
   listArp,
   listBridgeHosts,
   listInterfaces,
+  listNeighbors,
   listRoutes,
   listVlans,
   type ArpEntry,
   type BridgeHost,
   type Interface,
   type IpRoute,
+  type Neighbor,
   type Vlan,
 } from "@/lib/network";
 
-type Tab = "interfaces" | "routes" | "vlans" | "arp" | "bridge";
+type Tab = "interfaces" | "routes" | "vlans" | "arp" | "bridge" | "neighbors";
 
 export default function NetworkPage() {
   const params = useParams<{ id: string }>();
@@ -39,6 +41,7 @@ export default function NetworkPage() {
             ["vlans", "VLANs"],
             ["arp", "ARP"],
             ["bridge", "Bridge hosts"],
+            ["neighbors", "Neighbors (CDP/LLDP)"],
           ] as [Tab, string][]
         ).map(([k, label]) => (
           <button
@@ -60,7 +63,75 @@ export default function NetworkPage() {
       {tab === "vlans" && <VlansTab deviceId={deviceId} />}
       {tab === "arp" && <ArpTab deviceId={deviceId} />}
       {tab === "bridge" && <BridgeTab deviceId={deviceId} />}
+      {tab === "neighbors" && <NeighborsTab deviceId={deviceId} />}
     </div>
+  );
+}
+
+// ---------------- Neighbours ----------------
+
+function NeighborsTab({ deviceId }: { deviceId: string }) {
+  const { data, isLoading, error } = useQuery<Neighbor[]>({
+    queryKey: ["neighbors", deviceId],
+    queryFn: () => listNeighbors(deviceId),
+  });
+  return (
+    <Section
+      title="Neighbors (CDP / LLDP / MNDP)"
+      subtitle="Other devices the router has seen advertise themselves on its links. Useful for mapping the physical/L2 topology."
+    >
+      <ErrorOrTable error={error}>
+        <table className="w-full text-sm">
+          <thead className="border-b border-border bg-muted/50">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium">Local port</th>
+              <th className="px-3 py-2 font-medium">Identity</th>
+              <th className="px-3 py-2 font-medium">Address</th>
+              <th className="px-3 py-2 font-medium">MAC</th>
+              <th className="px-3 py-2 font-medium">Platform</th>
+              <th className="px-3 py-2 font-medium">Version</th>
+              <th className="px-3 py-2 font-medium">Board</th>
+              <th className="px-3 py-2 font-medium">Remote port</th>
+              <th className="px-3 py-2 font-medium">Proto</th>
+              <th className="px-3 py-2 font-medium">Age</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {isLoading && <EmptyRow colSpan={10} label="Loading…" />}
+            {!isLoading && (!data || data.length === 0) && (
+              <EmptyRow
+                colSpan={10}
+                label="No neighbours discovered. Enable LLDP/CDP under /ip neighbor discovery-settings on the device."
+              />
+            )}
+            {data?.map((n) => (
+              <tr key={n.id ?? `${n.mac_address}-${n.interface}`} className="hover:bg-accent/30">
+                <td className="px-3 py-2 font-mono text-xs">{n.interface ?? "—"}</td>
+                <td className="px-3 py-2 font-medium">{n.identity ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-xs">
+                  {n.address ?? n.address6 ?? "—"}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">{n.mac_address ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">{n.platform ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-[11px]">{n.version ?? "—"}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{n.board ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-xs">{n.interface_name ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {n.discovered_by ? (
+                    <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-900">
+                      {n.discovered_by}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{n.age ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ErrorOrTable>
+    </Section>
   );
 }
 

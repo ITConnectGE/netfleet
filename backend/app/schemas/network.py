@@ -57,6 +57,25 @@ class ArpPublic(BaseModel):
     comment: str | None
 
 
+# ---------------- Neighbours (CDP / LLDP / MNDP) ----------------
+
+
+class NeighborPublic(BaseModel):
+    id: str | None
+    interface: str | None
+    address: str | None
+    address6: str | None
+    mac_address: str | None
+    identity: str | None
+    platform: str | None
+    version: str | None
+    board: str | None
+    interface_name: str | None
+    discovered_by: str | None
+    age: str | None
+    uptime: str | None
+
+
 # ---------------- Bridge hosts ----------------
 
 

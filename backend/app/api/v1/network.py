@@ -25,6 +25,7 @@ from app.schemas.network import (
     IpAddressPublic,
     IpRouteCreate,
     IpRoutePublic,
+    NeighborPublic,
     VlanCreate,
     VlanPublic,
 )
@@ -239,6 +240,40 @@ async def list_bridge_hosts(
             external=h.external,
         )
         for h in items
+    ]
+
+
+# ---------------- Neighbours (CDP / LLDP / MNDP) ----------------
+
+
+@router.get("/{device_id}/neighbors", response_model=list[NeighborPublic])
+async def list_neighbors(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[NeighborPublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        items = await get_driver(device.vendor).ip_neighbors_list(_to_driver_creds(device))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        NeighborPublic(
+            id=n.id,
+            interface=n.interface,
+            address=n.address,
+            address6=n.address6,
+            mac_address=n.mac_address,
+            identity=n.identity,
+            platform=n.platform,
+            version=n.version,
+            board=n.board,
+            interface_name=n.interface_name,
+            discovered_by=n.discovered_by,
+            age=n.age,
+            uptime=n.uptime,
+        )
+        for n in items
     ]
 
 

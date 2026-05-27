@@ -27,6 +27,7 @@ class Capability(StrEnum):
     IP_ADDRESS = "ip.address"
     IP_ROUTE = "ip.route"
     IP_SERVICE = "ip.service"           # api, ssh, www, winbox, …
+    IP_NEIGHBOR = "ip.neighbor"         # CDP / LLDP / MNDP discovered peers
     # DHCP
     DHCP_SERVER = "dhcp.server"
     DHCP_LEASE = "dhcp.lease"
@@ -171,6 +172,27 @@ class ArpEntry:
     dynamic: bool | None = None
     invalid: bool | None = None
     comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class Neighbor:
+    """One row from /ip/neighbor on RouterOS — a peer discovered via CDP,
+    LLDP, or MikroTik's own MNDP. Other vendors use the same shape."""
+
+    id: str | None
+    interface: str | None                  # the local port the neighbour was seen on
+    address: str | None                    # IPv4
+    address6: str | None = None            # IPv6
+    mac_address: str | None = None
+    identity: str | None = None            # hostname / system-name
+    platform: str | None = None            # "MikroTik" / "Cisco" / "Ubiquiti" / …
+    version: str | None = None             # software version string
+    board: str | None = None               # model / hardware identifier
+    interface_name: str | None = None      # remote port the neighbour reports
+    discovered_by: str | None = None       # "cdp" / "lldp" / "mndp" (comma-separated allowed)
+    age: str | None = None                 # how long since last advert
+    uptime: str | None = None              # the neighbour's own uptime
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -448,6 +470,9 @@ class VendorDriver(Protocol):
 
     # Bridge hosts
     async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]: ...
+
+    # CDP / LLDP / MNDP neighbour discovery
+    async def ip_neighbors_list(self, creds: DeviceCredentials) -> list[Neighbor]: ...
 
     # Firmware
     async def firmware_check_updates(self, creds: DeviceCredentials) -> FirmwareInfo: ...

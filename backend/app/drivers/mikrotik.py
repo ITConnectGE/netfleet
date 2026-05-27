@@ -31,6 +31,7 @@ from app.drivers.base import (
     IpService,
     LogEntry,
     NatRule,
+    Neighbor,
     NtpClient,
     NtpServer,
     PppSecret,
@@ -59,6 +60,7 @@ class MikrotikDriver:
         Capability.IP_ADDRESS,
         Capability.IP_ROUTE,
         Capability.IP_SERVICE,
+        Capability.IP_NEIGHBOR,
         Capability.DHCP_SERVER,
         Capability.DHCP_LEASE,
         Capability.FIREWALL_FILTER,
@@ -315,6 +317,32 @@ class MikrotikDriver:
                 age=r.get("age"),
                 dynamic=_to_bool(r.get("dynamic")),
                 external=_to_bool(r.get("external")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    # ============== Neighbours (CDP / LLDP / MNDP) ==============
+
+    async def ip_neighbors_list(self, creds: DeviceCredentials) -> list[Neighbor]:
+        rows = await self._call(creds, "/ip/neighbor/print")
+        return [
+            Neighbor(
+                id=r.get(".id"),
+                interface=r.get("interface"),
+                address=r.get("address"),
+                address6=r.get("address6") or r.get("address-6"),
+                mac_address=r.get("mac-address"),
+                identity=r.get("identity"),
+                platform=r.get("platform"),
+                version=r.get("version"),
+                board=r.get("board"),
+                interface_name=r.get("interface-name"),
+                # RouterOS exposes both "discovered-by" (older) and "protocol"
+                # (newer) — keep whichever is present.
+                discovered_by=r.get("discovered-by") or r.get("protocol"),
+                age=r.get("age"),
+                uptime=r.get("uptime"),
                 raw=r,
             )
             for r in rows
