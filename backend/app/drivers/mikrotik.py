@@ -8,6 +8,7 @@ Uses `librouteros` for the native API (works on 6.x and 7.x). REST API support
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -989,49 +990,87 @@ class MikrotikDriver:
 
     # ============== Backup ==============
 
-    async def system_backup(self, creds: DeviceCredentials) -> BackupArtifact:
-        """Trigger /system/backup/save (binary) + /export (script) and download both."""
+    async def system_backup(
+        self, creds: DeviceCredentials, *, ssh_port: int = 22
+    ) -> BackupArtifact:
+        """Trigger /system/backup/save (binary) + /export (script), then SFTP
+        both files off the device.
+
+        SSH/SFTP must be enabled on the router. The librouteros API does not
+        expose binary file download, so this is the only way to actually
+        retrieve the .backup blob — without it the saved file just sits on
+        the device's /file root.
+        """
         from librouteros.exceptions import TrapError
 
         ts = datetime.now(UTC)
         name = f"netfleet-{ts.strftime('%Y%m%d-%H%M%S')}"
+        backup_filename = f"{name}.backup"
+        rsc_filename = f"{name}.rsc"
 
-        # 1) Save a binary backup
+        # 1) Trigger the binary backup. RouterOS returns once the file is on disk.
         try:
             await self._call(creds, "/system/backup/save", name=name)
         except TrapError as e:
             raise RuntimeError(f"backup save failed: {e}") from e
 
-        # 2) Pull the .backup file via /file
-        backup_filename = f"{name}.backup"
-        rows = await self._call(creds, "/file/print", **{"?name": backup_filename})
-        if not rows:
-            raise RuntimeError(f"backup file '{backup_filename}' not found after save")
-        backup_bytes = _try_read_file(rows[0])
-
-        # 3) /export as text — RouterOS prints to terminal; we have to scrape it.
-        # The python librouteros driver doesn't support /export directly (no API command),
-        # so we use the rsc fallback file approach.
-        rsc_filename = f"{name}.rsc"
+        # 2) Trigger /export — script-format dump. Best-effort: some perms
+        # / RouterOS versions don't let you /export to file. We log and
+        # continue with an empty .rsc rather than failing the whole backup.
         try:
-            await self._call(creds, "/export", file=rsc_filename)
-        except Exception:
-            # Older RouterOS or no perms — leave rsc empty
-            pass
+            await self._call(creds, "/export", file=name)
+        except Exception as e:
+            log.info("mikrotik.export_skipped", host=creds.host, error=str(e))
+
+        # 3) SFTP-pull both files. The .backup is mandatory — if SFTP fails
+        # here, the whole backup is reported as failed (no point persisting
+        # a row that references a file that never made it off the device).
+        try:
+            backup_bytes = await asyncio.to_thread(
+                _sftp_get,
+                host=creds.host,
+                port=ssh_port,
+                username=creds.username,
+                password=creds.password or "",
+                remote_name=backup_filename,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"failed to pull {backup_filename} via SFTP — "
+                f"check that SSH is enabled and reachable from NetFleet: {e}"
+            ) from e
 
         rsc_text = ""
-        rsc_rows = await self._call(creds, "/file/print", **{"?name": rsc_filename})
-        if rsc_rows:
-            rsc_text = _try_read_file_text(rsc_rows[0])
+        try:
+            rsc_bytes = await asyncio.to_thread(
+                _sftp_get,
+                host=creds.host,
+                port=ssh_port,
+                username=creds.username,
+                password=creds.password or "",
+                remote_name=rsc_filename,
+            )
+            rsc_text = rsc_bytes.decode("utf-8", errors="replace")
+        except Exception as e:
+            log.info("mikrotik.rsc_pull_skipped", host=creds.host, error=str(e))
 
-        # 4) Clean up the files we created on the device
+        # 4) Best-effort cleanup of the files we created on the device.
         for fname in (backup_filename, rsc_filename):
             try:
-                await self._call(creds, "/file/remove", **{"numbers": fname})
+                await asyncio.to_thread(
+                    _sftp_remove,
+                    host=creds.host,
+                    port=ssh_port,
+                    username=creds.username,
+                    password=creds.password or "",
+                    remote_name=fname,
+                )
             except Exception:
                 pass
 
-        return BackupArtifact(backup_bytes=backup_bytes, rsc_text=rsc_text, timestamp_iso=ts.isoformat())
+        return BackupArtifact(
+            backup_bytes=backup_bytes, rsc_text=rsc_text, timestamp_iso=ts.isoformat()
+        )
 
     async def system_restore(
         self,
@@ -1143,23 +1182,69 @@ def _sftp_put(
     are supported there), so `remote_name` is just a basename like
     ``netfleet-20260527-153012.backup``.
     """
+    with _sftp_session(host, port, username, password) as sftp:
+        sftp.put(local_path, remote_name)
+
+
+def _sftp_get(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    remote_name: str,
+) -> bytes:
+    """Blocking SFTP download — must be called via asyncio.to_thread.
+
+    Returns the binary contents of `remote_name` from the device's `/file`
+    root. Used for pulling /system/backup/save artefacts (binary .backup)
+    and /export output (.rsc) off the device.
+    """
+    import io
+
+    with _sftp_session(host, port, username, password) as sftp:
+        buf = io.BytesIO()
+        sftp.getfo(remote_name, buf)
+        return buf.getvalue()
+
+
+def _sftp_remove(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    remote_name: str,
+) -> None:
+    """Blocking SFTP remove — must be called via asyncio.to_thread."""
+    with _sftp_session(host, port, username, password) as sftp:
+        try:
+            sftp.remove(remote_name)
+        except FileNotFoundError:
+            pass
+
+
+@contextmanager
+def _sftp_session(host: str, port: int, username: str, password: str):
+    """Open an SFTP session as a context manager. Closes both SFTP and the
+    underlying SSH transport cleanly even on exceptions."""
     import paramiko  # imported lazily so the rest of the driver still loads on hosts without it
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        hostname=host,
+        port=port,
+        username=username,
+        password=password,
+        timeout=15,
+        allow_agent=False,
+        look_for_keys=False,
+    )
     try:
-        client.connect(
-            hostname=host,
-            port=port,
-            username=username,
-            password=password,
-            timeout=15,
-            allow_agent=False,
-            look_for_keys=False,
-        )
         sftp = client.open_sftp()
         try:
-            sftp.put(local_path, remote_name)
+            yield sftp
         finally:
             sftp.close()
     finally:
@@ -1207,16 +1292,6 @@ def _to_bool(v: Any) -> bool:
     if v is None:
         return False
     return str(v).strip().lower() in ("true", "yes", "1")
-
-
-def _try_read_file(file_row: dict[str, Any]) -> bytes:
-    """Stub: librouteros doesn't ship binary file download. Returns the size-only sentinel."""
-    # TODO Phase 7: implement actual file download (sftp or /file/read pagination).
-    return b"# netfleet backup placeholder - actual binary download lands in Phase 7\n"
-
-
-def _try_read_file_text(file_row: dict[str, Any]) -> str:
-    return file_row.get("contents", "") if isinstance(file_row.get("contents"), str) else ""
 
 
 def _parse_uptime(s: str) -> int | None:
