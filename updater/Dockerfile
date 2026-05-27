@@ -1,9 +1,17 @@
+FROM docker:24-cli AS docker
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
+# Bring the Docker CLI + compose plugin in from the official alpine image
+# rather than pulling Debian's older 'docker.io' (which lacks `docker compose`).
+COPY --from=docker /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker /usr/libexec/docker/cli-plugins/docker-compose \
+                  /usr/libexec/docker/cli-plugins/docker-compose
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io postgresql-client curl ca-certificates tini \
+    postgresql-client curl ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -20,6 +20,7 @@ from app.api.v1 import (
     sites,
     system,
     tenants,
+    updates,
     users,
     vpn,
 )
@@ -47,6 +48,7 @@ router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(audit.router, prefix="/audit", tags=["audit"])
 router.include_router(settings_api.router, prefix="/settings", tags=["settings"])
+router.include_router(updates.router, prefix="/system/update", tags=["updates"])
 
 # Health is at the root of /api/v1 for easy probe endpoints
 router.add_api_route("/health", system.health, methods=["GET"], tags=["system"])

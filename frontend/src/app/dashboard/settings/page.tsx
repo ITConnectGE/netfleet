@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
@@ -22,7 +23,23 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="mt-8 max-w-3xl">
+      <div className="mt-8 max-w-3xl space-y-8">
+        <Link
+          href="/dashboard/settings/updates"
+          className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold">In-app updates</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Check for a newer NetFleet release and upgrade with one click. Pre-update
+                Postgres backup included.
+              </p>
+            </div>
+            <span className="text-sm text-primary">Open →</span>
+          </div>
+        </Link>
+
         <SmtpSection />
       </div>
     </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import { UpdateBanner } from "@/components/update-banner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fetchMe, logout, type UserPublic } from "@/lib/auth";
@@ -58,6 +59,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
+      <UpdateBanner />
       <header className="border-b border-border bg-card">
         <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center gap-6">
