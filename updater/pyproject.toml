@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netfleet-updater"
-version = "0.15.3"
+version = "0.15.4"
 description = "NetFleet — in-app updater service"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }

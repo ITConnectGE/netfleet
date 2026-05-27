@@ -1199,13 +1199,25 @@ def _sftp_get(
     Returns the binary contents of `remote_name` from the device's `/file`
     root. Used for pulling /system/backup/save artefacts (binary .backup)
     and /export output (.rsc) off the device.
+
+    RouterOS occasionally hasn't flushed the file by the time the API
+    returns from /system/backup/save; retry briefly on file-not-found.
     """
     import io
+    import time
 
     with _sftp_session(host, port, username, password) as sftp:
-        buf = io.BytesIO()
-        sftp.getfo(remote_name, buf)
-        return buf.getvalue()
+        last_err: Exception | None = None
+        for attempt in range(5):
+            try:
+                buf = io.BytesIO()
+                sftp.getfo(remote_name, buf)
+                return buf.getvalue()
+            except FileNotFoundError as e:
+                last_err = e
+                time.sleep(0.5 * (attempt + 1))  # 0.5s, 1.0s, 1.5s, 2.0s, 2.5s
+        assert last_err is not None
+        raise last_err
 
 
 def _sftp_remove(
@@ -1227,7 +1239,15 @@ def _sftp_remove(
 @contextmanager
 def _sftp_session(host: str, port: int, username: str, password: str):
     """Open an SFTP session as a context manager. Closes both SFTP and the
-    underlying SSH transport cleanly even on exceptions."""
+    underlying SSH transport cleanly even on exceptions.
+
+    RouterOS — especially 6.x and stripped-down 7.x builds — still uses
+    legacy SSH key + KEX algorithms (ssh-rsa with SHA-1, ssh-dss,
+    diffie-hellman-group1/14-sha1). Modern paramiko disables most of those
+    by default, producing an opaque "no matching host key type" failure.
+    We re-enable them here. The connection is still encrypted; we're only
+    relaxing the algorithm whitelist.
+    """
     import paramiko  # imported lazily so the rest of the driver still loads on hosts without it
 
     client = paramiko.SSHClient()
@@ -1240,6 +1260,9 @@ def _sftp_session(host: str, port: int, username: str, password: str):
         timeout=15,
         allow_agent=False,
         look_for_keys=False,
+        # Tell paramiko NOT to disable any algorithm. The default disables
+        # SHA-1-based variants that RouterOS still depends on.
+        disabled_algorithms={"pubkeys": [], "keys": [], "kex": []},
     )
     try:
         sftp = client.open_sftp()

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import {
   downloadBackupFile,
@@ -148,7 +148,8 @@ export default function BackupsPage() {
               </tr>
             )}
             {rows?.map((b) => (
-              <tr key={b.id} className="hover:bg-accent/30">
+              <Fragment key={b.id}>
+              <tr className="hover:bg-accent/30">
                 <td className="px-3 py-2 font-mono text-xs">
                   {new Date(b.ts).toLocaleString()}
                 </td>
@@ -169,10 +170,7 @@ export default function BackupsPage() {
                       ok
                     </span>
                   ) : (
-                    <span
-                      className="rounded-md bg-red-100 px-1.5 py-0.5 text-red-800"
-                      title={b.error_message ?? ""}
-                    >
+                    <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-red-800">
                       failed
                     </span>
                   )}
@@ -235,6 +233,15 @@ export default function BackupsPage() {
                   )}
                 </td>
               </tr>
+              {b.status === "failed" && b.error_message && (
+                <tr className="bg-red-50/50 dark:bg-red-950/20">
+                  <td colSpan={7} className="px-3 pb-2 text-[11px] text-destructive">
+                    <span className="font-medium">Error:</span>{" "}
+                    <span className="font-mono break-all">{b.error_message}</span>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
