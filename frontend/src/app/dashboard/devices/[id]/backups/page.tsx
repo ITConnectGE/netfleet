@@ -80,6 +80,24 @@ export default function BackupsPage() {
         </button>
       </div>
 
+      <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+        <p className="font-medium">SSH access required for files to reach NetFleet.</p>
+        <p className="mt-1 text-xs">
+          MikroTik&apos;s API can <em>create</em> a backup on the device, but the binary{" "}
+          <code>.backup</code> file (and Restore) only work when SSH is reachable on the
+          device — otherwise the backup lives on the router and never lands in the portal.
+        </p>
+        <p className="mt-1 text-xs">On the MikroTik:</p>
+        <pre className="mt-1 overflow-x-auto rounded bg-amber-100/70 p-2 font-mono text-[11px] dark:bg-amber-900/40">
+{`/ip service enable ssh
+/ip service set ssh address=<netfleet-server-ip>/32`}
+        </pre>
+        <p className="mt-1 text-xs">
+          The device user used by NetFleet also needs SSH login (RouterOS group{" "}
+          <code>full</code> already has it; custom groups need <code>policy=ssh</code>).
+        </p>
+      </div>
+
       {error && (
         <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {(error as Error).message}
