@@ -76,6 +76,7 @@ class MikrotikDriver:
         Capability.VPN_WIREGUARD_PEER,
         Capability.TOOL_PING,
         Capability.TOOL_TRACEROUTE,
+        Capability.SYSTEM_FIRMWARE,
         Capability.SECRET_REVEAL,
     }
 
@@ -500,7 +501,7 @@ class MikrotikDriver:
             params["secondary-ntp"] = secondary
         await self._call(creds, "/system/ntp/client/set", **params)
 
-    # ============== Firmware (check only — upgrade lands in Phase 8) ==============
+    # ============== Firmware ==============
 
     async def firmware_check_updates(
         self, creds: DeviceCredentials
@@ -537,6 +538,35 @@ class MikrotikDriver:
             status=u.get("status"),
             raw=u,
         )
+
+    async def firmware_upgrade(self, creds: DeviceCredentials) -> None:
+        """RouterOS: /system/package/update/install — downloads + installs +
+        reboots. The router will drop the connection mid-call; we suppress
+        that and treat it as success.
+        """
+        try:
+            await self._call(creds, "/system/package/update/install")
+        except Exception as e:
+            # Connection drops on install are normal — RouterOS reboots before
+            # the API can ack the command. Re-raise only if it looks like a
+            # real refusal (auth, "no update available", etc.).
+            msg = str(e).lower()
+            if any(s in msg for s in ("no update", "not allowed", "no permission", "auth")):
+                raise
+
+    async def firmware_routerboard_upgrade(self, creds: DeviceCredentials) -> None:
+        """/system/routerboard/upgrade then /system/reboot. Two-step because
+        the bootloader upgrade is applied at next boot."""
+        try:
+            await self._call(creds, "/system/routerboard/upgrade")
+        except Exception as e:
+            msg = str(e).lower()
+            if any(s in msg for s in ("not allowed", "no permission", "auth")):
+                raise
+        try:
+            await self._call(creds, "/system/reboot")
+        except Exception:
+            pass  # connection drop on reboot is expected
 
     # ============== NTP server (router as server) ==============
 

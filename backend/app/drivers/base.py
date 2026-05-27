@@ -49,6 +49,8 @@ class Capability(StrEnum):
     # Tooling
     TOOL_PING = "tool.ping"
     TOOL_TRACEROUTE = "tool.traceroute"
+    # Firmware
+    SYSTEM_FIRMWARE = "system.firmware"   # check + upgrade
     # Secret reveal — a special "execute" capability gating /secrets/reveal
     SECRET_REVEAL = "secret.reveal"
 
@@ -447,8 +449,18 @@ class VendorDriver(Protocol):
     # Bridge hosts
     async def bridge_hosts_list(self, creds: DeviceCredentials) -> list[BridgeHost]: ...
 
-    # Firmware (check only — upgrade lands in Phase 8)
+    # Firmware
     async def firmware_check_updates(self, creds: DeviceCredentials) -> FirmwareInfo: ...
+    async def firmware_upgrade(self, creds: DeviceCredentials) -> None:
+        """Download + install pending RouterOS update. The device will reboot.
+
+        Implementations should treat connection drops after triggering the
+        install as expected — the upgrade is now in the device's hands.
+        """
+        ...
+    async def firmware_routerboard_upgrade(self, creds: DeviceCredentials) -> None:
+        """Apply the pending RouterBOARD bootloader upgrade. Reboots the device."""
+        ...
 
     # Queues
     async def queue_simple_list(self, creds: DeviceCredentials) -> list[SimpleQueue]: ...

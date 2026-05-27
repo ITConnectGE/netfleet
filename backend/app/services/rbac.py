@@ -79,6 +79,8 @@ DRIVER_SECTIONS: dict[str, list[str]] = {
     # Tooling
     "tool.ping":                ["execute"],
     "tool.traceroute":          ["execute"],
+    # Firmware (check + upgrade)
+    "system.firmware":          ["read", "execute"],
     # Secret reveal — guards endpoints that expose plaintext credentials
     "secret.reveal":            ["execute"],
 }

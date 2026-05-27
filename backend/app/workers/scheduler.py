@@ -72,6 +72,25 @@ async def job_firmware_check(session: AsyncSession) -> None:
         )
 
 
+async def job_firmware_auto_upgrade(session: AsyncSession) -> None:
+    """Walk per-device auto-upgrade policy and trigger upgrades whose window
+    contains the current UTC hour. Devices that already have a pending
+    upgrade are skipped — the post-upgrade firmware-check will reconcile
+    pending→succeeded when the new version is installed."""
+    orgs = list((await session.execute(select(Organization))).scalars())
+    for org in orgs:
+        eligible, upgraded, failed = await firmware_svc.auto_upgrade_run(session, org.id)
+        await session.commit()
+        if eligible or upgraded or failed:
+            log.info(
+                "scheduler.firmware_auto_upgrade.done",
+                organization_id=str(org.id),
+                eligible=eligible,
+                upgraded=upgraded,
+                failed=failed,
+            )
+
+
 async def job_backup_retention(session: AsyncSession) -> None:
     """Apply retention to every org's backup history."""
     keep_days = int(os.environ.get("NETFLEET_BACKUP_RETENTION_DAYS", "30"))
@@ -103,6 +122,13 @@ JOBS: list[ScheduledJob] = [
         name="firmware-check",
         interval_seconds=int(os.environ.get("NETFLEET_FIRMWARE_INTERVAL_SECONDS", str(24 * 3600))),
         handler=job_firmware_check,
+    ),
+    ScheduledJob(
+        name="firmware-auto-upgrade",
+        # Hourly — so the per-device window can be acted on within the hour
+        # it opens. Devices outside the window are skipped cheaply.
+        interval_seconds=int(os.environ.get("NETFLEET_AUTO_UPGRADE_INTERVAL_SECONDS", str(3600))),
+        handler=job_firmware_auto_upgrade,
     ),
 ]
 

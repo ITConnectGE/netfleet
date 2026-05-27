@@ -89,6 +89,16 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     routerboard_current: Mapped[str | None] = mapped_column(String(64))
     routerboard_available: Mapped[str | None] = mapped_column(String(64))
 
+    # Auto-upgrade policy + last attempt outcome
+    auto_upgrade_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_upgrade_window_start_hour: Mapped[int | None] = mapped_column(Integer)
+    auto_upgrade_window_end_hour: Mapped[int | None] = mapped_column(Integer)
+    last_upgrade_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_upgrade_status: Mapped[str | None] = mapped_column(String(32))
+    last_upgrade_error: Mapped[str | None] = mapped_column(String(2048))
+    last_upgrade_from_version: Mapped[str | None] = mapped_column(String(64))
+    last_upgrade_to_version: Mapped[str | None] = mapped_column(String(64))
+
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(String(2048))
 
