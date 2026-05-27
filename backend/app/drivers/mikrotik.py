@@ -898,14 +898,20 @@ class MikrotikDriver:
         )
         try:
             cmd_parts = path.strip("/").split("/")
-            cmd = conn.path(*cmd_parts[:-1])
             verb = cmd_parts[-1]
+            cmd = conn.path(*cmd_parts[:-1])
             if verb == "print":
-                # Apply query filters (kwargs like ?name=foo)
+                # `print` filters arrive as keys prefixed with "?"; everything else
+                # (".proplist" etc.) is ignored for now.
                 if params:
                     return list(cmd.select(*[k.lstrip("?") for k in params if k.startswith("?")]))
                 return list(cmd)
-            return list(getattr(cmd, verb)(**params))
+            # librouteros 4.x's Path only exposes add/remove/update/select directly,
+            # so `cmd.save(...)` / `cmd.export(...)` / `cmd.set(...)` all blow up
+            # with AttributeError. The lower-level `Path.__call__(verb, **kwargs)`
+            # works for every RouterOS API verb and always returns dicts, so
+            # callers reading `rows[0]["ret"]` keep working too.
+            return list(cmd(verb, **params))
         finally:
             conn.close()
 
