@@ -8,10 +8,10 @@ export interface DateRange {
   ts_to: string;   // ISO
 }
 
-function range(params: DateRange & Record<string, string | undefined>) {
+function range(params: object): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== "") out[k] = v;
+  for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+    if (typeof v === "string" && v !== "") out[k] = v;
   }
   return out;
 }
