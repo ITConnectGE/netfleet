@@ -18,10 +18,12 @@ from app.drivers.base import (
     BackupArtifact,
     BridgeHost,
     Capability,
+    DeviceClock,
     DeviceCredentials,
     DeviceUser,
     DhcpLease,
     FilterRule,
+    FirmwareInfo,
     Interface,
     IpAddress,
     IpRoute,
@@ -29,6 +31,7 @@ from app.drivers.base import (
     LogEntry,
     NatRule,
     NtpClient,
+    NtpServer,
     PppSecret,
     SimpleQueue,
     SnmpCommunity,
@@ -495,6 +498,97 @@ class MikrotikDriver:
         if secondary is not None:
             params["secondary-ntp"] = secondary
         await self._call(creds, "/system/ntp/client/set", **params)
+
+    # ============== Firmware (check only — upgrade lands in Phase 8) ==============
+
+    async def firmware_check_updates(
+        self, creds: DeviceCredentials
+    ) -> FirmwareInfo:
+        """Trigger /system/package/update/check-for-updates then read the result.
+
+        Also pulls /system/routerboard/print so the UI knows if the bootloader
+        needs upgrading (the second-stage upgrade after RouterOS update).
+        """
+        try:
+            await self._call(creds, "/system/package/update/check-for-updates")
+        except Exception:
+            pass  # cached results are still useful
+
+        rows = await self._call(creds, "/system/package/update/print")
+        u = rows[0] if rows else {}
+
+        rb_current = None
+        rb_available = None
+        try:
+            rb_rows = await self._call(creds, "/system/routerboard/print")
+            rb = rb_rows[0] if rb_rows else {}
+            rb_current = rb.get("current-firmware")
+            rb_available = rb.get("upgrade-firmware")
+        except Exception:
+            pass
+
+        return FirmwareInfo(
+            current_version=u.get("installed-version"),
+            available_version=u.get("latest-version"),
+            channel=u.get("channel"),
+            routerboard_current=rb_current,
+            routerboard_available=rb_available,
+            status=u.get("status"),
+            raw=u,
+        )
+
+    # ============== NTP server (router as server) ==============
+
+    async def ntp_server_get(self, creds: DeviceCredentials) -> NtpServer:
+        rows = await self._call(creds, "/system/ntp/server/print")
+        r = rows[0] if rows else {}
+        return NtpServer(
+            enabled=_to_bool(r.get("enabled")),
+            broadcast=_to_bool(r.get("broadcast")) if "broadcast" in r else None,
+            multicast=_to_bool(r.get("multicast")) if "multicast" in r else None,
+            manycast=_to_bool(r.get("manycast")) if "manycast" in r else None,
+            auth_key=r.get("auth-key"),
+            raw=r,
+        )
+
+    async def ntp_server_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        broadcast: bool | None = None,
+        multicast: bool | None = None,
+        manycast: bool | None = None,
+    ) -> None:
+        params: dict[str, Any] = {}
+        if enabled is not None:
+            params["enabled"] = "yes" if enabled else "no"
+        if broadcast is not None:
+            params["broadcast"] = "yes" if broadcast else "no"
+        if multicast is not None:
+            params["multicast"] = "yes" if multicast else "no"
+        if manycast is not None:
+            params["manycast"] = "yes" if manycast else "no"
+        await self._call(creds, "/system/ntp/server/set", **params)
+
+    # ============== Clock ==============
+
+    async def clock_get(self, creds: DeviceCredentials) -> DeviceClock:
+        rows = await self._call(creds, "/system/clock/print")
+        r = rows[0] if rows else {}
+        return DeviceClock(
+            time=r.get("time"),
+            date=r.get("date"),
+            time_zone_name=r.get("time-zone-name"),
+            time_zone_autodetect=(
+                _to_bool(r.get("time-zone-autodetect"))
+                if "time-zone-autodetect" in r
+                else None
+            ),
+            gmt_offset=r.get("gmt-offset"),
+            dst_active=_to_bool(r.get("dst-active")) if "dst-active" in r else None,
+            raw=r,
+        )
 
     # ============== SNMP ==============
 

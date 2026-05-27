@@ -12,6 +12,7 @@ from app.core.security import hash_password
 from app.models.device import Device
 from app.models.role import AssignmentScope, Role, RoleAssignment
 from app.models.site import Site
+from app.models.tenant import Tenant
 from app.models.user import AuthMethod, User
 from app.schemas.user import AssignmentCreate, UserCreate, UserUpdate
 
@@ -154,6 +155,19 @@ async def create_assignment(
     # Validate scope_id matches scope_type
     if payload.scope_type == AssignmentScope.ORGANIZATION:
         scope_id = None
+    elif payload.scope_type == AssignmentScope.TENANT:
+        if payload.scope_id is None:
+            raise InvalidScope("scope_id is required for TENANT scope")
+        ok = (
+            await session.execute(
+                select(Tenant.id).where(
+                    Tenant.id == payload.scope_id, Tenant.organization_id == organization_id
+                )
+            )
+        ).first()
+        if ok is None:
+            raise InvalidScope("tenant not found in this organization")
+        scope_id = payload.scope_id
     elif payload.scope_type == AssignmentScope.SITE:
         if payload.scope_id is None:
             raise InvalidScope("scope_id is required for SITE scope")
@@ -221,12 +235,16 @@ async def _resolve_scope_label(
         return None
     if scope_id is None:
         return None
+    if scope_type == AssignmentScope.TENANT:
+        return (
+            await session.execute(select(Tenant.name).where(Tenant.id == scope_id))
+        ).scalar_one_or_none()
     if scope_type == AssignmentScope.SITE:
-        site = (await session.execute(select(Site.name).where(Site.id == scope_id))).scalar_one_or_none()
-        return site
+        return (
+            await session.execute(select(Site.name).where(Site.id == scope_id))
+        ).scalar_one_or_none()
     if scope_type == AssignmentScope.DEVICE:
-        device = (
+        return (
             await session.execute(select(Device.name).where(Device.id == scope_id))
         ).scalar_one_or_none()
-        return device
     return None

@@ -13,10 +13,11 @@ from app.models.mixins import IdMixin, TableNameMixin, TimestampsMixin
 if TYPE_CHECKING:
     from app.models.device import Device
     from app.models.organization import Organization
+    from app.models.tenant import Tenant
 
 
 class Site(IdMixin, TimestampsMixin, TableNameMixin, Base):
-    """An MSP's client site — a grouping for devices and a scope for RBAC."""
+    """An MSP's client site — a physical location belonging to a tenant (the client)."""
 
     __tablename__ = "sites"
     __table_args__ = (UniqueConstraint("organization_id", "slug", name="uq_sites_org_slug"),)
@@ -24,6 +25,12 @@ class Site(IdMixin, TimestampsMixin, TableNameMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -36,6 +43,7 @@ class Site(IdMixin, TimestampsMixin, TableNameMixin, Base):
     notes: Mapped[str | None] = mapped_column(String(2048))
 
     organization: Mapped[Organization] = relationship("Organization")
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="sites")
     devices: Mapped[list[Device]] = relationship(
         "Device",
         back_populates="site",

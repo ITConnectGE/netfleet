@@ -9,6 +9,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.role import AssignmentScope, Permission, PermissionAction, Role, RoleAssignment
 from app.models.secret_audit import SecretKind, SecretReveal, SecretRotation
 from app.models.site import Site
+from app.models.tenant import Tenant
 from app.models.user import AuthMethod, User
 
 __all__ = [
@@ -33,5 +34,6 @@ __all__ = [
     "SecretReveal",
     "SecretRotation",
     "Site",
+    "Tenant",
     "User",
 ]

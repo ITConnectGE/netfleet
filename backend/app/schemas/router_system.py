@@ -24,6 +24,30 @@ class NtpClientUpdate(BaseModel):
     secondary: str | None = Field(default=None, max_length=64)
 
 
+class NtpServerPublic(BaseModel):
+    enabled: bool
+    broadcast: bool | None
+    multicast: bool | None
+    manycast: bool | None
+    auth_key: str | None
+
+
+class NtpServerUpdate(BaseModel):
+    enabled: bool | None = None
+    broadcast: bool | None = None
+    multicast: bool | None = None
+    manycast: bool | None = None
+
+
+class DeviceClockPublic(BaseModel):
+    time: str | None
+    date: str | None
+    time_zone_name: str | None
+    time_zone_autodetect: bool | None
+    gmt_offset: str | None
+    dst_active: bool | None
+
+
 # ---------------- SNMP ----------------
 
 

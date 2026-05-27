@@ -18,8 +18,11 @@ from app.drivers.base import SnmpCommunity as DriverSnmpCommunity
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.router_system import (
+    DeviceClockPublic,
     NtpClientPublic,
     NtpClientUpdate,
+    NtpServerPublic,
+    NtpServerUpdate,
     SnmpCommunityCreate,
     SnmpCommunityPublic,
     SnmpPublic,
@@ -103,6 +106,88 @@ async def update_ntp(
         request_payload=payload.model_dump(exclude_unset=True),
     )
     await session.commit()
+
+
+# ---------------- NTP server (router serving time) ----------------
+
+
+@router.get("/{device_id}/ntp-server", response_model=NtpServerPublic)
+async def get_ntp_server(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> NtpServerPublic:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        s = await get_driver(device.vendor).ntp_server_get(_to_driver_creds(device))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return NtpServerPublic(
+        enabled=s.enabled,
+        broadcast=s.broadcast,
+        multicast=s.multicast,
+        manycast=s.manycast,
+        auth_key=s.auth_key,
+    )
+
+
+@router.patch("/{device_id}/ntp-server", status_code=status.HTTP_204_NO_CONTENT)
+async def update_ntp_server(
+    device_id: UUID,
+    payload: NtpServerUpdate,
+    request: Request,
+    user: User = Depends(require_permission("system.info", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).ntp_server_set(
+            _to_driver_creds(device),
+            enabled=payload.enabled,
+            broadcast=payload.broadcast,
+            multicast=payload.multicast,
+            manycast=payload.manycast,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.ntp",
+        action="update_server",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(exclude_unset=True),
+    )
+    await session.commit()
+
+
+# ---------------- Device clock (read-only) ----------------
+
+
+@router.get("/{device_id}/clock", response_model=DeviceClockPublic)
+async def get_device_clock(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> DeviceClockPublic:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        c = await get_driver(device.vendor).clock_get(_to_driver_creds(device))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return DeviceClockPublic(
+        time=c.time,
+        date=c.date,
+        time_zone_name=c.time_zone_name,
+        time_zone_autodetect=c.time_zone_autodetect,
+        gmt_offset=c.gmt_offset,
+        dst_active=c.dst_active,
+    )
 
 
 # ---------------- SNMP ----------------

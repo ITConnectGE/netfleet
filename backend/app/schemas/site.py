@@ -16,7 +16,7 @@ class SiteBase(BaseModel):
 
 
 class SiteCreate(SiteBase):
-    pass
+    tenant_id: UUID
 
 
 class SiteUpdate(BaseModel):
@@ -25,11 +25,14 @@ class SiteUpdate(BaseModel):
     contact_email: EmailStr | None = None
     contact_phone: str | None = Field(default=None, max_length=64)
     notes: str | None = Field(default=None, max_length=2048)
+    tenant_id: UUID | None = None
 
 
 class SitePublic(SiteBase):
     id: UUID
     organization_id: UUID
+    tenant_id: UUID
+    tenant_name: str | None = None
     device_count: int = 0
     created_at: datetime
     updated_at: datetime

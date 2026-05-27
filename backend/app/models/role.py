@@ -24,6 +24,7 @@ class PermissionAction(StrEnum):
 
 class AssignmentScope(StrEnum):
     ORGANIZATION = "organization"
+    TENANT = "tenant"
     SITE = "site"
     DEVICE = "device"
 

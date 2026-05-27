@@ -16,6 +16,30 @@ export interface NtpUpdate {
   secondary?: string | null;
 }
 
+export interface NtpServer {
+  enabled: boolean;
+  broadcast: boolean | null;
+  multicast: boolean | null;
+  manycast: boolean | null;
+  auth_key: string | null;
+}
+
+export interface NtpServerUpdate {
+  enabled?: boolean;
+  broadcast?: boolean;
+  multicast?: boolean;
+  manycast?: boolean;
+}
+
+export interface DeviceClock {
+  time: string | null;
+  date: string | null;
+  time_zone_name: string | null;
+  time_zone_autodetect: boolean | null;
+  gmt_offset: string | null;
+  dst_active: boolean | null;
+}
+
 export interface SnmpSettings {
   enabled: boolean;
   contact: string | null;
@@ -60,6 +84,24 @@ export async function updateNtp(deviceId: string, payload: NtpUpdate): Promise<v
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }
+}
+
+export async function getNtpServer(deviceId: string): Promise<NtpServer> {
+  return api.get(`devices/${deviceId}/ntp-server`).json<NtpServer>();
+}
+export async function updateNtpServer(
+  deviceId: string,
+  payload: NtpServerUpdate,
+): Promise<void> {
+  try {
+    await api.patch(`devices/${deviceId}/ntp-server`, { json: payload });
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function getDeviceClock(deviceId: string): Promise<DeviceClock> {
+  return api.get(`devices/${deviceId}/clock`).json<DeviceClock>();
 }
 
 export async function getSnmp(deviceId: string): Promise<SnmpSettings> {

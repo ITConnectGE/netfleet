@@ -7,12 +7,17 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   createSnmpCommunity,
   deleteSnmpCommunity,
+  getDeviceClock,
   getNtp,
+  getNtpServer,
   getSnmp,
   listSnmpCommunities,
   updateNtp,
+  updateNtpServer,
   updateSnmp,
+  type DeviceClock,
   type NtpClient,
+  type NtpServer,
   type SnmpCommunity,
   type SnmpSettings,
 } from "@/lib/router-system";
@@ -23,7 +28,9 @@ export default function SystemPage() {
 
   return (
     <div className="space-y-10">
+      <ClockCard deviceId={deviceId} />
       <NtpSection deviceId={deviceId} />
+      <NtpServerSection deviceId={deviceId} />
       <SnmpSection deviceId={deviceId} />
       <SnmpCommunitiesSection deviceId={deviceId} />
     </div>
@@ -531,3 +538,218 @@ function Field({
 
 const input =
   "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+
+// ---------------- Device clock ----------------
+
+function ClockCard({ deviceId }: { deviceId: string }) {
+  const { data, isLoading, error, refetch, dataUpdatedAt } = useQuery<DeviceClock>({
+    queryKey: ["clock", deviceId],
+    queryFn: () => getDeviceClock(deviceId),
+    refetchInterval: 10_000,
+  });
+
+  return (
+    <section>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Device time</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Live from the router. Auto-refreshes every 10 seconds — large drift here means
+            NTP isn&apos;t reaching the device.
+          </p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="rounded-md border border-input bg-background px-3 py-1.5 text-xs hover:bg-accent"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(error as Error).message}
+        </div>
+      )}
+
+      <div className="mt-4 rounded-lg border border-border bg-card p-5">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <KV label="Time">
+              <span className="font-mono text-2xl tabular-nums">
+                {data?.time ?? "—"}
+              </span>
+            </KV>
+            <KV label="Date">
+              <span className="font-mono">{data?.date ?? "—"}</span>
+            </KV>
+            <KV label="Timezone">
+              <span className="font-mono text-sm">
+                {data?.time_zone_name ?? "—"}
+                {data?.gmt_offset && (
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    ({data.gmt_offset})
+                  </span>
+                )}
+                {data?.time_zone_autodetect && (
+                  <span className="ml-1 text-[10px] uppercase text-muted-foreground">
+                    auto
+                  </span>
+                )}
+              </span>
+            </KV>
+            <KV label="DST">
+              {data?.dst_active === null || data?.dst_active === undefined ? (
+                <span className="text-muted-foreground">—</span>
+              ) : data.dst_active ? (
+                <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-900">
+                  active
+                </span>
+              ) : (
+                <span className="text-muted-foreground">off</span>
+              )}
+            </KV>
+          </div>
+        )}
+        {dataUpdatedAt > 0 && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            updated {new Date(dataUpdatedAt).toLocaleTimeString()}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function KV({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+// ---------------- NTP server ----------------
+
+function NtpServerSection({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<NtpServer>({
+    queryKey: ["ntp-server", deviceId],
+    queryFn: () => getNtpServer(deviceId),
+  });
+
+  const [enabled, setEnabled] = useState(false);
+  const [broadcast, setBroadcast] = useState(false);
+  const [multicast, setMulticast] = useState(false);
+  const [manycast, setManycast] = useState(false);
+  const [done, setDone] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (data) {
+      setEnabled(data.enabled);
+      setBroadcast(Boolean(data.broadcast));
+      setMulticast(Boolean(data.multicast));
+      setManycast(Boolean(data.manycast));
+    }
+  }, [data]);
+
+  const m = useMutation({
+    mutationFn: () =>
+      updateNtpServer(deviceId, { enabled, broadcast, multicast, manycast }),
+    onSuccess: () => {
+      setDone(true);
+      qc.invalidateQueries({ queryKey: ["ntp-server", deviceId] });
+      setTimeout(() => setDone(false), 3000);
+    },
+    onError: (e: Error) => setErrMsg(e.message),
+  });
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold">NTP server</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Let other devices on the LAN sync their clock from this router. Enable only one of
+        broadcast/multicast/manycast depending on your network design — leave them all off
+        for plain unicast service.
+      </p>
+
+      {errMsg && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errMsg}
+        </div>
+      )}
+      {done && (
+        <div className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          NTP server settings updated.
+        </div>
+      )}
+
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          setErrMsg(null);
+          m.mutate();
+        }}
+        className="mt-4 rounded-lg border border-border bg-card p-5"
+      >
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="size-4 rounded"
+            disabled={isLoading}
+          />
+          NTP server enabled
+        </label>
+
+        <div className="mt-4 flex flex-wrap gap-6 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={broadcast}
+              onChange={(e) => setBroadcast(e.target.checked)}
+              className="size-4 rounded"
+              disabled={isLoading || !enabled}
+            />
+            broadcast
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={multicast}
+              onChange={(e) => setMulticast(e.target.checked)}
+              className="size-4 rounded"
+              disabled={isLoading || !enabled}
+            />
+            multicast
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={manycast}
+              onChange={(e) => setManycast(e.target.checked)}
+              className="size-4 rounded"
+              disabled={isLoading || !enabled}
+            />
+            manycast
+          </label>
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <button
+            type="submit"
+            disabled={m.isPending || isLoading}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+          >
+            {m.isPending ? "Saving…" : "Save NTP server settings"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}

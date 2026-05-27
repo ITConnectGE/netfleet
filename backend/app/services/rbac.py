@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.device import Device
 from app.models.role import AssignmentScope, Permission, Role, RoleAssignment
+from app.models.site import Site
 from app.models.user import User
 
 log = structlog.get_logger(__name__)
@@ -33,6 +34,7 @@ log = structlog.get_logger(__name__)
 #
 # "Application" sections — what the platform itself controls.
 APP_SECTIONS: dict[str, list[str]] = {
+    "tenants": ["read", "write"],
     "sites": ["read", "write"],
     "devices": ["read", "write", "execute"],   # execute = test_connection / reboot
     "users": ["read", "write"],
@@ -95,14 +97,17 @@ async def can(
     *,
     device_id: UUID | None = None,
     site_id: UUID | None = None,
+    tenant_id: UUID | None = None,
 ) -> bool:
     """Return True if the user is permitted to do (section, action) in scope."""
     if user.is_admin:
         return True
 
-    # Resolve site_id from device_id when needed (to match site-scoped roles)
+    # Walk the chain: device → site → tenant. Resolve missing rungs.
     if device_id is not None and site_id is None:
         site_id = await _site_for_device(session, device_id)
+    if site_id is not None and tenant_id is None:
+        tenant_id = await _tenant_for_site(session, site_id)
 
     stmt = (
         select(RoleAssignment)
@@ -112,7 +117,7 @@ async def can(
     assignments = list((await session.execute(stmt)).scalars())
 
     for a in assignments:
-        if not _scope_matches(a, device_id=device_id, site_id=site_id):
+        if not _scope_matches(a, device_id=device_id, site_id=site_id, tenant_id=tenant_id):
             continue
         if _role_grants(a.role, section, action):
             return True
@@ -128,9 +133,18 @@ async def require(
     *,
     device_id: UUID | None = None,
     site_id: UUID | None = None,
+    tenant_id: UUID | None = None,
 ) -> None:
     """Permission check that raises PermissionError on denial — caller maps to 403."""
-    if not await can(session, user, section, action, device_id=device_id, site_id=site_id):
+    if not await can(
+        session,
+        user,
+        section,
+        action,
+        device_id=device_id,
+        site_id=site_id,
+        tenant_id=tenant_id,
+    ):
         raise PermissionError(f"denied: {section}:{action}")
 
 
@@ -142,9 +156,12 @@ def _scope_matches(
     *,
     device_id: UUID | None,
     site_id: UUID | None,
+    tenant_id: UUID | None,
 ) -> bool:
     if assignment.scope_type == AssignmentScope.ORGANIZATION:
         return True
+    if assignment.scope_type == AssignmentScope.TENANT:
+        return tenant_id is not None and assignment.scope_id == tenant_id
     if assignment.scope_type == AssignmentScope.SITE:
         return site_id is not None and assignment.scope_id == site_id
     if assignment.scope_type == AssignmentScope.DEVICE:
@@ -163,6 +180,11 @@ def _role_grants(role: Role, section: str, action: str) -> bool:
 
 async def _site_for_device(session: AsyncSession, device_id: UUID) -> UUID | None:
     stmt = select(Device.site_id).where(Device.id == device_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def _tenant_for_site(session: AsyncSession, site_id: UUID) -> UUID | None:
+    stmt = select(Site.tenant_id).where(Site.id == site_id)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

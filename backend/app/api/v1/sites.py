@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, get_current_user, require_permission
@@ -13,21 +13,25 @@ from app.models.user import User
 from app.schemas.site import SiteCreate, SitePublic, SiteUpdate
 from app.services import audit as audit_svc
 from app.services import site as site_svc
+from app.services import tenant as tenant_svc
 
 router = APIRouter()
 
 
-def _to_public(site, device_count: int = 0) -> SitePublic:
-    return SitePublic.model_validate({**site.__dict__, "device_count": device_count})
+def _to_public(site, tenant_name: str | None = None, device_count: int = 0) -> SitePublic:
+    return SitePublic.model_validate(
+        {**site.__dict__, "tenant_name": tenant_name, "device_count": device_count}
+    )
 
 
 @router.get("", response_model=list[SitePublic])
 async def list_sites(
+    tenant_id: UUID | None = Query(default=None),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(db_session),
 ) -> list[SitePublic]:
-    items = await site_svc.list_sites(session, user.organization_id)
-    return [_to_public(s, c) for s, c in items]
+    items = await site_svc.list_sites(session, user.organization_id, tenant_id=tenant_id)
+    return [_to_public(s, tname, c) for s, tname, c in items]
 
 
 @router.post("", response_model=SitePublic, status_code=status.HTTP_201_CREATED)
@@ -41,6 +45,8 @@ async def create_site(
         site = await site_svc.create_site(session, user.organization_id, payload)
     except site_svc.SiteSlugTaken as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except tenant_svc.TenantNotFound as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     await audit_svc.write_audit(
         session,
@@ -55,7 +61,7 @@ async def create_site(
         request_payload=payload.model_dump(),
     )
     await session.commit()
-    return _to_public(site, 0)
+    return _to_public(site, None, 0)
 
 
 @router.get("/{site_id}", response_model=SitePublic)

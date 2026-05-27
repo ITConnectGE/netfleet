@@ -257,6 +257,31 @@ class NtpClient:
 
 
 @dataclass(slots=True)
+class NtpServer:
+    """RouterOS /system/ntp/server (singleton — router acting as NTP server)."""
+
+    enabled: bool
+    broadcast: bool | None = None
+    multicast: bool | None = None
+    manycast: bool | None = None
+    auth_key: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DeviceClock:
+    """Current device time as reported by /system/clock/print."""
+
+    time: str | None                       # e.g. "12:34:56"
+    date: str | None                       # e.g. "may/27/2026" (RouterOS format)
+    time_zone_name: str | None
+    time_zone_autodetect: bool | None
+    gmt_offset: str | None                 # e.g. "+04:00"
+    dst_active: bool | None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SnmpSettings:
     """RouterOS /snmp (singleton)."""
 
@@ -454,6 +479,19 @@ class VendorDriver(Protocol):
         primary: str | None = None,
         secondary: str | None = None,
     ) -> None: ...
+    async def ntp_server_get(self, creds: DeviceCredentials) -> NtpServer: ...
+    async def ntp_server_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        enabled: bool | None = None,
+        broadcast: bool | None = None,
+        multicast: bool | None = None,
+        manycast: bool | None = None,
+    ) -> None: ...
+
+    # Clock
+    async def clock_get(self, creds: DeviceCredentials) -> DeviceClock: ...
 
     # SNMP
     async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings: ...

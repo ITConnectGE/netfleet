@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models.organization import Organization
+from app.models.tenant import Tenant
 from app.models.user import AuthMethod, User
 from app.schemas.auth import SetupRequest
 from app.services.rbac import seed_system_roles
@@ -51,5 +52,16 @@ async def perform_setup(session: AsyncSession, payload: SetupRequest) -> tuple[O
 
     # Seed the built-in roles for this organization (viewer / operator).
     await seed_system_roles(session, org.id)
+
+    # Auto-create a "Default" tenant so the MSP can start adding sites right away.
+    session.add(
+        Tenant(
+            organization_id=org.id,
+            name="Default",
+            slug="default",
+            description="Auto-created at first-run setup. Rename or split into more tenants any time.",
+        )
+    )
+    await session.flush()
 
     return org, admin
