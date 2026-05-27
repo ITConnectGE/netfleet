@@ -13,6 +13,7 @@ from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.logging import configure_logging
+from app.core.middleware import RequestIdMiddleware, unhandled_exception_handler
 
 configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
 log = structlog.get_logger()
@@ -53,6 +54,14 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.ENV == "production",
 )
+
+# Request-id + structlog binding. Outermost so the id is bound for every
+# subsequent middleware and handler.
+app.add_middleware(RequestIdMiddleware)
+
+# Catch-all for anything an endpoint forgets to handle — turns opaque 500s
+# into a structured log line + a JSON body carrying the request_id.
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(v1_router, prefix="/api/v1")
 

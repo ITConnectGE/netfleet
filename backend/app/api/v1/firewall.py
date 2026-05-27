@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+log = structlog.get_logger(__name__)
 
 from app.api.dependencies import (
     client_ip,
@@ -44,28 +47,45 @@ async def list_filter(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except fw_svc.OperationError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [
-        FilterRulePublic(
-            id=r.id,
-            chain=r.chain,
-            action=r.action,
-            src_address=r.src_address,
-            dst_address=r.dst_address,
-            src_address_list=r.src_address_list,
-            dst_address_list=r.dst_address_list,
-            protocol=r.protocol,
-            src_port=r.src_port,
-            dst_port=r.dst_port,
-            in_interface=r.in_interface,
-            out_interface=r.out_interface,
-            connection_state=r.connection_state,
-            log=r.log,
-            log_prefix=r.log_prefix,
-            disabled=r.disabled,
-            comment=r.comment,
-        )
-        for r in items
-    ]
+
+    out: list[FilterRulePublic] = []
+    for r in items:
+        try:
+            out.append(
+                FilterRulePublic(
+                    id=r.id,
+                    chain=r.chain,
+                    action=r.action,
+                    src_address=r.src_address,
+                    dst_address=r.dst_address,
+                    src_address_list=r.src_address_list,
+                    dst_address_list=r.dst_address_list,
+                    protocol=r.protocol,
+                    src_port=r.src_port,
+                    dst_port=r.dst_port,
+                    in_interface=r.in_interface,
+                    out_interface=r.out_interface,
+                    connection_state=r.connection_state,
+                    log=r.log,
+                    log_prefix=r.log_prefix,
+                    disabled=r.disabled,
+                    comment=r.comment,
+                )
+            )
+        except Exception as e:
+            # Surface bad RouterOS payloads as 502 with the offending row,
+            # rather than letting the validator raise an opaque 500.
+            log.warning(
+                "firewall.filter.row_invalid",
+                device_id=str(device_id),
+                error=str(e),
+                row=r.raw,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Unexpected firewall filter row from device: {e}",
+            ) from e
+    return out
 
 
 @router.post(
