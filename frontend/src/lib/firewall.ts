@@ -46,7 +46,11 @@ export interface LogEntry {
 }
 
 export async function listFilterRules(deviceId: string): Promise<FilterRule[]> {
-  return api.get(`devices/${deviceId}/firewall/filter`).json<FilterRule[]>();
+  try {
+    return await api.get(`devices/${deviceId}/firewall/filter`).json<FilterRule[]>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
 
 export async function createFilterRule(
@@ -91,5 +95,9 @@ export async function listLogs(
   const searchParams: Record<string, string> = {};
   if (options.topics) searchParams.topics = options.topics;
   if (options.limit) searchParams.limit = String(options.limit);
-  return api.get(`devices/${deviceId}/logs`, { searchParams }).json<LogEntry[]>();
+  try {
+    return await api.get(`devices/${deviceId}/logs`, { searchParams }).json<LogEntry[]>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
