@@ -14,6 +14,7 @@ from app.api.dependencies import (
     get_current_user,
     require_permission,
 )
+from app.drivers import get_driver
 from app.models.audit_log import AuditOutcome
 from app.models.device_backup import BackupSource
 from app.models.user import User
@@ -21,6 +22,7 @@ from app.schemas.backups import DeviceBackupPublic
 from app.services import audit as audit_svc
 from app.services import backups as backup_svc
 from app.services import device as device_svc
+from app.services.device import _to_driver_creds
 
 router = APIRouter()
 
@@ -140,3 +142,77 @@ async def download_backup_file(
 
     media = "application/octet-stream" if kind == "backup" else "text/plain"
     return FileResponse(path, filename=filename, media_type=media)
+
+
+@router.post(
+    "/{device_id}/backups/{backup_id}/restore",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def restore_backup(
+    device_id: UUID,
+    backup_id: UUID,
+    request: Request,
+    user: User = Depends(require_permission("system.backup", "execute")),
+    session: AsyncSession = Depends(db_session),
+) -> dict[str, object]:
+    """Upload a previously-taken .backup file to the device and run /system/backup/load.
+
+    The device reboots almost immediately after the load command; the API
+    connection drop is expected and treated as success.
+    """
+    rows = await backup_svc.list_history(
+        session, user.organization_id, device_id=device_id, limit=500
+    )
+    row = next((r for r in rows if r.id == backup_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="backup not found")
+    if not row.backup_filename:
+        raise HTTPException(
+            status_code=400, detail="this row has no .backup file (only .rsc)"
+        )
+
+    try:
+        local_path = backup_svc.backup_file_path(device_id, row.backup_filename)
+    except backup_svc.BackupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    try:
+        device = await device_svc.get_device(session, user.organization_id, device_id)
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    error_message: str | None = None
+    try:
+        await get_driver(device.vendor).system_restore(
+            _to_driver_creds(device),
+            local_backup_path=local_path,
+        )
+    except Exception as e:  # noqa: BLE001
+        error_message = str(e)
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.backup",
+        action="restore",
+        outcome=AuditOutcome.OK if error_message is None else AuditOutcome.FAILED,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"backup_id": str(backup_id), "filename": row.backup_filename},
+        error_message=error_message,
+    )
+    await session.commit()
+
+    if error_message is not None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"restore failed: {error_message}",
+        )
+
+    return {
+        "ok": True,
+        "filename": row.backup_filename,
+        "device_will_reboot": True,
+    }

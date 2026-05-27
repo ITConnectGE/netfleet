@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 
 import {
   downloadBackupFile,
   listDeviceBackups,
+  restoreBackup,
   triggerBackup,
   type DeviceBackup,
 } from "@/lib/backups";
@@ -25,6 +27,39 @@ export default function BackupsPage() {
     mutationFn: () => triggerBackup(deviceId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backups", deviceId] }),
   });
+
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreOk, setRestoreOk] = useState<string | null>(null);
+  const restore = useMutation({
+    mutationFn: (backupId: string) => restoreBackup(deviceId, backupId),
+    onMutate: (backupId) => {
+      setRestoringId(backupId);
+      setRestoreError(null);
+      setRestoreOk(null);
+    },
+    onSuccess: (r) => {
+      setRestoreOk(`Restore dispatched (${r.filename}). The device is rebooting now.`);
+      setRestoringId(null);
+    },
+    onError: (e: Error) => {
+      setRestoreError(e.message);
+      setRestoringId(null);
+    },
+  });
+
+  function onRestore(b: DeviceBackup) {
+    if (!b.backup_filename) return;
+    const ok = confirm(
+      `Restore "${b.backup_filename}" to this device?\n\n` +
+        `• The device will REBOOT immediately after the backup is applied.\n` +
+        `• Active sessions and traffic will be interrupted.\n` +
+        `• This action cannot be undone from the UI — only by restoring an older backup.\n\n` +
+        `Continue?`,
+    );
+    if (!ok) return;
+    restore.mutate(b.id);
+  }
 
   return (
     <div>
@@ -53,6 +88,16 @@ export default function BackupsPage() {
       {run.error && (
         <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {(run.error as Error).message}
+        </div>
+      )}
+      {restoreError && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Restore failed: {restoreError}
+        </div>
+      )}
+      {restoreOk && (
+        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          {restoreOk}
         </div>
       )}
 
@@ -158,6 +203,16 @@ export default function BackupsPage() {
                       className="ml-3 text-xs text-primary hover:underline"
                     >
                       .rsc
+                    </button>
+                  )}
+                  {b.backup_filename && b.status === "ok" && (
+                    <button
+                      onClick={() => onRestore(b)}
+                      disabled={restoringId !== null}
+                      className="ml-3 text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+                      title="Upload this .backup to the device and run /system/backup/load (device will reboot)"
+                    >
+                      {restoringId === b.id ? "Restoring…" : "Restore"}
                     </button>
                   )}
                 </td>

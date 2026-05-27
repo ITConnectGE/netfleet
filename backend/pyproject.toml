@@ -29,6 +29,7 @@ runtime = [
     "pyotp>=2.9",
     "cryptography>=43.0",
     "librouteros>=3.4",
+    "paramiko>=3.5",
     "structlog>=24.4",
     "python-multipart>=0.0.20",
     "email-validator>=2.2",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -970,6 +971,49 @@ class MikrotikDriver:
 
         return BackupArtifact(backup_bytes=backup_bytes, rsc_text=rsc_text, timestamp_iso=ts.isoformat())
 
+    async def system_restore(
+        self,
+        creds: DeviceCredentials,
+        *,
+        local_backup_path: Path,
+        ssh_port: int = 22,
+    ) -> None:
+        """Upload .backup over SFTP, trigger /system/backup/load. Device reboots."""
+        if not local_backup_path.is_file():
+            raise RuntimeError(f"local backup not found: {local_backup_path}")
+
+        remote_filename = local_backup_path.name
+        if not remote_filename.endswith(".backup"):
+            raise RuntimeError("backup file must have a .backup extension")
+        name_only = remote_filename.removesuffix(".backup")
+
+        # SSH/SFTP upload is blocking + uses a separate library — push it to a thread.
+        await asyncio.to_thread(
+            _sftp_put,
+            host=creds.host,
+            port=ssh_port,
+            username=creds.username,
+            password=creds.password or "",
+            local_path=str(local_backup_path),
+            remote_name=remote_filename,
+        )
+
+        # Fire the load command. The device starts rebooting almost immediately —
+        # the API connection drops mid-reply, which is expected. Wrap it in a
+        # short timeout so we don't hang on the closing socket.
+        try:
+            await asyncio.wait_for(
+                self._call(creds, "/system/backup/load", name=name_only),
+                timeout=8.0,
+            )
+        except (TimeoutError, OSError, Exception) as e:  # noqa: BLE001
+            log.info(
+                "mikrotik.backup_load_dispatched",
+                host=creds.host,
+                name=name_only,
+                drop_reason=type(e).__name__,
+            )
+
     # ============== transport ==============
 
     async def _call(
@@ -1011,6 +1055,44 @@ class MikrotikDriver:
 
 
 # ---------------- helpers ----------------
+
+
+def _sftp_put(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    local_path: str,
+    remote_name: str,
+) -> None:
+    """Blocking SFTP upload — must be called via asyncio.to_thread.
+
+    Files are dropped at the root of RouterOS's `/file` namespace (no subdirs
+    are supported there), so `remote_name` is just a basename like
+    ``netfleet-20260527-153012.backup``.
+    """
+    import paramiko  # imported lazily so the rest of the driver still loads on hosts without it
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            password=password,
+            timeout=15,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+        sftp = client.open_sftp()
+        try:
+            sftp.put(local_path, remote_name)
+        finally:
+            sftp.close()
+    finally:
+        client.close()
 
 
 def _row_to_filter_rule(r: dict[str, Any]) -> FilterRule:

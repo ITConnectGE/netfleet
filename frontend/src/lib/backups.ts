@@ -70,3 +70,24 @@ export async function downloadBackupFile(
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export interface RestoreResult {
+  ok: boolean;
+  filename: string;
+  device_will_reboot: boolean;
+}
+
+/** Upload .backup to the device via SFTP and trigger /system/backup/load.
+ *  RouterOS reboots immediately on success — surfacing as a connection drop. */
+export async function restoreBackup(
+  deviceId: string,
+  backupId: string,
+): Promise<RestoreResult> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/backups/${backupId}/restore`, { timeout: 60_000 })
+      .json<RestoreResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -572,3 +573,15 @@ class VendorDriver(Protocol):
 
     # Backup
     async def system_backup(self, creds: DeviceCredentials) -> BackupArtifact: ...
+    async def system_restore(
+        self,
+        creds: DeviceCredentials,
+        *,
+        local_backup_path: Path,
+        ssh_port: int = 22,
+    ) -> None:
+        """Restore a previously-taken backup. Implementations upload the file
+        out-of-band (SFTP/SCP) and trigger the vendor restore command. The
+        device is expected to reboot — callers should treat connection drops
+        right after this call as success."""
+        ...
