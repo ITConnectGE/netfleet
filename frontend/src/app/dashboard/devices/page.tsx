@@ -211,7 +211,7 @@ function DeviceForm({
             placeholder="Office CCR"
           />
         </Field>
-        <Field label="Site" htmlFor="d-site">
+        <Field label="Site" htmlFor="d-site" hint="grouped by tenant">
           <select
             id="d-site"
             required
@@ -219,10 +219,20 @@ function DeviceForm({
             onChange={(e) => setSiteId(e.target.value)}
             className={inputClass}
           >
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
+            {Object.entries(
+              sites.reduce<Record<string, Site[]>>((acc, s) => {
+                const key = s.tenant_name ?? "(no tenant)";
+                (acc[key] ||= []).push(s);
+                return acc;
+              }, {}),
+            ).map(([tenantName, list]) => (
+              <optgroup key={tenantName} label={tenantName}>
+                {list.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </Field>

@@ -9,6 +9,7 @@ import { RiskReportCard } from "@/components/risk-report-card";
 import { listDevices, type Device } from "@/lib/devices";
 import { listRoles, type Role } from "@/lib/roles";
 import { listSites, type Site } from "@/lib/sites";
+import { listTenants, type Tenant } from "@/lib/tenants";
 import {
   createAssignment,
   deleteAssignment,
@@ -37,7 +38,14 @@ export default function UserDetailPage() {
     enabled: Boolean(id),
   });
   const { data: roles } = useQuery<Role[]>({ queryKey: ["roles"], queryFn: listRoles });
-  const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: listSites });
+  const { data: tenants } = useQuery<Tenant[]>({
+    queryKey: ["tenants"],
+    queryFn: listTenants,
+  });
+  const { data: sites } = useQuery<Site[]>({
+    queryKey: ["sites"],
+    queryFn: () => listSites(),
+  });
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["devices"],
     queryFn: () => listDevices(),
@@ -143,8 +151,14 @@ export default function UserDetailPage() {
         </table>
       </div>
 
-      {roles && sites && devices && (
-        <AssignForm userId={id} roles={roles} sites={sites} devices={devices} />
+      {roles && tenants && sites && devices && (
+        <AssignForm
+          userId={id}
+          roles={roles}
+          tenants={tenants}
+          sites={sites}
+          devices={devices}
+        />
       )}
 
       <RiskReportCard userId={id} />
@@ -244,17 +258,21 @@ function ResetPasswordCard({ userId }: { userId: string }) {
 function AssignForm({
   userId,
   roles,
+  tenants,
   sites,
   devices,
 }: {
   userId: string;
   roles: Role[];
+  tenants: Tenant[];
   sites: Site[];
   devices: Device[];
 }) {
   const qc = useQueryClient();
   const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
-  const [scopeType, setScopeType] = useState<"organization" | "site" | "device">("organization");
+  const [scopeType, setScopeType] = useState<
+    "organization" | "tenant" | "site" | "device"
+  >("organization");
   const [scopeId, setScopeId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
@@ -273,11 +291,16 @@ function AssignForm({
   });
 
   const scopeOptions =
-    scopeType === "site"
-      ? sites.map((s) => ({ value: s.id, label: s.name }))
-      : scopeType === "device"
-        ? devices.map((d) => ({ value: d.id, label: d.name }))
-        : [];
+    scopeType === "tenant"
+      ? tenants.map((t) => ({ value: t.id, label: t.name }))
+      : scopeType === "site"
+        ? sites.map((s) => ({
+            value: s.id,
+            label: `${s.tenant_name ? `${s.tenant_name} · ` : ""}${s.name}`,
+          }))
+        : scopeType === "device"
+          ? devices.map((d) => ({ value: d.id, label: d.name }))
+          : [];
 
   return (
     <form
@@ -313,20 +336,25 @@ function AssignForm({
           <select
             value={scopeType}
             onChange={(e) => {
-              const v = e.target.value as "organization" | "site" | "device";
+              const v = e.target.value as "organization" | "tenant" | "site" | "device";
               setScopeType(v);
               setScopeId("");
             }}
             className={selectClass}
           >
             <option value="organization">organization (all)</option>
+            <option value="tenant">tenant</option>
             <option value="site">site</option>
             <option value="device">device</option>
           </select>
         </label>
         {scopeType !== "organization" && (
           <label className="space-y-1 text-xs font-medium text-muted-foreground md:col-span-2">
-            {scopeType === "site" ? "Site" : "Device"}
+            {scopeType === "tenant"
+              ? "Tenant"
+              : scopeType === "site"
+                ? "Site"
+                : "Device"}
             <select
               required
               value={scopeId}

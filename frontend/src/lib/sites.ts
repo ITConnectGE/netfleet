@@ -3,6 +3,8 @@ import { api, readErrorMessage } from "@/lib/api";
 export interface Site {
   id: string;
   organization_id: string;
+  tenant_id: string;
+  tenant_name: string | null;
   name: string;
   slug: string;
   address: string | null;
@@ -15,6 +17,7 @@ export interface Site {
 }
 
 export interface SiteCreate {
+  tenant_id: string;
   name: string;
   slug: string;
   address?: string | null;
@@ -23,10 +26,18 @@ export interface SiteCreate {
   notes?: string | null;
 }
 
-export type SiteUpdate = Partial<Omit<SiteCreate, "slug">>;
+export interface SiteUpdate {
+  name?: string;
+  address?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  notes?: string | null;
+  tenant_id?: string;
+}
 
-export async function listSites(): Promise<Site[]> {
-  return api.get("sites").json<Site[]>();
+export async function listSites(tenantId?: string): Promise<Site[]> {
+  const searchParams = tenantId ? { tenant_id: tenantId } : undefined;
+  return api.get("sites", { searchParams }).json<Site[]>();
 }
 
 export async function getSite(id: string): Promise<Site> {

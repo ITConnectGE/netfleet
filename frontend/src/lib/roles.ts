@@ -1,7 +1,7 @@
 import { api, readErrorMessage } from "@/lib/api";
 
 export type PermissionAction = "read" | "write" | "execute";
-export type AssignmentScope = "organization" | "site" | "device";
+export type AssignmentScope = "organization" | "tenant" | "site" | "device";
 
 export interface Permission {
   id: string;
