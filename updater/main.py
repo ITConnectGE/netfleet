@@ -31,13 +31,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = structlog.get_logger("netfleet.updater")
 
-CURRENT_VERSION = os.getenv("VERSION", "0.1.0")
-
 # Mounted by docker-compose; see the `updater:` service in docker-compose.yml.
 WORKDIR = Path(os.getenv("NETFLEET_WORKDIR", "/workdir"))
 BACKUPS_DIR = Path(os.getenv("NETFLEET_BACKUPS_DIR", "/backups"))
 COMPOSE_FILE = WORKDIR / "docker-compose.yml"
 ENV_FILE = WORKDIR / ".env"
+
+
+def _current_version() -> str:
+    """Always reflect the *deployed* image tag — the source of truth is the
+    VERSION line written into /workdir/.env by `_persist_version` after each
+    successful upgrade. Falls back to the env var (set by the host shell) and
+    finally to "unknown" so we never silently return a stale "0.1.0"."""
+    return _env_value("VERSION", os.getenv("VERSION", "unknown"))
 
 # Services we recreate on update (NEVER include 'updater' here — see module docstring)
 RECREATE_SERVICES = ["api", "worker", "web"]
@@ -315,7 +321,7 @@ def _require_token(x_internal_token: str = Header(default="")) -> None:
 # ---------------- App ----------------
 
 
-app = FastAPI(title="NetFleet Updater", version=CURRENT_VERSION)
+app = FastAPI(title="NetFleet Updater", version=_current_version())
 
 
 @app.get("/status", response_model=StatusResponse)
@@ -323,11 +329,12 @@ async def status() -> StatusResponse:
     available = await _check_latest_release()
     _state.available = available
     _state.last_checked_iso = datetime.now(UTC).isoformat()
+    current = _current_version()
     show_available = (
-        available if (available and available.lstrip("v") != CURRENT_VERSION.lstrip("v")) else None
+        available if (available and available.lstrip("v") != current.lstrip("v")) else None
     )
     return StatusResponse(
-        current=CURRENT_VERSION,
+        current=current,
         available=show_available,
         target_version=_state.target_version,
         channel=settings.UPDATE_CHANNEL,
@@ -363,4 +370,4 @@ async def trigger_update(req: UpdateRequest) -> dict[str, str]:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": CURRENT_VERSION}
+    return {"status": "ok", "version": _current_version()}

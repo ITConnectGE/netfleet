@@ -6,6 +6,11 @@ name: netfleet
 # ---------------------------------------------------------------
 
 x-api-env: &api-env
+  # VERSION is the deployed image tag (e.g. 0.13.2). The api/worker read this
+  # so /api/v1/health reports the actual running version instead of whatever
+  # __version__ happened to be in source at build time — those two can drift
+  # whenever a version bump merges before the next tagged release.
+  VERSION: ${VERSION:-latest}
   NETFLEET_ENV: ${NETFLEET_ENV:-production}
   NETFLEET_PUBLIC_URL: ${NETFLEET_PUBLIC_URL}
   NETFLEET_JWT_SECRET: ${NETFLEET_JWT_SECRET}
@@ -153,6 +158,9 @@ services:
       - /opt/netfleet:/workdir
       - /opt/netfleet/data/backups:/backups
     environment:
+      # See note on x-api-env above — the updater also reads VERSION from .env
+      # so the "Current version" pane on /settings/updates matches reality.
+      VERSION: ${VERSION:-latest}
       NETFLEET_UPDATER_TOKEN: ${NETFLEET_UPDATER_TOKEN}
       NETFLEET_UPDATE_CHANNEL: ${NETFLEET_UPDATE_CHANNEL:-stable}
       NETFLEET_GITHUB_REPO: ${NETFLEET_GITHUB_REPO:-ITConnectGE/netfleet}
