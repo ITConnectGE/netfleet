@@ -91,7 +91,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className={inputClass}
-                placeholder="you@itconnectge.ge"
+                placeholder="you@itconnect.ge"
                 autoComplete="email"
               />
             </Field>

@@ -15,9 +15,9 @@ official communication channels, and public events where an individual is repres
 
 If you witness or experience behavior that violates this Code of Conduct, please report it to:
 
-**conduct@itconnectge.ge**
+**conduct@itconnect.ge**
 
-Reports are reviewed promptly and confidentially by the ITConnectGE open-source team. We will not disclose
+Reports are reviewed promptly and confidentially by the ITConnect open-source team. We will not disclose
 the identity of a reporter without explicit consent.
 
 ## Enforcement

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netfleet-api"
-version = "0.15.2"
+version = "0.15.3"
 description = "NetFleet — multi-vendor network fleet management API"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
-authors = [{ name = "ITConnectGE", email = "opensource@itconnectge.ge" }]
+authors = [{ name = "ITConnect", email = "opensource@itconnect.ge" }]
 dependencies = []
 
 [project.optional-dependencies]

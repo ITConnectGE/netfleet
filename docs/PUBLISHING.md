@@ -43,7 +43,7 @@ On GitHub:
 
 ```bash
 git config user.name "Your Name"
-git config user.email "you@itconnectge.ge"
+git config user.email "you@itconnect.ge"
 
 git remote add origin git@github.com:ITConnectGE/netfleet.git
 # or HTTPS: git remote add origin https://github.com/ITConnectGE/netfleet.git

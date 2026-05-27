@@ -37,12 +37,12 @@ export default function LandingPage() {
         <footer className="mt-16 text-xs text-muted-foreground">
           An open-source project by{" "}
           <a
-            href="https://itconnectge.ge"
+            href="https://itconnect.ge"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 hover:underline"
           >
-            ITConnectGE
+            ITConnect
           </a>{" "}
           · Apache-2.0
         </footer>

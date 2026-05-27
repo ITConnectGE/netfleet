@@ -249,7 +249,7 @@ function SnmpSection({ deviceId }: { deviceId: string }) {
               value={contact}
               onChange={(e) => setContact(e.target.value)}
               className={input}
-              placeholder="noc@itconnectge.ge"
+              placeholder="noc@itconnect.ge"
               disabled={isLoading || !enabled}
             />
           </Field>

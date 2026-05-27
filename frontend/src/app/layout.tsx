@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   },
   description: "Multi-vendor network fleet management for MSPs.",
   applicationName: "NetFleet",
-  authors: [{ name: "ITConnectGE", url: "https://itconnectge.ge" }],
+  authors: [{ name: "ITConnect", url: "https://itconnect.ge" }],
   icons: { icon: "/favicon.ico" },
 };
 

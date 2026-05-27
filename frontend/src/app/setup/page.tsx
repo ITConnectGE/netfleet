@@ -123,7 +123,7 @@ export default function SetupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className={inputClass}
-              placeholder="admin@itconnectge.ge"
+              placeholder="admin@itconnect.ge"
               autoComplete="email"
             />
           </Field>
