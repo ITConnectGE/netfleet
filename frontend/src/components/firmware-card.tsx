@@ -54,91 +54,112 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
     data.routerboard_current &&
     data.routerboard_available !== data.routerboard_current;
 
+  function onUpgradeClick() {
+    const lines: string[] = [];
+    lines.push("What this will do:");
+    lines.push("");
+    lines.push(
+      `  • Install RouterOS ${data.available_version} (currently ${data.current_version ?? "?"}).`,
+    );
+    lines.push("  • Reboot the device to apply it (~3–5 min downtime).");
+
+    let includeRb = false;
+    if (rbUpgrade) {
+      includeRb = confirm(
+        `Also upgrade the RouterBOARD bootloader?\n\n` +
+          `  ${data.routerboard_current}  →  ${data.routerboard_available}\n\n` +
+          `The bootloader is the hardware-level firmware (separate from RouterOS).\n` +
+          `If you say Yes, the device will reboot ONE EXTRA TIME after the RouterOS\n` +
+          `upgrade to apply it — total downtime ~6–10 min.\n\n` +
+          `OK  = upgrade RouterOS + RouterBOARD (two reboots)\n` +
+          `Cancel = upgrade only RouterOS (single reboot)`,
+      );
+      if (includeRb) {
+        lines.push(
+          `  • Then upgrade RouterBOARD bootloader ${data.routerboard_current} → ${data.routerboard_available} and reboot again.`,
+        );
+      }
+    }
+
+    lines.push("");
+    lines.push(`Channel: ${data.channel ?? "stable"}`);
+    lines.push("");
+    lines.push("Recommended: take a Backup first (Backups tab → Backup now).");
+    lines.push("Active sessions and traffic through this device will be interrupted.");
+    lines.push("");
+    lines.push("Continue?");
+
+    if (confirm(lines.join("\n"))) {
+      upgrade.mutate({ include_routerboard: includeRb });
+    }
+  }
+
   return (
     <div
       className={`rounded-lg border p-5 ${
         needsUpgrade ? "border-amber-300 bg-amber-50/40" : "border-border bg-card"
       }`}
     >
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-medium text-muted-foreground">Firmware</h3>
-          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-            <span className="text-muted-foreground">RouterOS</span>
-            <span className="font-mono">
-              {data.current_version ?? "—"}
-              {data.available_version && data.available_version !== data.current_version && (
-                <>
-                  {" "}→{" "}
-                  <span className="font-semibold text-amber-900">
-                    {data.available_version}
-                  </span>
-                </>
-              )}
-            </span>
-            {data.routerboard_current && (
-              <>
-                <span className="text-muted-foreground">RouterBOARD</span>
-                <span className="font-mono">
-                  {data.routerboard_current}
-                  {rbUpgrade && (
-                    <>
-                      {" "}→{" "}
-                      <span className="font-semibold text-amber-900">
-                        {data.routerboard_available}
-                      </span>
-                    </>
-                  )}
-                </span>
-              </>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Firmware</h3>
+            {needsUpgrade ? (
+              <span className="rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
+                update available
+              </span>
+            ) : (
+              <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                up to date
+              </span>
             )}
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <FirmwareRow
+              label="RouterOS"
+              hint="The operating system running on the device."
+              installed={data.current_version}
+              available={data.available_version}
+              hasUpgrade={needsUpgrade}
+            />
+            {data.routerboard_current && (
+              <FirmwareRow
+                label="RouterBOARD"
+                hint="Bootloader firmware (separate from RouterOS — usually only updates after a major RouterOS jump)."
+                installed={data.routerboard_current}
+                available={data.routerboard_available}
+                hasUpgrade={Boolean(rbUpgrade)}
+              />
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
             <span className="text-muted-foreground">Channel</span>
-            <span className="font-mono text-xs">{data.channel ?? "—"}</span>
+            <span className="font-mono">{data.channel ?? "—"}</span>
             <span className="text-muted-foreground">Last checked</span>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground">
               {data.checked_at ? new Date(data.checked_at).toLocaleString() : "never"}
             </span>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          {needsUpgrade ? (
-            <span className="rounded-md bg-amber-200 px-2 py-1 text-xs font-medium text-amber-900">
-              update available
-            </span>
-          ) : (
-            <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">
-              up to date
-            </span>
-          )}
+
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex gap-1.5">
             <button
               onClick={() => recheck.mutate()}
               disabled={recheck.isPending}
               className="rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
             >
-              {recheck.isPending ? "Checking…" : "Check now"}
+              {recheck.isPending ? "Checking…" : "Check for updates"}
             </button>
             {needsUpgrade && (
               <button
-                onClick={() => {
-                  const rbAvailable = Boolean(rbUpgrade);
-                  const includeRb =
-                    rbAvailable &&
-                    confirm(
-                      "Also upgrade RouterBOARD bootloader? (adds a second reboot)",
-                    );
-                  if (
-                    confirm(
-                      `Trigger RouterOS upgrade ${data.current_version ?? "?"} → ${data.available_version}?\n\nThe device will reboot.`,
-                    )
-                  ) {
-                    upgrade.mutate({ include_routerboard: includeRb });
-                  }
-                }}
+                onClick={onUpgradeClick}
                 disabled={upgrade.isPending}
                 className="rounded-md border border-amber-400 bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
               >
-                {upgrade.isPending ? "Upgrading…" : "Upgrade now"}
+                {upgrade.isPending ? "Upgrading…" : "Upgrade…"}
               </button>
             )}
           </div>
@@ -195,6 +216,48 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
     </div>
   );
 }
+
+function FirmwareRow({
+  label,
+  hint,
+  installed,
+  available,
+  hasUpgrade,
+}: {
+  label: string;
+  hint: string;
+  installed: string | null | undefined;
+  available: string | null | undefined;
+  hasUpgrade: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border/70 bg-background/50 px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-[11px] text-muted-foreground">{hint}</span>
+      </div>
+      <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Installed</div>
+          <div className="font-mono">{installed ?? "—"}</div>
+        </div>
+        <div className="text-muted-foreground">→</div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {hasUpgrade ? "Available" : "Available"}
+          </div>
+          <div className={`font-mono ${hasUpgrade ? "font-semibold text-amber-900" : ""}`}>
+            {available ?? "—"}
+            {!hasUpgrade && available && installed === available && (
+              <span className="ml-2 text-[10px] font-normal text-emerald-700">(same)</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function UpgradeStatusPill({ status }: { status: "pending" | "succeeded" | "failed" }) {
   const cls =
