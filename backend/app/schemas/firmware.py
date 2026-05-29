@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -23,10 +24,27 @@ class FleetFirmwareSummary(BaseModel):
 
 
 class FirmwareUpgradeRequest(BaseModel):
-    """Caller opts in to RouterBOARD bootloader upgrade explicitly — it costs
-    a second reboot and isn't always needed."""
+    """Targets are independent so the UI can offer separate buttons:
 
+    - `routeros` (default): upgrade the RouterOS package only.
+    - `routerboard`: upgrade only the RouterBOARD bootloader. Useful when
+      RouterOS is already on the target version and only the bootloader
+      lags behind.
+    - `both`: upgrade RouterOS first, then the bootloader (two reboots).
+
+    The legacy `include_routerboard=true` request is still accepted and
+    treated as `target="both"`.
+    """
+
+    target: Literal["routeros", "routerboard", "both"] = "routeros"
     include_routerboard: bool = False
+
+    @model_validator(mode="after")
+    def _coerce_legacy_flag(self) -> "FirmwareUpgradeRequest":
+        if self.include_routerboard and self.target == "routeros":
+            # Caller used the old single-flag API: promote to "both".
+            object.__setattr__(self, "target", "both")
+        return self
 
 
 class FirmwareUpgradeResult(BaseModel):

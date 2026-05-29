@@ -128,7 +128,7 @@ async def trigger_firmware_upgrade(
             session,
             user.organization_id,
             device_id,
-            include_routerboard=payload.include_routerboard,
+            target=payload.target,
         )
     except device_svc.DeviceNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
@@ -158,7 +158,7 @@ async def trigger_firmware_upgrade(
         device_id=device_id,
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
-        request_payload={"include_routerboard": payload.include_routerboard},
+        request_payload={"target": payload.target},
         response_meta={
             "from": device.last_upgrade_from_version,
             "to": device.last_upgrade_to_version,

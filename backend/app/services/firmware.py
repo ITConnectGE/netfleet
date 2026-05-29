@@ -89,21 +89,41 @@ async def trigger_firmware_upgrade(
     organization_id: UUID,
     device_id: UUID,
     *,
+    target: str = "routeros",
     include_routerboard: bool = False,
 ) -> Device:
-    """Kick off the device's pending RouterOS upgrade. The device reboots.
+    """Kick off a firmware upgrade. The device reboots.
+
+    `target` selects which component to upgrade:
+      - ``"routeros"``  → RouterOS package only (default).
+      - ``"routerboard"`` → bootloader only (useful when the OS is already
+        on the target version and only the bootloader lags).
+      - ``"both"`` → RouterOS first, then the bootloader.
 
     We mark `last_upgrade_status='pending'` *before* the driver call. If the
     driver raises (auth refused, no update, etc.), we flip to 'failed' with
     the error. A successful trigger leaves the row at 'pending' because the
     actual install runs on the device — the next firmware-check after reboot
-    will reveal whether `firmware == last_upgrade_to_version`, at which point
+    reveals whether `firmware == last_upgrade_to_version`, at which point
     the next caller (or the auto-upgrade job) flips it to 'succeeded'.
     """
+    # Legacy shim: callers still passing include_routerboard=True implicitly
+    # mean target="both".
+    if include_routerboard and target == "routeros":
+        target = "both"
+    if target not in ("routeros", "routerboard", "both"):
+        raise FirmwareError(f"unknown upgrade target: {target!r}")
+
     device = await get_device(session, organization_id, device_id)
 
-    from_v = device.firmware
-    to_v = device.firmware_available
+    from_v: str | None
+    to_v: str | None
+    if target == "routerboard":
+        from_v = device.routerboard_current
+        to_v = device.routerboard_available
+    else:
+        from_v = device.firmware
+        to_v = device.firmware_available
 
     device.last_upgrade_triggered_at = datetime.now(UTC)
     device.last_upgrade_status = "pending"
@@ -115,16 +135,19 @@ async def trigger_firmware_upgrade(
     driver = get_driver(device.vendor)
     creds = _to_driver_creds(device)
     try:
-        await driver.firmware_upgrade(creds)
-        if include_routerboard and device.routerboard_available and (
-            device.routerboard_available != device.routerboard_current
-        ):
-            # Best-effort — RouterOS upgrade reboots first, so this often
-            # won't run synchronously. Caller can re-trigger after the box
-            # comes back if needed.
+        if target in ("routeros", "both"):
+            await driver.firmware_upgrade(creds)
+        if target in ("routerboard", "both"):
+            # In "both" the RouterOS upgrade reboots first and this often
+            # won't run synchronously; that's OK, the user re-runs after
+            # the box comes back. In "routerboard"-only it runs immediately.
             try:
                 await driver.firmware_routerboard_upgrade(creds)
             except Exception as e:
+                # Don't fail the whole call when running as a follow-up to
+                # RouterOS, but DO fail when this is the only requested op.
+                if target == "routerboard":
+                    raise
                 log.warning(
                     "firmware.routerboard_upgrade_failed",
                     device_id=str(device.id),

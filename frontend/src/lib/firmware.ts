@@ -57,14 +57,16 @@ export async function checkDeviceFirmware(deviceId: string): Promise<FirmwareSta
   }
 }
 
+export type FirmwareUpgradeTarget = "routeros" | "routerboard" | "both";
+
 export async function triggerFirmwareUpgrade(
   deviceId: string,
-  opts?: { include_routerboard?: boolean },
+  opts: { target: FirmwareUpgradeTarget },
 ): Promise<FirmwareUpgradeResult> {
   try {
     return await api
       .post(`devices/${deviceId}/firmware/upgrade`, {
-        json: { include_routerboard: opts?.include_routerboard ?? false },
+        json: { target: opts.target },
         timeout: 60_000,
       })
       .json<FirmwareUpgradeResult>();
