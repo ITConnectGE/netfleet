@@ -47,19 +47,23 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
   });
 
   if (isLoading || !data) return null;
+  // Local alias so the nested closures below get the narrowed (non-undefined)
+  // type — TypeScript doesn't propagate the `!data` narrow into the body of a
+  // nested function declaration that captures `data` by reference.
+  const fw = data;
 
-  const needsUpgrade = data.needs_upgrade;
+  const needsUpgrade = fw.needs_upgrade;
   const rbUpgrade =
-    data.routerboard_available &&
-    data.routerboard_current &&
-    data.routerboard_available !== data.routerboard_current;
+    fw.routerboard_available &&
+    fw.routerboard_current &&
+    fw.routerboard_available !== fw.routerboard_current;
 
   function onUpgradeClick() {
     const lines: string[] = [];
     lines.push("What this will do:");
     lines.push("");
     lines.push(
-      `  • Install RouterOS ${data.available_version} (currently ${data.current_version ?? "?"}).`,
+      `  • Install RouterOS ${fw.available_version} (currently ${fw.current_version ?? "?"}).`,
     );
     lines.push("  • Reboot the device to apply it (~3–5 min downtime).");
 
@@ -67,7 +71,7 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
     if (rbUpgrade) {
       includeRb = confirm(
         `Also upgrade the RouterBOARD bootloader?\n\n` +
-          `  ${data.routerboard_current}  →  ${data.routerboard_available}\n\n` +
+          `  ${fw.routerboard_current}  →  ${fw.routerboard_available}\n\n` +
           `The bootloader is the hardware-level firmware (separate from RouterOS).\n` +
           `If you say Yes, the device will reboot ONE EXTRA TIME after the RouterOS\n` +
           `upgrade to apply it — total downtime ~6–10 min.\n\n` +
@@ -76,13 +80,13 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
       );
       if (includeRb) {
         lines.push(
-          `  • Then upgrade RouterBOARD bootloader ${data.routerboard_current} → ${data.routerboard_available} and reboot again.`,
+          `  • Then upgrade RouterBOARD bootloader ${fw.routerboard_current} → ${fw.routerboard_available} and reboot again.`,
         );
       }
     }
 
     lines.push("");
-    lines.push(`Channel: ${data.channel ?? "stable"}`);
+    lines.push(`Channel: ${fw.channel ?? "stable"}`);
     lines.push("");
     lines.push("Recommended: take a Backup first (Backups tab → Backup now).");
     lines.push("Active sessions and traffic through this device will be interrupted.");
