@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { StatusPill } from "@/components/status-pill";
+import { downloadAuthed } from "@/lib/api";
 import {
   createDevice,
   getOnboardingScript,
@@ -463,13 +464,18 @@ function OnboardingPanel({
             >
               {copied ? "Copied!" : "Copy to clipboard"}
             </button>
-            <a
-              href={`/api/v1/devices/${deviceId}/onboarding-script`}
-              download={`netfleet-onboarding-${deviceName}.rsc`}
+            <button
+              type="button"
+              onClick={() =>
+                downloadAuthed(
+                  `/api/v1/devices/${deviceId}/onboarding-script`,
+                  `netfleet-onboarding-${deviceName}.rsc`,
+                ).catch((e: Error) => alert(`Download failed: ${e.message}`))
+              }
               className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
             >
               Download .rsc
-            </a>
+            </button>
           </div>
           <pre className="mt-3 max-h-[40vh] overflow-auto rounded-md border border-border bg-zinc-950 p-3 font-mono text-[11px] text-zinc-100">
 {script}
@@ -485,6 +491,44 @@ function OnboardingPanel({
             ; otherwise the whitelist line shows a placeholder you have to
             edit manually.
           </p>
+
+          <details className="mt-3 rounded-md border border-border bg-background/60 p-3 text-xs">
+            <summary className="cursor-pointer font-medium text-foreground">
+              How to apply this on the MikroTik
+            </summary>
+            <div className="mt-2 space-y-2 text-muted-foreground">
+              <p className="font-medium text-foreground">Option A — paste into terminal (simplest)</p>
+              <ol className="list-decimal space-y-0.5 pl-5">
+                <li>Open WinBox or WebFig and log in to the router.</li>
+                <li>Open <strong>New Terminal</strong> (or the SSH CLI).</li>
+                <li>Click <strong>Copy to clipboard</strong> above, then right-click → Paste into the terminal.</li>
+                <li>RouterOS runs each line as you paste. Done.</li>
+              </ol>
+              <p className="mt-2 font-medium text-foreground">
+                Option B — upload .rsc and <code>/import</code>
+              </p>
+              <ol className="list-decimal space-y-0.5 pl-5">
+                <li>Click <strong>Download .rsc</strong> above.</li>
+                <li>
+                  In WinBox open <strong>Files</strong>, drag the .rsc file into
+                  the file list (or upload via FTP / drop into <code>/file</code>
+                  via the WebFig <em>Files</em> tab).
+                </li>
+                <li>
+                  Open <strong>New Terminal</strong> and run:
+                  <pre className="mt-1 overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-[10px] text-zinc-100">
+{`/import file=netfleet-onboarding-${deviceId.slice(0, 8)}.rsc`}
+                  </pre>
+                </li>
+                <li>Watch for <code>Script file loaded and executed successfully</code>.</li>
+              </ol>
+              <p className="mt-2 text-[11px]">
+                If you mis-typed the password in the form, edit the{" "}
+                <code>password=</code> line at the top of the script before pasting.
+                The script is idempotent — safe to re-run.
+              </p>
+            </div>
+          </details>
         </>
       )}
     </div>

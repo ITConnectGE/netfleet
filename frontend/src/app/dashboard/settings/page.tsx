@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { downloadAuthed } from "@/lib/api";
 import {
   createSystemBackup,
   deleteSystemBackup,
@@ -150,13 +151,18 @@ function SystemBackupSection() {
                   {new Date(b.created_at).toLocaleString()}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <a
-                    href={`/api/v1/settings/system-backup/${encodeURIComponent(b.filename)}`}
-                    download={b.filename}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadAuthed(
+                        `/api/v1/settings/system-backup/${encodeURIComponent(b.filename)}`,
+                        b.filename,
+                      ).catch((e: Error) => alert(`Download failed: ${e.message}`))
+                    }
                     className="mr-3 text-xs text-primary hover:underline"
                   >
                     Download
-                  </a>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

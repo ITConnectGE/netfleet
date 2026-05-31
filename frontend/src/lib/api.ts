@@ -71,6 +71,37 @@ export function isHttpError(e: unknown): e is HTTPError {
   return e instanceof HTTPError;
 }
 
+/** Authenticated file download. <a href download> doesn't carry the
+ *  bearer token, so any /api/v1/* endpoint guarded by auth 401s before
+ *  the browser save dialog is even reached. Use this helper for every
+ *  downloadable file the API exposes — backups, onboarding scripts,
+ *  system bundles, CSV reports. */
+export async function downloadAuthed(
+  url: string,
+  fallbackFilename: string,
+): Promise<void> {
+  const token = authStorage.getAccessToken();
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`download failed: HTTP ${res.status}`);
+  }
+  const disp = res.headers.get("Content-Disposition") ?? "";
+  const match = disp.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? fallbackFilename;
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+
 export async function readErrorMessage(e: unknown): Promise<string> {
   if (isHttpError(e)) {
     try {
