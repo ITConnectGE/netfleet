@@ -74,14 +74,27 @@ export default function NetworkPage() {
 
 // ---------------- Neighbours ----------------
 
+const ALL_PROTOCOLS = ["cdp", "lldp", "mndp"] as const;
+type ProtocolKey = (typeof ALL_PROTOCOLS)[number];
+
+function parseProtocols(s: string | null): Set<ProtocolKey> {
+  if (!s) return new Set();
+  return new Set(
+    s
+      .split(",")
+      .map((p) => p.trim().toLowerCase())
+      .filter((p): p is ProtocolKey =>
+        (ALL_PROTOCOLS as readonly string[]).includes(p),
+      ),
+  );
+}
+
 function NeighborsTab({ deviceId }: { deviceId: string }) {
   const qc = useQueryClient();
   const [view, setView] = useState<"table" | "graph">("graph");
   const { data, isLoading, error } = useQuery<Neighbor[]>({
     queryKey: ["neighbors", deviceId],
     queryFn: () => listNeighbors(deviceId),
-    // Light auto-refresh — the topology changes infrequently but it's
-    // nice to see "freshly plugged in" peers without manually reloading.
     refetchInterval: 30_000,
   });
   const { data: device } = useQuery<Device>({
@@ -92,24 +105,40 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
     queryKey: ["neighbor-discovery", deviceId],
     queryFn: () => getNeighborDiscovery(deviceId),
   });
-  const discoveryOff =
-    !discovery ||
-    discovery.discover_interface_list === null ||
-    discovery.discover_interface_list === "" ||
-    discovery.discover_interface_list === "none" ||
-    !discovery.protocols ||
-    discovery.protocols === "";
-  const enableDiscovery = useMutation({
-    mutationFn: () =>
-      setNeighborDiscovery(deviceId, {
-        discover_interface_list: "all",
-        protocols: "cdp,lldp,mndp",
-      }),
+
+  const enabledProtocols = parseProtocols(discovery?.protocols ?? null);
+  const ifaceList = discovery?.discover_interface_list ?? null;
+  // RouterOS treats "none" or an empty interface list as "discovery off
+  // everywhere". Anything else — "all", "!dynamic", "WAN", … — is "on".
+  const interfacesOn = Boolean(
+    ifaceList && ifaceList !== "" && ifaceList !== "none",
+  );
+  const allProtocolsOn =
+    ALL_PROTOCOLS.every((p) => enabledProtocols.has(p)) && interfacesOn;
+  const discoveryOff = !interfacesOn || enabledProtocols.size === 0;
+
+  const setDiscovery = useMutation({
+    mutationFn: (payload: NeighborDiscovery) => setNeighborDiscovery(deviceId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["neighbor-discovery", deviceId] });
       qc.invalidateQueries({ queryKey: ["neighbors", deviceId] });
     },
   });
+
+  const toggleProtocol = (p: ProtocolKey) => {
+    const next = new Set(enabledProtocols);
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    setDiscovery.mutate({
+      discover_interface_list: interfacesOn ? ifaceList : "all",
+      protocols: ALL_PROTOCOLS.filter((x) => next.has(x)).join(",") || "",
+    });
+  };
+  const enableAll = () =>
+    setDiscovery.mutate({
+      discover_interface_list: "all",
+      protocols: "cdp,lldp,mndp",
+    });
 
   return (
     <Section
@@ -139,29 +168,64 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
         </div>
       )}
 
-      {/* Always-available discovery status + enable bar above whichever view. */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
-        <div>
-          <span className="text-muted-foreground">Discovery on this device:</span>{" "}
-          <span className="font-mono">
-            {discovery
-              ? `interfaces=${discovery.discover_interface_list ?? "—"} · protocols=${discovery.protocols ?? "—"}`
-              : "…"}
-          </span>
+      {/* Discovery status + per-protocol toggles. The pills reflect the
+          actual `/ip/neighbor/discovery-settings` state and clicking one
+          patches the device immediately. */}
+      <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground">Discovery:</span>
+            {discovery ? (
+              <>
+                {ALL_PROTOCOLS.map((p) => {
+                  const on = enabledProtocols.has(p);
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => toggleProtocol(p)}
+                      disabled={setDiscovery.isPending}
+                      title={on ? `Click to disable ${p.toUpperCase()}` : `Click to enable ${p.toUpperCase()}`}
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium uppercase transition disabled:opacity-50 ${
+                        on
+                          ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                          : "bg-zinc-200 text-zinc-600 line-through hover:bg-zinc-300"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+                <span className="text-muted-foreground">·</span>
+                <span className="font-mono text-muted-foreground">
+                  interfaces={ifaceList ?? "—"}
+                </span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">…</span>
+            )}
+          </div>
+          {discoveryOff && (
+            <button
+              onClick={enableAll}
+              disabled={setDiscovery.isPending}
+              className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {setDiscovery.isPending
+                ? "Enabling…"
+                : "Enable on all interfaces (CDP+LLDP+MNDP)"}
+            </button>
+          )}
         </div>
-        {discoveryOff && (
-          <button
-            onClick={() => enableDiscovery.mutate()}
-            disabled={enableDiscovery.isPending}
-            className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {enableDiscovery.isPending ? "Enabling…" : "Enable on all interfaces (CDP+LLDP+MNDP)"}
-          </button>
+        {!discoveryOff && !allProtocolsOn && (
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            Some protocols are disabled. Click a greyed pill to toggle it on.
+          </p>
         )}
       </div>
-      {enableDiscovery.error && (
+      {setDiscovery.error && (
         <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {(enableDiscovery.error as Error).message}
+          {(setDiscovery.error as Error).message}
         </div>
       )}
 
@@ -171,16 +235,30 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
           centerPlatform="MikroTik"
           neighbors={data ?? []}
           isLoading={isLoading}
+          emptyHeadline={
+            discoveryOff
+              ? "Discovery is off on this device."
+              : !allProtocolsOn
+                ? `Discovery is partially on (${[...enabledProtocols].join(", ").toUpperCase() || "none"}).`
+                : "No neighbours yet."
+          }
+          emptyBody={
+            discoveryOff
+              ? "Turn it on with the button above and give the device a few seconds to advertise."
+              : !allProtocolsOn
+                ? "Some peers may not be reached. Toggle the missing protocols above to widen the net."
+                : "Discovery is on. Check that peer devices advertise via CDP, LLDP or MNDP and are connected to one of this router's interfaces."
+          }
           emptyState={
-            discoveryOff && (
+            discoveryOff ? (
               <button
-                onClick={() => enableDiscovery.mutate()}
-                disabled={enableDiscovery.isPending}
+                onClick={enableAll}
+                disabled={setDiscovery.isPending}
                 className="mt-3 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
               >
-                {enableDiscovery.isPending ? "Enabling…" : "Enable discovery now"}
+                {setDiscovery.isPending ? "Enabling…" : "Enable discovery now"}
               </button>
-            )
+            ) : undefined
           }
         />
       ) : (
@@ -248,12 +326,16 @@ function NeighborsGraph({
   centerPlatform,
   neighbors,
   isLoading,
+  emptyHeadline,
+  emptyBody,
   emptyState,
 }: {
   centerName: string;
   centerPlatform: string;
   neighbors: Neighbor[];
   isLoading: boolean;
+  emptyHeadline?: string;
+  emptyBody?: string;
   emptyState?: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -268,10 +350,10 @@ function NeighborsGraph({
   if (neighbors.length === 0) {
     return (
       <div className="flex h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">No neighbours discovered.</p>
-        <p className="mt-1 text-xs">
-          Enable LLDP/CDP/MNDP on the device, then this page will populate.
+        <p className="font-medium text-foreground">
+          {emptyHeadline ?? "No neighbours discovered."}
         </p>
+        {emptyBody && <p className="mt-1 text-xs">{emptyBody}</p>}
         {emptyState}
       </div>
     );
