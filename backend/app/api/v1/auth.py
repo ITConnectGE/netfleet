@@ -16,8 +16,12 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponseFinal,
+    LoginResponseMfaChoice,
     LoginResponseMfaRequired,
     LoginResponseOtpRequired,
+    MfaMethodPublic,
+    OtpSendRequest,
+    OtpSendResponse,
     OtpVerifyRequest,
     ProfileUpdateRequest,
     RefreshRequest,
@@ -58,7 +62,12 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 @router.post(
     "/login",
-    response_model=LoginResponseFinal | LoginResponseMfaRequired | LoginResponseOtpRequired,
+    response_model=(
+        LoginResponseFinal
+        | LoginResponseMfaChoice
+        | LoginResponseMfaRequired
+        | LoginResponseOtpRequired
+    ),
     responses={401: {"description": "invalid credentials"}},
 )
 async def login(
@@ -68,42 +77,113 @@ async def login(
     session: AsyncSession = Depends(db_session),
 ):
     try:
-        user = await auth_svc.authenticate_local(session, email=body.email, password=body.password)
-    except auth_svc.TotpRequired as e:
-        # Issue a short-lived MFA temp token; client posts it back with the code.
-        temp, exp = auth_svc.issue_mfa_temp_token_for_id(e.user_id, e.organization_id)
-        return LoginResponseMfaRequired(mfa_temp_token=temp, mfa_temp_expires_at=exp)
-    except auth_svc.OtpRequired as e:
-        # Look the user back up to dispatch the OTP (auth_svc.OtpRequired
-        # carries only IDs, deliberately). We commit immediately so the
-        # code + expiry land on the row even if the dispatch fails — the
-        # client will still get a temp_token and the user can try again
-        # without a fresh password round-trip.
-        from uuid import UUID as _UUID
-        user = (
-            await session.execute(
-                select(User).where(User.id == _UUID(e.user_id))
+        user = await auth_svc.authenticate_local(
+            session, email=body.email, password=body.password
+        )
+    except auth_svc.AuthError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
+
+    # MFA gate: list what the user can use right now. TOTP > email > SMS.
+    org = (
+        await session.execute(
+            select(Organization).where(Organization.id == user.organization_id)
+        )
+    ).scalar_one()
+    methods = auth_svc.available_mfa_methods(user, org)
+
+    # Zero methods → straight to the finalised session.
+    if not methods:
+        return await _finalize_login(session, response, request, user)
+
+    # Always issue a temp token first; both paths below need it.
+    temp, exp = auth_svc.issue_mfa_temp_token_for_id(
+        str(user.id), str(user.organization_id)
+    )
+
+    # When there's exactly one method we keep the legacy single-step
+    # responses, so clients that haven't learned about mfa_choice still
+    # behave correctly — only the multi-method case requires the picker.
+    if len(methods) == 1:
+        only_method, only_hint = methods[0]
+        if only_method == "totp":
+            return LoginResponseMfaRequired(
+                mfa_temp_token=temp, mfa_temp_expires_at=exp
             )
-        ).scalar_one()
+        # Single OTP channel: dispatch now so the user lands on the
+        # code input straight away — mirrors the old auto-dispatch
+        # behaviour for OtpRequired.
         try:
-            _code, channel = await login_otp_svc.issue_login_otp(session, user)
+            _code, channel = await login_otp_svc.issue_login_otp(
+                session, user, channel=only_method
+            )
         except login_otp_svc.OtpDispatchError as err:
             await session.commit()
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
             ) from err
         await session.commit()
-        temp, exp = auth_svc.issue_mfa_temp_token_for_id(e.user_id, e.organization_id)
         return LoginResponseOtpRequired(
             mfa_temp_token=temp,
             mfa_temp_expires_at=exp,
             channel=channel,
-            destination_hint=_mask_destination(channel, user),
+            destination_hint=only_hint or "****",
         )
-    except auth_svc.AuthError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
 
-    return await _finalize_login(session, response, request, user)
+    # 2+ methods → let the user pick which factor to use.
+    return LoginResponseMfaChoice(
+        mfa_temp_token=temp,
+        mfa_temp_expires_at=exp,
+        methods=[
+            MfaMethodPublic(method=m, destination_hint=h) for m, h in methods
+        ],
+        default_method=methods[0][0],
+    )
+
+
+@router.post("/otp/send", response_model=OtpSendResponse)
+async def otp_send(
+    body: OtpSendRequest,
+    session: AsyncSession = Depends(db_session),
+) -> OtpSendResponse:
+    """Dispatch the one-time login code via the user-picked channel.
+    Called from the multi-method picker after the user clicks
+    "Email" or "SMS" (TOTP doesn't go through here — its codes are
+    generated client-side by the authenticator app)."""
+    from uuid import UUID as _UUID
+
+    from app.core.security import decode_jwt
+
+    try:
+        payload = decode_jwt(body.mfa_temp_token, expected_type="mfa_temp")
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)
+        ) from e
+    user_id = payload["sub"]
+    user = (
+        await session.execute(
+            select(User).where(User.id == _UUID(user_id), User.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if user is None or not user.otp_login_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="otp login not enabled for this user",
+        )
+    try:
+        _code, channel = await login_otp_svc.issue_login_otp(
+            session, user, channel=body.method
+        )
+    except login_otp_svc.OtpDispatchError as err:
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
+        ) from err
+    await session.commit()
+    return OtpSendResponse(
+        method=channel,  # type: ignore[arg-type]
+        destination_hint=_mask_destination(channel, user),
+    )
 
 
 @router.post("/otp/verify", response_model=LoginResponseFinal)

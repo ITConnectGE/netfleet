@@ -5,9 +5,16 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/logo";
-import { fetchSetupStatus, login, verifyLoginOtp, verifyTotp } from "@/lib/auth";
+import {
+  fetchSetupStatus,
+  login,
+  sendOtpCode,
+  verifyLoginOtp,
+  verifyTotp,
+  type MfaMethod,
+} from "@/lib/auth";
 
-type Phase = "password" | "totp" | "otp";
+type Phase = "password" | "choose" | "totp" | "otp";
 
 interface OtpInfo {
   channel: "sms" | "email";
@@ -23,6 +30,10 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [mfaTempToken, setMfaTempToken] = useState<string | null>(null);
   const [otpInfo, setOtpInfo] = useState<OtpInfo | null>(null);
+  const [methods, setMethods] = useState<MfaMethod[]>([]);
+  const [defaultMethod, setDefaultMethod] = useState<"totp" | "email" | "sms">(
+    "totp",
+  );
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -42,7 +53,12 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const result = await login(email, password);
-      if (result.status === "mfa_required") {
+      if (result.status === "mfa_choice") {
+        setMfaTempToken(result.mfa_temp_token);
+        setMethods(result.methods);
+        setDefaultMethod(result.default_method);
+        setPhase("choose");
+      } else if (result.status === "mfa_required") {
         setMfaTempToken(result.mfa_temp_token);
         setPhase("totp");
       } else if (result.status === "otp_required") {
@@ -55,6 +71,26 @@ export default function LoginPage() {
       } else {
         router.replace("/dashboard");
       }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function pickMethod(m: "totp" | "email" | "sms") {
+    if (!mfaTempToken) return;
+    setError(null);
+    if (m === "totp") {
+      setPhase("totp");
+      return;
+    }
+    // email / sms: ask the server to dispatch the code, then move on.
+    setSubmitting(true);
+    try {
+      const res = await sendOtpCode(mfaTempToken, m);
+      setOtpInfo({ channel: res.method, destinationHint: res.destination_hint });
+      setPhase("otp");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -97,6 +133,7 @@ export default function LoginPage() {
     setCode("");
     setMfaTempToken(null);
     setOtpInfo(null);
+    setMethods([]);
   }
 
   return (
@@ -114,18 +151,22 @@ export default function LoginPage() {
           <h2 className="text-xl font-semibold tracking-tight">
             {phase === "password"
               ? "Sign in"
-              : phase === "totp"
-                ? "Two-factor authentication"
-                : "One-time code"}
+              : phase === "choose"
+                ? "Choose a second factor"
+                : phase === "totp"
+                  ? "Two-factor authentication"
+                  : "One-time code"}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {phase === "password"
               ? "Local credentials or Microsoft single sign-on."
-              : phase === "totp"
-                ? "Enter the 6-digit code from your authenticator app."
-                : otpInfo
-                  ? `We sent a code via ${otpInfo.channel === "sms" ? "SMS" : "email"} to ${otpInfo.destinationHint}. It expires in 5 minutes.`
-                  : "Enter the code we just sent you."}
+              : phase === "choose"
+                ? "Pick the channel you'd like to use. TOTP is the fastest; email and SMS arrive in about a minute."
+                : phase === "totp"
+                  ? "Enter the 6-digit code from your authenticator app."
+                  : otpInfo
+                    ? `We sent a code via ${otpInfo.channel === "sms" ? "SMS" : "email"} to ${otpInfo.destinationHint}. It expires in 5 minutes.`
+                    : "Enter the code we just sent you."}
           </p>
 
           {error && (
@@ -165,6 +206,48 @@ export default function LoginPage() {
             </form>
           )}
 
+          {phase === "choose" && (
+            <div className="mt-6 space-y-2">
+              {methods.map((m) => (
+                <button
+                  key={m.method}
+                  type="button"
+                  onClick={() => pickMethod(m.method)}
+                  disabled={submitting}
+                  className={`flex w-full items-center justify-between rounded-md border px-3 py-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    m.method === defaultMethod
+                      ? "border-primary bg-primary/5 hover:bg-primary/10"
+                      : "border-input bg-background hover:bg-accent"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <MethodIcon method={m.method} />
+                    <div>
+                      <div className="font-medium">{methodLabel(m.method)}</div>
+                      {m.destination_hint && (
+                        <div className="text-[11px] text-muted-foreground">
+                          {m.destination_hint}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {m.method === defaultMethod && (
+                    <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      recommended
+                    </span>
+                  )}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={resetToPassword}
+                className="block w-full pt-2 text-center text-xs text-muted-foreground hover:underline"
+              >
+                ← Use a different account
+              </button>
+            </div>
+          )}
+
           {phase === "totp" && (
             <form className="mt-6 space-y-4" onSubmit={onSubmitTotp}>
               <Field label="Authenticator code" htmlFor="totp">
@@ -184,6 +267,18 @@ export default function LoginPage() {
               <button type="submit" disabled={submitting} className={primaryBtnClass}>
                 {submitting ? "Verifying…" : "Verify"}
               </button>
+              {methods.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCode("");
+                    setPhase("choose");
+                  }}
+                  className="block w-full text-center text-xs text-muted-foreground hover:underline"
+                >
+                  Use a different factor
+                </button>
+              )}
               <button
                 type="button"
                 onClick={resetToPassword}
@@ -214,6 +309,18 @@ export default function LoginPage() {
               <button type="submit" disabled={submitting} className={primaryBtnClass}>
                 {submitting ? "Verifying…" : "Verify"}
               </button>
+              {methods.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCode("");
+                    setPhase("choose");
+                  }}
+                  className="block w-full text-center text-xs text-muted-foreground hover:underline"
+                >
+                  Use a different factor
+                </button>
+              )}
               <button
                 type="button"
                 onClick={resetToPassword}
@@ -246,6 +353,39 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function methodLabel(m: "totp" | "email" | "sms"): string {
+  if (m === "totp") return "Authenticator app (TOTP)";
+  if (m === "email") return "Email a code";
+  return "Text a code (SMS)";
+}
+
+function MethodIcon({ method }: { method: "totp" | "email" | "sms" }) {
+  const cls = "size-5 shrink-0 text-muted-foreground";
+  if (method === "totp") {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="4" y="2" width="16" height="20" rx="2" />
+        <path d="M12 14v.01" />
+        <path d="M8 18h8" />
+      </svg>
+    );
+  }
+  if (method === "email") {
+    return (
+      <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3 7 9 6 9-6" />
+      </svg>
+    );
+  }
+  return (
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="7" y="2" width="10" height="20" rx="2" />
+      <path d="M11 18h2" />
+    </svg>
   );
 }
 

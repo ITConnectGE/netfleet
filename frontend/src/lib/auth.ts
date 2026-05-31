@@ -104,7 +104,42 @@ export interface LoginOtpRequired {
   destination_hint: string;
 }
 
-export type LoginResult = LoginFinal | LoginMfaRequired | LoginOtpRequired;
+export interface MfaMethod {
+  method: "totp" | "email" | "sms";
+  destination_hint: string | null;
+}
+
+export interface LoginMfaChoice {
+  status: "mfa_choice";
+  mfa_temp_token: string;
+  mfa_temp_expires_at: string;
+  methods: MfaMethod[];
+  default_method: "totp" | "email" | "sms";
+}
+
+export type LoginResult =
+  | LoginFinal
+  | LoginMfaRequired
+  | LoginOtpRequired
+  | LoginMfaChoice;
+
+export interface OtpSendResponse {
+  method: "email" | "sms";
+  destination_hint: string;
+}
+
+export async function sendOtpCode(
+  mfa_temp_token: string,
+  method: "email" | "sms",
+): Promise<OtpSendResponse> {
+  try {
+    return await api
+      .post("auth/otp/send", { json: { mfa_temp_token, method } })
+      .json<OtpSendResponse>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
 
 export async function login(email: string, password: string): Promise<LoginResult> {
   try {

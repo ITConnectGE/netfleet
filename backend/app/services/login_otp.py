@@ -48,16 +48,22 @@ def _new_code() -> str:
     return f"{secrets.randbelow(10**OTP_LENGTH):0{OTP_LENGTH}d}"
 
 
-async def issue_login_otp(session: AsyncSession, user: User) -> tuple[str, str]:
+async def issue_login_otp(
+    session: AsyncSession, user: User, *, channel: str
+) -> tuple[str, str]:
     """Generate a fresh code, persist a hash + expiry on the user row,
-    return (plaintext, channel_used). Channel is "sms" or "email"."""
+    and dispatch via the requested ``channel`` ("email" or "sms").
+    Returns (plaintext, channel_used). The channel is honoured exactly
+    — callers that want fallback should retry with the other channel."""
+    if channel not in ("email", "sms"):
+        raise OtpDispatchError(f"unsupported OTP channel: {channel}")
     code = _new_code()
     user.otp_code_hash = hash_password(code)
     user.otp_expires_at = datetime.now(UTC) + timedelta(seconds=OTP_TTL_SECONDS)
     user.otp_attempts = 0
     await session.flush()
-    channel = await _dispatch(session, user, code)
-    return code, channel
+    used = await _dispatch(session, user, code, channel=channel)
+    return code, used
 
 
 async def verify_login_otp(
@@ -90,7 +96,12 @@ def _clear(user: User) -> None:
     user.otp_attempts = 0
 
 
-async def _dispatch(session: AsyncSession, user: User, code: str) -> str:
+async def _dispatch(
+    session: AsyncSession, user: User, code: str, *, channel: str
+) -> str:
+    """Send the code via the explicit channel the caller picked. No
+    silent fallback: if the user chose SMS but the gateway is dead we
+    surface the error so they can re-pick email."""
     org = (
         await session.execute(
             select(Organization).where(Organization.id == user.organization_id)
@@ -103,8 +114,11 @@ async def _dispatch(session: AsyncSession, user: User, code: str) -> str:
         "sign in, you can ignore this message — but tell your administrator."
     )
 
-    # Prefer SMS if both the user has a mobile and the gateway is on.
-    if user.mobile_phone and org.sms_enabled and org.sms_api_url and org.sms_body_template:
+    if channel == "sms":
+        if not user.mobile_phone:
+            raise OtpDispatchError("No mobile number on file for this user.")
+        if not (org.sms_enabled and org.sms_api_url and org.sms_body_template):
+            raise OtpDispatchError("SMS gateway is not configured for this organisation.")
         try:
             await sms_svc.send_sms(
                 session,
@@ -114,11 +128,10 @@ async def _dispatch(session: AsyncSession, user: User, code: str) -> str:
             )
             return "sms"
         except sms_svc.SmsGatewayError as e:
-            # Don't expose internals to the user but log loudly — the
-            # next branch will try email as a fallback so they aren't
-            # locked out just because the SMS gateway is hiccuping.
             log.warning("login_otp.sms_failed", user_id=str(user.id), error=str(e))
+            raise OtpDispatchError(f"SMS gateway failed: {e}") from e
 
+    # channel == "email"
     try:
         await email_svc.send_email(
             org,
@@ -129,6 +142,4 @@ async def _dispatch(session: AsyncSession, user: User, code: str) -> str:
         return "email"
     except (email_svc.SmtpNotConfigured, email_svc.SmtpSendError) as e:
         log.warning("login_otp.email_failed", user_id=str(user.id), error=str(e))
-        raise OtpDispatchError(
-            "Could not deliver the login code via SMS or email. Contact your administrator."
-        ) from e
+        raise OtpDispatchError(f"Email delivery failed: {e}") from e

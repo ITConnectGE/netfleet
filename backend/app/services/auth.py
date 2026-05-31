@@ -78,13 +78,49 @@ async def authenticate_local(
         user.password_hash = hash_password(password)
         await session.flush()
 
-    if user.totp_enrolled:
-        raise TotpRequired(user_id=str(user.id), organization_id=str(user.organization_id))
-
-    if user.otp_login_enabled:
-        raise OtpRequired(user_id=str(user.id), organization_id=str(user.organization_id))
-
+    # The login endpoint decides whether MFA is needed by inspecting
+    # user.totp_enrolled / user.otp_login_enabled — we don't raise from
+    # here anymore so the caller can present a method picker when the
+    # user has multiple options. The legacy TotpRequired / OtpRequired
+    # exceptions stay defined for any external caller still expecting
+    # them, but our /auth/login path no longer raises them.
     return user
+
+
+def available_mfa_methods(
+    user: User, organization
+) -> list[tuple[str, str | None]]:
+    """Return the ordered list of MFA methods this user can use right
+    now, as (method, destination_hint) tuples. Priority: TOTP first,
+    then email, then SMS — matches what an operator expects under
+    "which factor should I use today?".
+
+    ``destination_hint`` is None for TOTP (no out-of-band delivery) and
+    a masked label for email / SMS (so the picker UI can show "code to
+    n***@example.com" without leaking the full address)."""
+    out: list[tuple[str, str | None]] = []
+    if user.totp_enrolled:
+        out.append(("totp", None))
+    if user.otp_login_enabled:
+        local, _, domain = user.email.partition("@")
+        head = local[0] if local else ""
+        email_hint = f"{head}***@{domain}" if domain else "****"
+        out.append(("email", email_hint))
+        # SMS only when both the user has a mobile AND the org has the
+        # gateway turned on + configured.
+        sms_ready = bool(
+            user.mobile_phone
+            and getattr(organization, "sms_enabled", False)
+            and getattr(organization, "sms_api_url", None)
+            and getattr(organization, "sms_body_template", None)
+        )
+        if sms_ready:
+            n = user.mobile_phone or ""
+            sms_hint = (
+                f"{'*' * max(0, len(n) - 4)}{n[-4:]}" if len(n) >= 4 else "****"
+            )
+            out.append(("sms", sms_hint))
+    return out
 
 
 # ---------------- TOTP ----------------

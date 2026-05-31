@@ -42,6 +42,35 @@ class LoginResponseOtpRequired(BaseModel):
     destination_hint: str
 
 
+class MfaMethodPublic(BaseModel):
+    """One entry in the login choice picker."""
+
+    method: Literal["totp", "email", "sms"]
+    destination_hint: str | None = None
+
+
+class LoginResponseMfaChoice(BaseModel):
+    """Returned when the user has multiple MFA methods available and
+    must pick one. The frontend renders a picker; on selection it
+    either prompts for the TOTP code or posts to /auth/otp/send."""
+
+    status: Literal["mfa_choice"] = "mfa_choice"
+    mfa_temp_token: str
+    mfa_temp_expires_at: datetime
+    methods: list[MfaMethodPublic]
+    default_method: Literal["totp", "email", "sms"]
+
+
+class OtpSendRequest(BaseModel):
+    mfa_temp_token: str
+    method: Literal["email", "sms"]
+
+
+class OtpSendResponse(BaseModel):
+    method: Literal["email", "sms"]
+    destination_hint: str
+
+
 class TotpVerifyRequest(BaseModel):
     mfa_temp_token: str
     code: str = Field(min_length=6, max_length=8, pattern=r"^\d+$")
