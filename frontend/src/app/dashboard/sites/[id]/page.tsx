@@ -52,7 +52,6 @@ export default function SiteDetailPage() {
       <div className="mt-1 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{site.name}</h1>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">{site.slug}</p>
         </div>
         <button
           onClick={() => {

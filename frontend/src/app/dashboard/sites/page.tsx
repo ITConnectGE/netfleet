@@ -70,9 +70,6 @@ export default function SitesPage() {
                   >
                     {s.name}
                   </Link>
-                  <div className="font-mono text-[10px] text-muted-foreground">
-                    {s.slug}
-                  </div>
                 </td>
                 <td className="max-w-xs truncate px-4 py-3 text-xs text-muted-foreground">
                   {s.address ?? "—"}

@@ -67,15 +67,11 @@ export default function TenantDetailPage() {
       <div className="mt-1 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{tenant.name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            <span className="font-mono">{tenant.slug}</span>
-            {tenant.primary_contact_email && (
-              <>
-                {" · "}
-                Contact: {tenant.primary_contact_name ?? tenant.primary_contact_email}
-              </>
-            )}
-          </p>
+          {tenant.primary_contact_email && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Contact: {tenant.primary_contact_name ?? tenant.primary_contact_email}
+            </p>
+          )}
         </div>
         <button
           onClick={() => {
@@ -128,7 +124,6 @@ export default function TenantDetailPage() {
           <thead className="border-b border-border bg-muted/50">
             <tr className="text-left">
               <th className="px-4 py-2.5 font-medium">Name</th>
-              <th className="px-4 py-2.5 font-medium">Slug</th>
               <th className="px-4 py-2.5 font-medium">Devices</th>
               <th className="px-4 py-2.5 font-medium">Address</th>
               <th className="px-4 py-2.5 font-medium">Contact</th>
@@ -138,7 +133,7 @@ export default function TenantDetailPage() {
           <tbody className="divide-y divide-border">
             {(!sites || sites.length === 0) && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                   No sites yet for this tenant.
                 </td>
               </tr>
@@ -152,9 +147,6 @@ export default function TenantDetailPage() {
                   >
                     {s.name}
                   </Link>
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {s.slug}
                 </td>
                 <td className="px-4 py-3">{s.device_count}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -202,7 +194,6 @@ function SiteForm({
   onCreated: () => void;
 }) {
   const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
   const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -215,7 +206,10 @@ function SiteForm({
       const payload: SiteCreate = {
         tenant_id: tenantId,
         name,
-        slug,
+        // Slug is derived from the name silently — operators don't see
+        // it. The backend's uniqueness check (tenant_id, slug) is per
+        // tenant so collisions across tenants are fine.
+        slug: slugify(name),
         address: address || null,
         latitude,
         longitude,
@@ -248,24 +242,9 @@ function SiteForm({
             id="s-name"
             required
             value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (!slug) setSlug(slugify(e.target.value));
-            }}
+            onChange={(e) => setName(e.target.value)}
             className={input}
             placeholder="HQ Office"
-          />
-        </Field>
-        <Field label="Slug" htmlFor="s-slug">
-          <input
-            id="s-slug"
-            required
-            pattern="^[a-z0-9][a-z0-9-]*[a-z0-9]$"
-            minLength={2}
-            value={slug}
-            onChange={(e) => setSlug(e.target.value.toLowerCase())}
-            className={`${input} font-mono`}
-            placeholder="hq-office"
           />
         </Field>
         <Field label="Address" htmlFor="s-addr">

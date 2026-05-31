@@ -58,7 +58,6 @@ export default function TenantsPage() {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-base font-semibold">{t.name}</h3>
-                <p className="mt-0.5 font-mono text-xs text-muted-foreground">{t.slug}</p>
               </div>
               <div className="text-right text-xs text-muted-foreground">
                 <div>
@@ -90,7 +89,6 @@ export default function TenantsPage() {
 
 function TenantForm({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -101,7 +99,11 @@ function TenantForm({ onCreated }: { onCreated: () => void }) {
     mutationFn: () =>
       createTenant({
         name,
-        slug,
+        // Slug is a routing/audit identifier the backend still requires;
+        // derive it silently from the name. If the operator wants a custom
+        // one they can edit it post-create from the tenant detail page —
+        // most don't care, so it's no longer in the form.
+        slug: slugify(name),
         description: description || null,
         primary_contact_name: contactName || null,
         primary_contact_email: contactEmail || null,
@@ -133,24 +135,9 @@ function TenantForm({ onCreated }: { onCreated: () => void }) {
             id="t-name"
             required
             value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (!slug) setSlug(slugify(e.target.value));
-            }}
+            onChange={(e) => setName(e.target.value)}
             className={input}
             placeholder="Acme Manufacturing"
-          />
-        </Field>
-        <Field label="Slug" htmlFor="t-slug">
-          <input
-            id="t-slug"
-            required
-            pattern="^[a-z0-9][a-z0-9-]*[a-z0-9]$"
-            minLength={2}
-            value={slug}
-            onChange={(e) => setSlug(e.target.value.toLowerCase())}
-            className={`${input} font-mono`}
-            placeholder="acme"
           />
         </Field>
         <Field label="Description" htmlFor="t-desc">
