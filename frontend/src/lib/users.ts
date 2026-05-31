@@ -5,9 +5,11 @@ export interface UserListItem {
   id: string;
   email: string;
   display_name: string | null;
+  mobile_phone: string | null;
   is_active: boolean;
   is_admin: boolean;
   totp_enrolled: boolean;
+  must_change_password: boolean;
   auth_method: "local" | "oidc";
   last_login_at: string | null;
   created_at: string;
@@ -17,14 +19,33 @@ export interface UserListItem {
 export interface UserCreate {
   email: string;
   display_name: string;
-  password: string;
+  /**
+   * Optional from P21 Stage 3 on. When omitted, the backend generates
+   * a 16-character random password and forces the user through a
+   * change-password flow on first login.
+   */
+  password?: string | null;
+  mobile_phone?: string | null;
   is_admin?: boolean;
+  /** Org-scope role assignments minted at invite time. */
+  role_ids?: string[];
 }
 
 export interface UserUpdate {
   display_name?: string;
+  mobile_phone?: string | null;
   is_active?: boolean;
   is_admin?: boolean;
+}
+
+export interface UserInviteResponse {
+  user: UserListItem;
+  /**
+   * Plaintext returned exactly once when the password was auto-
+   * generated. Show it to the inviter, then drop it on the floor; the
+   * server has only the hash from this point on.
+   */
+  generated_password: string | null;
 }
 
 export interface Assignment {
@@ -48,9 +69,9 @@ export async function listUsers(): Promise<UserListItem[]> {
   return api.get("users").json<UserListItem[]>();
 }
 
-export async function createUser(payload: UserCreate): Promise<UserListItem> {
+export async function createUser(payload: UserCreate): Promise<UserInviteResponse> {
   try {
-    return await api.post("users", { json: payload }).json<UserListItem>();
+    return await api.post("users", { json: payload }).json<UserInviteResponse>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

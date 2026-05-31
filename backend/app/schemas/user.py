@@ -13,9 +13,11 @@ class UserListItem(BaseModel):
     id: UUID
     email: EmailStr
     display_name: str | None
+    mobile_phone: str | None = None
     is_active: bool
     is_admin: bool
     totp_enrolled: bool
+    must_change_password: bool = False
     auth_method: Literal["local", "oidc"]
     last_login_at: datetime | None
     created_at: datetime
@@ -27,14 +29,32 @@ class UserListItem(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     display_name: str = Field(min_length=1, max_length=255)
-    password: str = Field(min_length=12, max_length=512)
+    # Password is optional from Stage 3 on. When omitted, the service
+    # generates a strong random one and sets must_change_password=True,
+    # forcing the recipient through a change on first login.
+    password: str | None = Field(default=None, min_length=12, max_length=512)
+    mobile_phone: str | None = Field(default=None, max_length=32)
     is_admin: bool = False
+    # Roles assigned at organisation scope when the user is invited.
+    # Site- and device-level scopes still flow through the explicit
+    # /assignments endpoint (Stage 5 will surface those at invite time).
+    role_ids: list[UUID] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    mobile_phone: str | None = Field(default=None, max_length=32)
     is_active: bool | None = None
     is_admin: bool | None = None
+
+
+class UserInviteResponse(BaseModel):
+    """Returned by POST /users when a password was auto-generated. The
+    plaintext is included exactly once so the inviter can hand it to the
+    invitee out of band; we never expose it again."""
+
+    user: UserListItem
+    generated_password: str | None = None
 
 
 class PasswordResetRequest(BaseModel):

@@ -17,6 +17,7 @@ from app.schemas.user import (
     AssignmentPublic,
     PasswordResetRequest,
     UserCreate,
+    UserInviteResponse,
     UserListItem,
     UserUpdate,
 )
@@ -42,17 +43,21 @@ async def list_users(
     return [_to_list_item(u, c) for u, c in items]
 
 
-@router.post("", response_model=UserListItem, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=UserInviteResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
     request: Request,
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
-) -> UserListItem:
+) -> UserInviteResponse:
     try:
-        new_user = await user_svc.create_user(session, actor.organization_id, payload)
+        new_user, generated = await user_svc.create_user(
+            session, actor.organization_id, payload
+        )
     except user_svc.UserEmailTaken as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except user_svc.RoleNotInOrganization as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     await audit_svc.write_audit(
         session,
@@ -63,10 +68,16 @@ async def create_user(
         outcome=AuditOutcome.OK,
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
-        request_payload=payload.model_dump(exclude={"password"}),
+        # Never log the password — even the auto-generated one. The
+        # inviter sees it once in the API response, that's all.
+        request_payload={
+            **payload.model_dump(exclude={"password"}, mode="json"),
+            "password_auto_generated": generated is not None,
+        },
     )
     await session.commit()
-    return _to_list_item(new_user, 0)
+    item = _to_list_item(new_user, len(payload.role_ids))
+    return UserInviteResponse(user=item, generated_password=generated)
 
 
 @router.patch("/{user_id}", response_model=UserListItem)

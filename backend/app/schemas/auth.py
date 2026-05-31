@@ -46,6 +46,18 @@ class TotpEnrollConfirmRequest(BaseModel):
     code: str = Field(min_length=6, max_length=8, pattern=r"^\d+$")
 
 
+class TotpDisableRequest(BaseModel):
+    """Disabling TOTP rechecks the password — a stolen-but-unlocked
+    session shouldn't be able to weaken the second factor."""
+
+    current_password: str = Field(min_length=1, max_length=512)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=12, max_length=512)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str | None = None  # also accepted via httpOnly cookie
 
@@ -63,6 +75,7 @@ class UserPublic(BaseModel):
     mobile_phone: str | None = None
     is_admin: bool
     totp_enrolled: bool
+    must_change_password: bool = False
     auth_method: Literal["local", "oidc"]
     organization_id: UUID
 

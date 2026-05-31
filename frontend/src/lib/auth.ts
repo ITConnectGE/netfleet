@@ -8,6 +8,7 @@ export interface UserPublic {
   mobile_phone: string | null;
   is_admin: boolean;
   totp_enrolled: boolean;
+  must_change_password: boolean;
   auth_method: "local" | "oidc";
   organization_id: string;
 }
@@ -20,6 +21,60 @@ export interface ProfileUpdate {
 export async function updateProfile(payload: ProfileUpdate): Promise<UserPublic> {
   try {
     return await api.patch("auth/me", { json: payload }).json<UserPublic>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+}
+
+export interface TokenPair {
+  access_token: string;
+  expires_at: string;
+}
+
+export async function changePassword(payload: ChangePasswordPayload): Promise<TokenPair> {
+  try {
+    const out = await api
+      .post("auth/change-password", { json: payload })
+      .json<TokenPair>();
+    // Server revoked every refresh token + minted a new one in the cookie;
+    // here we just refresh the in-memory access token so the active tab
+    // keeps working without a re-login.
+    authStorage.setAccessToken(out.access_token, out.expires_at);
+    return out;
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export interface TotpEnrollResponse {
+  secret: string;
+  otpauth_uri: string;
+}
+
+export async function enrollTotpBegin(): Promise<TotpEnrollResponse> {
+  try {
+    return await api.post("auth/totp/enroll").json<TotpEnrollResponse>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function enrollTotpConfirm(code: string): Promise<void> {
+  try {
+    await api.post("auth/totp/enroll/confirm", { json: { code } });
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function disableTotp(currentPassword: string): Promise<void> {
+  try {
+    await api.post("auth/totp/disable", { json: { current_password: currentPassword } });
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

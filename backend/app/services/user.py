@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+import string
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -15,6 +17,15 @@ from app.models.site import Site
 from app.models.tenant import Tenant
 from app.models.user import AuthMethod, User
 from app.schemas.user import AssignmentCreate, UserCreate, UserUpdate
+
+# Character set for auto-generated invite passwords. We deliberately
+# drop characters that are ambiguous in print (`0`, `O`, `1`, `l`, `I`,
+# `|`) so the inviter can read the password to the invitee over the
+# phone without spelling-bee theatrics.
+_INVITE_PWD_ALPHABET = "".join(
+    c for c in string.ascii_letters + string.digits if c not in "0O1lI|"
+) + "@#$%^&*?+-_=:."
+_INVITE_PWD_LENGTH = 16
 
 
 class UserNotFound(Exception):
@@ -61,9 +72,22 @@ async def get_user(session: AsyncSession, organization_id: UUID, user_id: UUID) 
     return user
 
 
+def generate_invite_password() -> str:
+    """Cryptographically-random password used when an admin chooses
+    "auto-generate" on the invite form (or no password is supplied)."""
+    return "".join(
+        secrets.choice(_INVITE_PWD_ALPHABET) for _ in range(_INVITE_PWD_LENGTH)
+    )
+
+
 async def create_user(
     session: AsyncSession, organization_id: UUID, payload: UserCreate
-) -> User:
+) -> tuple[User, str | None]:
+    """Create a user. Returns (user, generated_password). When the
+    caller supplied a password, generated_password is None — the caller
+    already has it. When it was auto-generated, the plaintext is
+    returned exactly once so the API layer can surface it to the
+    inviter; the password is never accessible again after that."""
     email = payload.email.lower()
     dupe = (
         await session.execute(
@@ -75,18 +99,56 @@ async def create_user(
     if dupe is not None:
         raise UserEmailTaken(f"user with email '{email}' already exists")
 
+    if payload.password:
+        plaintext = payload.password
+        generated: str | None = None
+        must_change = False
+    else:
+        plaintext = generate_invite_password()
+        generated = plaintext
+        # Force the invitee to set their own password on first login;
+        # admins shouldn't know an active password long-term.
+        must_change = True
+
+    mobile = _normalise_phone(payload.mobile_phone)
+
     user = User(
         organization_id=organization_id,
         email=email,
         display_name=payload.display_name,
-        password_hash=hash_password(payload.password),
+        mobile_phone=mobile,
+        password_hash=hash_password(plaintext),
         auth_method=AuthMethod.LOCAL,
         is_active=True,
         is_admin=payload.is_admin,
+        must_change_password=must_change,
     )
     session.add(user)
     await session.flush()
-    return user
+
+    # Org-scope role assignments at invite time. Site/device scope is
+    # configured later through /users/{id}/assignments; this is purely
+    # the "give them this role across the whole org" shortcut.
+    for role_id in payload.role_ids:
+        role = (
+            await session.execute(
+                select(Role).where(
+                    Role.id == role_id, Role.organization_id == organization_id
+                )
+            )
+        ).scalar_one_or_none()
+        if role is None:
+            raise RoleNotInOrganization(f"role {role_id} not in organisation")
+        session.add(
+            RoleAssignment(
+                user_id=user.id,
+                role_id=role.id,
+                scope_type=AssignmentScope.ORGANIZATION,
+                scope_id=None,
+            )
+        )
+    await session.flush()
+    return user, generated
 
 
 async def update_user(
@@ -96,7 +158,10 @@ async def update_user(
     payload: UserUpdate,
 ) -> User:
     user = await get_user(session, organization_id, user_id)
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "mobile_phone" in data:
+        data["mobile_phone"] = _normalise_phone(data["mobile_phone"])
+    for k, v in data.items():
         setattr(user, k, v)
     await session.flush()
     return user
@@ -110,7 +175,17 @@ async def reset_password(
 ) -> None:
     user = await get_user(session, organization_id, user_id)
     user.password_hash = hash_password(new_password)
+    # Admin-initiated resets always require the target to set their
+    # own password before continuing — same UX rule as invite.
+    user.must_change_password = True
     await session.flush()
+
+
+def _normalise_phone(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    cleaned = "".join(c for c in raw if c.isdigit() or c == "+")
+    return cleaned or None
 
 
 # ---------------- role assignments ----------------

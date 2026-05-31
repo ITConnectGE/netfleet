@@ -2,25 +2,35 @@
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, get_current_user
 from app.core.config import settings
+from app.models.audit_log import AuditOutcome
+from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.auth import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponseFinal,
     LoginResponseMfaRequired,
     ProfileUpdateRequest,
     RefreshRequest,
     TokenPair,
+    TotpDisableRequest,
     TotpEnrollConfirmRequest,
     TotpEnrollResponse,
     TotpVerifyRequest,
     UserPublic,
 )
+from app.services import audit as audit_svc
 from app.services import auth as auth_svc
+from app.services import email as email_svc
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -169,6 +179,106 @@ async def totp_enroll_confirm(
         await auth_svc.confirm_totp_enrollment(session, user, body.code)
     except auth_svc.AuthError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    await session.commit()
+
+
+@router.post("/totp/disable", status_code=status.HTTP_204_NO_CONTENT)
+async def totp_disable(
+    body: TotpDisableRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+):
+    try:
+        await auth_svc.disable_totp(session, user, current_password=body.current_password)
+    except auth_svc.AuthError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="users",
+        action="totp_disable",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await session.commit()
+
+
+@router.post("/change-password", response_model=TokenPair)
+async def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> TokenPair:
+    """Self-service password change. Revokes every existing refresh
+    token, mints a fresh pair, and sends an SMTP notification (without
+    the password itself). Returns a new access token so the caller can
+    swap it in without bouncing through /login."""
+    try:
+        await auth_svc.change_own_password(
+            session,
+            user=user,
+            current_password=body.current_password,
+            new_password=body.new_password,
+        )
+    except auth_svc.AuthError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    # Audit log + commit DB before doing best-effort email — if SMTP is
+    # misconfigured we still want the password change to stick.
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="users",
+        action="self_password_change",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    # Mint a fresh refresh + access token so the active session is not
+    # killed by the bulk revoke we just performed.
+    refresh_raw, _ = await auth_svc.issue_refresh_token(
+        session,
+        user=user,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=client_ip(request),
+    )
+    _set_refresh_cookie(response, refresh_raw)
+    access, access_exp = auth_svc.issue_access_token(user)
+    await session.commit()
+
+    # Notify the user out-of-band. Failure here is logged but doesn't
+    # break the password change — they will have heard about it from
+    # the UI already.
+    try:
+        org = (
+            await session.execute(
+                select(Organization).where(Organization.id == user.organization_id)
+            )
+        ).scalar_one()
+        await email_svc.send_email(
+            org,
+            to=user.email,
+            subject="Your NetFleet password was changed",
+            body_text=(
+                "Hi,\n\n"
+                "Your NetFleet password was just changed.\n\n"
+                f"When: {request.headers.get('date', 'just now')}\n"
+                f"From IP: {client_ip(request) or 'unknown'}\n"
+                f"Device: {request.headers.get('user-agent', 'unknown')}\n\n"
+                "If this wasn't you, contact your administrator immediately.\n"
+            ),
+        )
+    except (email_svc.SmtpNotConfigured, email_svc.SmtpSendError) as e:
+        log.warning("password_change.email_failed", user_id=str(user.id), error=str(e))
+
+    return TokenPair(access_token=access, expires_at=access_exp)
 
 
 # ---------------- helpers ----------------

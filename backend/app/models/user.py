@@ -58,6 +58,11 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
 
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Set to True when an admin auto-generates an invite password or
+    # resets a user's password. The dashboard layout intercepts users
+    # with this flag and walks them through a password change before
+    # anything else can be done.
+    must_change_password: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Watermark for the navbar notifications bell — events with a

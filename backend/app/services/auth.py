@@ -244,3 +244,45 @@ async def confirm_totp_enrollment(session: AsyncSession, user: User, code: str) 
     user.totp_enrolled = True
     await session.flush()
     return True
+
+
+async def disable_totp(
+    session: AsyncSession, user: User, *, current_password: str
+) -> None:
+    """Operator-initiated TOTP removal. Re-checks the password so a
+    stolen-but-unlocked session can't unwind the second factor."""
+    if not verify_password(current_password, user.password_hash):
+        raise AuthError("invalid current password")
+    user.totp_secret_encrypted = None
+    user.totp_enrolled = False
+    await session.flush()
+
+
+# ---------------- Password change ----------------
+
+
+async def change_own_password(
+    session: AsyncSession,
+    *,
+    user: User,
+    current_password: str,
+    new_password: str,
+) -> None:
+    """Self-service password change.
+
+    Validates the current password, hashes the new one, clears the
+    must_change_password gate, and revokes every refresh token this user
+    owns so other sessions are kicked out. The caller (API layer) is
+    responsible for issuing a fresh refresh token afterwards if it
+    wants the active session to survive."""
+    if user.auth_method != AuthMethod.LOCAL:
+        raise AuthError("only local accounts can change password here")
+    if not verify_password(current_password, user.password_hash):
+        raise AuthError("current password is incorrect")
+    if current_password == new_password:
+        raise AuthError("new password must differ from current password")
+
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = False
+    await _revoke_all_for_user(session, user.id)
+    await session.flush()

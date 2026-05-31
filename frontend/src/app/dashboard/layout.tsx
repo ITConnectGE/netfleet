@@ -57,6 +57,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
   }, [isLoading, me, router]);
 
+  // Force first-login password change. The Profile page detects the
+  // same flag and locks itself into the password card until the
+  // change-password call succeeds.
+  useEffect(() => {
+    if (me?.must_change_password && pathname !== "/dashboard/profile") {
+      router.replace("/dashboard/profile?force=password");
+    }
+  }, [me?.must_change_password, pathname, router]);
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center">
@@ -65,6 +74,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     );
   }
   if (!me) return null;
+  const passwordChangeRequired = me.must_change_password;
 
   return (
     <ToastProvider>
@@ -92,12 +102,22 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={passwordChangeRequired ? "#" : item.href}
+                    onClick={(e) => {
+                      if (passwordChangeRequired) e.preventDefault();
+                    }}
+                    aria-disabled={passwordChangeRequired ? "true" : undefined}
+                    title={
+                      passwordChangeRequired
+                        ? "Change your password first"
+                        : undefined
+                    }
                     className={cn(
                       "rounded-md px-3 py-1.5 text-sm font-medium transition",
                       active
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      passwordChangeRequired && "pointer-events-none opacity-50",
                     )}
                   >
                     {item.label}
