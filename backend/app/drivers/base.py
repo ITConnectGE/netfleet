@@ -462,6 +462,15 @@ class VendorDriver(Protocol):
     async def firewall_filter_remove(
         self, creds: DeviceCredentials, rule_id: str
     ) -> None: ...
+    async def firewall_address_list_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        list_name: str,
+        address: str,
+        comment: str | None = None,
+        timeout: str | None = None,
+    ) -> str: ...
 
     # System logs
     async def log_list(

@@ -235,6 +235,24 @@ class MikrotikDriver:
     ) -> None:
         await self._call(creds, "/ip/firewall/filter/remove", **{".id": rule_id})
 
+    async def firewall_address_list_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        list_name: str,
+        address: str,
+        comment: str | None = None,
+        timeout: str | None = None,
+    ) -> str:
+        params: dict[str, Any] = {"list": list_name, "address": address}
+        if comment is not None:
+            params["comment"] = comment
+        if timeout is not None:
+            # RouterOS expects values like "1d", "12h", "30m", "1w".
+            params["timeout"] = timeout
+        rows = await self._call(creds, "/ip/firewall/address-list/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
     # ============== IP routes ==============
 
     async def ip_routes_list(self, creds: DeviceCredentials) -> list[IpRoute]:
