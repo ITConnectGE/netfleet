@@ -20,7 +20,9 @@ export function UpdateBanner() {
 
   const { data } = useQuery<UpdateStatus>({
     queryKey: ["update-status"],
-    queryFn: getUpdateStatus,
+    // Wrap so TanStack Query's QueryFunctionContext isn't passed as the
+    // `force` boolean — see settings/updates/page.tsx for the same fix.
+    queryFn: () => getUpdateStatus(),
     refetchInterval: (q) => (q.state.data && isInProgress(q.state.data.state) ? 2000 : 60_000),
     // The updater may be unreachable on a fresh install — fail silently
     retry: false,
