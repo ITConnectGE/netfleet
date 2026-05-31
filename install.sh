@@ -68,6 +68,11 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
   FERNET=$(gen_fernet)
   UPDATER_TOKEN=$(gen_hex)
   DB_PASS=$(gen_hex | head -c 24)
+  # First-run takeover defence — the very first POST /api/v1/setup must
+  # carry this token in `X-Bootstrap-Token`. The token is consumed by the
+  # `is_setup_complete=True` DB transition, so it is single-use even though
+  # we don't delete the .env line. See backend/app/api/v1/setup.py.
+  BOOTSTRAP_TOKEN=$(gen_hex)
 
   read -rp "Enter the domain that will serve NetFleet (e.g. netfleet.example.com): " DOMAIN
   DOMAIN="${DOMAIN:-localhost}"
@@ -78,6 +83,7 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
     -e "s|^NETFLEET_JWT_SECRET=.*|NETFLEET_JWT_SECRET=$JWT|" \
     -e "s|^NETFLEET_FERNET_KEY=.*|NETFLEET_FERNET_KEY=$FERNET|" \
     -e "s|^NETFLEET_UPDATER_TOKEN=.*|NETFLEET_UPDATER_TOKEN=$UPDATER_TOKEN|" \
+    -e "s|^NETFLEET_BOOTSTRAP_TOKEN=.*|NETFLEET_BOOTSTRAP_TOKEN=$BOOTSTRAP_TOKEN|" \
     -e "s|^NETFLEET_DB_PASSWORD=.*|NETFLEET_DB_PASSWORD=$DB_PASS|" \
     -e "s|^NETFLEET_DATABASE_URL=.*|NETFLEET_DATABASE_URL=postgresql+asyncpg://netfleet:$DB_PASS@postgres:5432/netfleet|" \
     -e "s|^NETFLEET_OIDC_REDIRECT_URI=.*|NETFLEET_OIDC_REDIRECT_URI=https://$DOMAIN/api/v1/auth/oidc/callback|" \
@@ -116,9 +122,27 @@ done
 
 log "done."
 DOMAIN_USED=$(grep '^NETFLEET_DOMAIN=' "$INSTALL_DIR/.env" | cut -d= -f2)
+TOKEN_USED=$(grep '^NETFLEET_BOOTSTRAP_TOKEN=' "$INSTALL_DIR/.env" | cut -d= -f2)
 echo
 echo -e "${COLOR_GREEN}=========================================================${COLOR_RESET}"
-echo -e "  ${COLOR_GREEN}NetFleet is up.${COLOR_RESET}  Open:  https://$DOMAIN_USED"
+echo -e "  ${COLOR_GREEN}NetFleet is up.${COLOR_RESET}"
+echo
+if [[ -n "$TOKEN_USED" ]]; then
+  # Token after the `#` is a URL fragment — fragments are not sent to the
+  # server in the request line, never land in access logs, the Referer
+  # header, or upstream proxy caches. The web setup page picks it up from
+  # window.location.hash and forwards it as the X-Bootstrap-Token header.
+  echo -e "  ${COLOR_GREEN}First-run setup URL${COLOR_RESET} (single use, share with care):"
+  echo
+  echo -e "    https://$DOMAIN_USED/setup#token=$TOKEN_USED"
+  echo
+  echo -e "  Token also stored in $INSTALL_DIR/.env (mode 600)"
+  echo -e "  as NETFLEET_BOOTSTRAP_TOKEN. Once the first admin is created,"
+  echo -e "  the endpoint refuses further setup attempts and the token is"
+  echo -e "  effectively dead."
+else
+  echo -e "  Open: https://$DOMAIN_USED"
+fi
 echo -e "${COLOR_GREEN}=========================================================${COLOR_RESET}"
 echo
 echo "Logs:    docker compose -f $INSTALL_DIR/docker-compose.yml logs -f"

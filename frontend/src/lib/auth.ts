@@ -178,9 +178,20 @@ export interface SetupPayload {
   admin_password: string;
 }
 
-export async function performSetup(payload: SetupPayload): Promise<void> {
+export async function performSetup(
+  payload: SetupPayload,
+  bootstrapToken: string,
+): Promise<void> {
   try {
-    await api.post("setup", { json: payload }).json();
+    // X-Bootstrap-Token guards first-run takeover. The token is delivered
+    // out-of-band by the installer (URL fragment, never sent to the server
+    // on the initial GET), so it never lands in access logs or proxy caches.
+    await api
+      .post("setup", {
+        json: payload,
+        headers: { "X-Bootstrap-Token": bootstrapToken },
+      })
+      .json();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

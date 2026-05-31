@@ -14,8 +14,29 @@ export default function SetupPage() {
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [bootstrapToken, setBootstrapToken] = useState("");
+  const [tokenFromUrl, setTokenFromUrl] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Read the bootstrap token from the URL fragment if the installer-printed
+  // link was used (e.g. https://host/setup#token=…). Fragments are not sent
+  // to the server in the initial request, so the token never lands in
+  // access logs, the Referer header, or upstream proxy caches.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+    const t = params.get("token");
+    if (t) {
+      setBootstrapToken(t);
+      setTokenFromUrl(true);
+      // Strip the fragment immediately so a stray screen-recording or
+      // address-bar glance doesn't leak it.
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     fetchSetupStatus()
@@ -43,15 +64,25 @@ export default function SetupPage() {
       setError("Passwords do not match.");
       return;
     }
+    if (!bootstrapToken.trim()) {
+      setError(
+        "Bootstrap token is required. Use the URL printed by install.sh, " +
+          "or paste the value of NETFLEET_BOOTSTRAP_TOKEN from /opt/netfleet/.env.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
-      await performSetup({
-        organization_name: orgName,
-        organization_slug: orgSlug,
-        admin_email: email,
-        admin_display_name: displayName,
-        admin_password: password,
-      });
+      await performSetup(
+        {
+          organization_name: orgName,
+          organization_slug: orgSlug,
+          admin_email: email,
+          admin_display_name: displayName,
+          admin_password: password,
+        },
+        bootstrapToken.trim(),
+      );
       router.replace("/login?setup=complete");
     } catch (e) {
       setError((e as Error).message);
@@ -82,6 +113,31 @@ export default function SetupPage() {
         )}
 
         <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+          <h2 className="text-sm font-medium text-muted-foreground">Bootstrap</h2>
+          <Field
+            label="Setup token"
+            htmlFor="bootstrap-token"
+            hint={
+              tokenFromUrl
+                ? "loaded from the install URL"
+                : "value of NETFLEET_BOOTSTRAP_TOKEN in /opt/netfleet/.env"
+            }
+          >
+            <input
+              id="bootstrap-token"
+              type="password"
+              required
+              value={bootstrapToken}
+              onChange={(e) => setBootstrapToken(e.target.value)}
+              className={`${inputClass} font-mono`}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="64-char hex token from install.sh"
+            />
+          </Field>
+
+          <hr className="border-border" />
+
           <h2 className="text-sm font-medium text-muted-foreground">Organization</h2>
           <Field label="Name" htmlFor="org-name">
             <input
