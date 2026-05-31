@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { useToast } from "@/components/toast";
 import {
@@ -89,6 +89,166 @@ export default function DhcpPage() {
   );
 }
 
+// ---------------- Shared table helpers ----------------
+
+type SortDir = "asc" | "desc" | null;
+
+interface SortState {
+  by: string | null;
+  dir: SortDir;
+}
+
+interface UseTableOpts<T> {
+  rows: T[];
+  /** Map column id → string accessor for filter + alphabetic sort. */
+  accessors: Record<string, (row: T) => string>;
+  /** Optional: map column id → numeric accessor; used for sort when present. */
+  numericAccessors?: Record<string, (row: T) => number>;
+}
+
+function useTable<T>({ rows, accessors, numericAccessors }: UseTableOpts<T>) {
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<SortState>({ by: null, dir: null });
+
+  const onFilter = (id: string, v: string) =>
+    setFilters((p) => ({ ...p, [id]: v }));
+
+  function onSort(id: string) {
+    setSort((prev) => {
+      if (prev.by !== id) return { by: id, dir: "asc" };
+      if (prev.dir === "asc") return { by: id, dir: "desc" };
+      return { by: null, dir: null };
+    });
+  }
+
+  const visible = useMemo(() => {
+    let out = rows.filter((r) =>
+      Object.entries(filters).every(([id, q]) => {
+        const needle = q.trim().toLowerCase();
+        if (!needle) return true;
+        const acc = accessors[id];
+        if (!acc) return true;
+        return acc(r).toLowerCase().includes(needle);
+      }),
+    );
+    if (sort.by && sort.dir) {
+      const numeric = numericAccessors?.[sort.by];
+      const text = accessors[sort.by];
+      out = [...out].sort((a, b) => {
+        if (numeric) {
+          return numeric(a) - numeric(b);
+        }
+        return text ? text(a).localeCompare(text(b)) : 0;
+      });
+      if (sort.dir === "desc") out.reverse();
+    }
+    return out;
+  }, [rows, filters, sort, accessors, numericAccessors]);
+
+  return { visible, filters, sort, onFilter, onSort };
+}
+
+interface ColDef {
+  id: string;
+  label: string;
+  align?: "left" | "right";
+  /** Hide the per-column filter input (e.g. for the actions column). */
+  noFilter?: boolean;
+  /** Disable click-to-sort (actions / non-sortable columns). */
+  noSort?: boolean;
+  /** Override the filter placeholder. */
+  placeholder?: string;
+}
+
+function TableHeader({
+  columns,
+  sort,
+  onSort,
+  filters,
+  onFilter,
+}: {
+  columns: ColDef[];
+  sort: SortState;
+  onSort: (id: string) => void;
+  filters: Record<string, string>;
+  onFilter: (id: string, value: string) => void;
+}) {
+  return (
+    <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+      <tr>
+        {columns.map((c) => {
+          const isSorted = sort.by === c.id && sort.dir;
+          const align = c.align === "right" ? "text-right" : "text-left";
+          return (
+            <th key={c.id} className={`px-3 py-2 font-medium ${align}`}>
+              {c.noSort ? (
+                <span>{c.label}</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSort(c.id)}
+                  className="inline-flex items-center gap-1 hover:text-foreground"
+                >
+                  {c.label}
+                  <span
+                    className={
+                      isSorted
+                        ? "text-foreground"
+                        : "text-muted-foreground/40"
+                    }
+                  >
+                    {isSorted
+                      ? sort.dir === "asc"
+                        ? "▲"
+                        : "▼"
+                      : "⇅"}
+                  </span>
+                </button>
+              )}
+            </th>
+          );
+        })}
+      </tr>
+      <tr className="border-b border-border bg-muted/20">
+        {columns.map((c) => (
+          <th key={`${c.id}-f`} className="px-2 py-1 align-top">
+            {c.noFilter ? null : (
+              <input
+                value={filters[c.id] ?? ""}
+                onChange={(e) => onFilter(c.id, e.target.value)}
+                placeholder={c.placeholder ?? "filter…"}
+                aria-label={`Filter ${c.label}`}
+                className="block w-full rounded border border-input bg-background px-2 py-0.5 text-[11px] font-normal text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            )}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+function EmptyRow({
+  span,
+  isLoading,
+  empty,
+}: {
+  span: number;
+  isLoading: boolean;
+  empty: string;
+}) {
+  return (
+    <tr>
+      <td
+        colSpan={span}
+        className="px-3 py-6 text-center text-muted-foreground"
+      >
+        {isLoading ? "Loading…" : empty}
+      </td>
+    </tr>
+  );
+}
+
 // ---------------- Leases ----------------
 
 function LeasesPanel({ deviceId }: { deviceId: string }) {
@@ -99,25 +259,39 @@ function LeasesPanel({ deviceId }: { deviceId: string }) {
     queryFn: () => listDhcpLeases(deviceId),
   });
 
-  const [filter, setFilter] = useState("");
-  const filtered = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    return (leases ?? []).filter((l) => {
-      if (!needle) return true;
-      const blob = [
-        l.address,
-        l.mac_address,
-        l.host_name,
-        l.comment,
-        l.status,
-        l.client_id,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return blob.includes(needle);
-    });
-  }, [leases, filter]);
+  const cols: ColDef[] = [
+    { id: "address", label: "Address" },
+    { id: "mac_address", label: "MAC" },
+    { id: "host_name", label: "Host" },
+    { id: "status", label: "Status" },
+    { id: "server", label: "Server" },
+    { id: "type", label: "Type", placeholder: "static / dynamic" },
+    { id: "expires", label: "Expires", noFilter: false },
+    { id: "comment", label: "Comment" },
+    { id: "actions", label: "", align: "right", noFilter: true, noSort: true },
+  ];
+
+  const accessors: Record<string, (r: DhcpLease) => string> = {
+    address: (r) => r.address,
+    mac_address: (r) => r.mac_address,
+    host_name: (r) => r.host_name ?? "",
+    status: (r) => r.status ?? "",
+    server: (r) => r.server ?? "",
+    type: (r) => (r.dynamic ? "dynamic" : "static") + (r.blocked ? " blocked" : ""),
+    expires: (r) => r.expires_at_iso ?? "",
+    comment: (r) => r.comment ?? "",
+    actions: () => "",
+  };
+  // Sort addresses as IPv4 numerically when possible, then alphabetically.
+  const numericAccessors: Record<string, (r: DhcpLease) => number> = {
+    address: (r) => ipToInt(r.address),
+  };
+
+  const { visible, filters, sort, onFilter, onSort } = useTable({
+    rows: leases ?? [],
+    accessors,
+    numericAccessors,
+  });
 
   const make = useMutation({
     mutationFn: (id: string) => makeLeaseStatic(deviceId, id),
@@ -138,40 +312,37 @@ function LeasesPanel({ deviceId }: { deviceId: string }) {
 
   return (
     <section>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <input
-          type="search"
-          placeholder="Filter by IP / MAC / hostname / comment…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        />
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Click a column header to sort; type below to filter that column.
+          Dynamic leases can be reserved as static (the router converts the
+          row in-place, keeping the same IP).
+        </p>
         <span className="text-xs text-muted-foreground">
-          {filtered.length} of {leases?.length ?? 0}
+          {visible.length} of {leases?.length ?? 0}
         </span>
       </div>
 
-      {isLoading && (
-        <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
-      )}
-
-      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
+      <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Address</th>
-              <th className="px-3 py-2 font-medium">MAC</th>
-              <th className="px-3 py-2 font-medium">Host</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Server</th>
-              <th className="px-3 py-2 font-medium">Comment</th>
-              <th className="px-3 py-2 font-medium text-right" />
-            </tr>
-          </thead>
+          <TableHeader
+            columns={cols}
+            sort={sort}
+            onSort={onSort}
+            filters={filters}
+            onFilter={onFilter}
+          />
           <tbody className="divide-y divide-border">
-            {filtered.map((l) => (
+            {(visible.length === 0 || isLoading) && (
+              <EmptyRow
+                span={cols.length}
+                isLoading={isLoading}
+                empty="No leases match."
+              />
+            )}
+            {visible.map((l) => (
               <LeaseRow
-                key={l.id ?? l.mac_address}
+                key={l.id ?? `${l.address}-${l.mac_address}`}
                 lease={l}
                 onMakeStatic={() => l.id && make.mutate(l.id)}
                 onDelete={() => {
@@ -189,16 +360,6 @@ function LeasesPanel({ deviceId }: { deviceId: string }) {
                 }}
               />
             ))}
-            {!isLoading && filtered.length === 0 && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="px-3 py-8 text-center text-muted-foreground"
-                >
-                  No leases match.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
@@ -219,6 +380,7 @@ function LeaseRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(lease.comment ?? "");
+  const canReserve = lease.dynamic && lease.id !== null;
   return (
     <tr className="align-top hover:bg-accent/30">
       <td className="px-3 py-2 font-mono text-xs">{lease.address}</td>
@@ -234,9 +396,16 @@ function LeaseRow({
         >
           {lease.status ?? "—"}
         </span>
-        {lease.dynamic && (
-          <span className="ml-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-900">
+      </td>
+      <td className="px-3 py-2 text-xs">{lease.server ?? "—"}</td>
+      <td className="px-3 py-2 text-xs">
+        {lease.dynamic ? (
+          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-900">
             dynamic
+          </span>
+        ) : (
+          <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-sky-900">
+            static
           </span>
         )}
         {lease.blocked && (
@@ -245,7 +414,9 @@ function LeaseRow({
           </span>
         )}
       </td>
-      <td className="px-3 py-2 text-xs">{lease.server ?? "—"}</td>
+      <td className="px-3 py-2 text-xs text-muted-foreground">
+        {lease.expires_at_iso ?? "—"}
+      </td>
       <td className="px-3 py-2 text-xs">
         {editing ? (
           <div className="flex items-center gap-2">
@@ -286,14 +457,21 @@ function LeaseRow({
         )}
       </td>
       <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
-        {lease.dynamic && (
+        {canReserve ? (
           <button
             type="button"
             onClick={onMakeStatic}
-            className="mr-3 text-primary hover:underline"
+            className="mr-3 rounded-md border border-primary/40 bg-primary/5 px-2 py-0.5 font-medium text-primary hover:bg-primary/10"
+            title="Convert this dynamic lease into a static reservation (same IP, MAC bound)"
           >
-            Reserve (static)
+            Reserve
           </button>
+        ) : (
+          !lease.dynamic && (
+            <span className="mr-3 text-[10px] uppercase tracking-wide text-muted-foreground">
+              reserved
+            </span>
+          )
         )}
         <button
           type="button"
@@ -321,6 +499,31 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
     queryFn: () => listDhcpPools(deviceId),
   });
   const [showForm, setShowForm] = useState(false);
+
+  const cols: ColDef[] = [
+    { id: "name", label: "Name" },
+    { id: "interface", label: "Interface" },
+    { id: "address_pool", label: "Pool" },
+    { id: "lease_time", label: "Lease time" },
+    { id: "authoritative", label: "Authoritative" },
+    { id: "status", label: "Status" },
+    { id: "comment", label: "Comment" },
+    { id: "actions", label: "", align: "right", noFilter: true, noSort: true },
+  ];
+  const accessors: Record<string, (r: DhcpServer) => string> = {
+    name: (r) => r.name,
+    interface: (r) => r.interface,
+    address_pool: (r) => r.address_pool ?? "",
+    lease_time: (r) => r.lease_time ?? "",
+    authoritative: (r) => r.authoritative ?? "",
+    status: (r) => (r.disabled ? "disabled" : "active"),
+    comment: (r) => r.comment ?? "",
+    actions: () => "",
+  };
+  const { visible, filters, sort, onFilter, onSort } = useTable({
+    rows: servers ?? [],
+    accessors,
+  });
 
   const del = useMutation({
     mutationFn: (id: string) => deleteDhcpServer(deviceId, id),
@@ -358,37 +561,28 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
 
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Name</th>
-              <th className="px-3 py-2 font-medium">Interface</th>
-              <th className="px-3 py-2 font-medium">Pool</th>
-              <th className="px-3 py-2 font-medium">Lease time</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium text-right" />
-            </tr>
-          </thead>
+          <TableHeader
+            columns={cols}
+            sort={sort}
+            onSort={onSort}
+            filters={filters}
+            onFilter={onFilter}
+          />
           <tbody className="divide-y divide-border">
-            {isLoading && (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                  Loading…
-                </td>
-              </tr>
+            {(visible.length === 0 || isLoading) && (
+              <EmptyRow
+                span={cols.length}
+                isLoading={isLoading}
+                empty="No servers match."
+              />
             )}
-            {!isLoading && (servers ?? []).length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                  No servers yet.
-                </td>
-              </tr>
-            )}
-            {servers?.map((s) => (
+            {visible.map((s) => (
               <tr key={s.id ?? s.name} className="hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{s.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{s.interface}</td>
                 <td className="px-3 py-2 text-xs">{s.address_pool ?? "—"}</td>
                 <td className="px-3 py-2 text-xs">{s.lease_time ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">{s.authoritative ?? "—"}</td>
                 <td className="px-3 py-2 text-xs">
                   {s.disabled ? (
                     <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-zinc-800">
@@ -399,6 +593,9 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
                       active
                     </span>
                   )}
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">
+                  {s.comment ?? "—"}
                 </td>
                 <td className="px-3 py-2 text-right text-xs">
                   <button
@@ -465,8 +662,7 @@ function ServerForm({
         </p>
       )}
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="block space-y-1 text-sm font-medium">
-          Name
+        <FormLabel label="Name">
           <input
             required
             value={name}
@@ -474,9 +670,8 @@ function ServerForm({
             className={input}
             placeholder="dhcp-lan"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Interface
+        </FormLabel>
+        <FormLabel label="Interface">
           <input
             required
             value={iface}
@@ -484,9 +679,8 @@ function ServerForm({
             className={`${input} font-mono`}
             placeholder="bridge-lan"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Address pool
+        </FormLabel>
+        <FormLabel label="Address pool">
           <select
             value={pool}
             onChange={(e) => setPool(e.target.value)}
@@ -499,16 +693,15 @@ function ServerForm({
               </option>
             ))}
           </select>
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Lease time
+        </FormLabel>
+        <FormLabel label="Lease time">
           <input
             value={leaseTime}
             onChange={(e) => setLeaseTime(e.target.value)}
             className={input}
             placeholder="1d, 30m, 12h"
           />
-        </label>
+        </FormLabel>
       </div>
       <div className="mt-4 flex justify-end">
         <button
@@ -533,6 +726,34 @@ function NetworksPanel({ deviceId }: { deviceId: string }) {
     queryFn: () => listDhcpNetworks(deviceId),
   });
   const [showForm, setShowForm] = useState(false);
+
+  const cols: ColDef[] = [
+    { id: "address", label: "Address" },
+    { id: "gateway", label: "Gateway" },
+    { id: "dns_servers", label: "DNS" },
+    { id: "ntp_servers", label: "NTP" },
+    { id: "domain", label: "Domain" },
+    { id: "comment", label: "Comment" },
+    { id: "actions", label: "", align: "right", noFilter: true, noSort: true },
+  ];
+  const accessors: Record<string, (r: DhcpNetwork) => string> = {
+    address: (r) => r.address,
+    gateway: (r) => r.gateway ?? "",
+    dns_servers: (r) => r.dns_servers ?? "",
+    ntp_servers: (r) => r.ntp_servers ?? "",
+    domain: (r) => r.domain ?? "",
+    comment: (r) => r.comment ?? "",
+    actions: () => "",
+  };
+  const numericAccessors: Record<string, (r: DhcpNetwork) => number> = {
+    address: (r) => ipToInt(r.address),
+    gateway: (r) => (r.gateway ? ipToInt(r.gateway) : 0),
+  };
+  const { visible, filters, sort, onFilter, onSort } = useTable({
+    rows: networks ?? [],
+    accessors,
+    numericAccessors,
+  });
 
   const del = useMutation({
     mutationFn: (id: string) => deleteDhcpNetwork(deviceId, id),
@@ -570,38 +791,31 @@ function NetworksPanel({ deviceId }: { deviceId: string }) {
 
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Address</th>
-              <th className="px-3 py-2 font-medium">Gateway</th>
-              <th className="px-3 py-2 font-medium">DNS</th>
-              <th className="px-3 py-2 font-medium">NTP</th>
-              <th className="px-3 py-2 font-medium">Domain</th>
-              <th className="px-3 py-2 font-medium text-right" />
-            </tr>
-          </thead>
+          <TableHeader
+            columns={cols}
+            sort={sort}
+            onSort={onSort}
+            filters={filters}
+            onFilter={onFilter}
+          />
           <tbody className="divide-y divide-border">
-            {isLoading && (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                  Loading…
-                </td>
-              </tr>
+            {(visible.length === 0 || isLoading) && (
+              <EmptyRow
+                span={cols.length}
+                isLoading={isLoading}
+                empty="No networks defined."
+              />
             )}
-            {!isLoading && (networks ?? []).length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                  No networks defined.
-                </td>
-              </tr>
-            )}
-            {networks?.map((n) => (
+            {visible.map((n) => (
               <tr key={n.id ?? n.address} className="hover:bg-accent/30">
                 <td className="px-3 py-2 font-mono text-xs">{n.address}</td>
                 <td className="px-3 py-2 font-mono text-xs">{n.gateway ?? "—"}</td>
                 <td className="px-3 py-2 font-mono text-xs">{n.dns_servers ?? "—"}</td>
                 <td className="px-3 py-2 font-mono text-xs">{n.ntp_servers ?? "—"}</td>
                 <td className="px-3 py-2 text-xs">{n.domain ?? "—"}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">
+                  {n.comment ?? "—"}
+                </td>
                 <td className="px-3 py-2 text-right text-xs">
                   <button
                     onClick={() => {
@@ -667,8 +881,7 @@ function NetworkForm({
         </p>
       )}
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="block space-y-1 text-sm font-medium">
-          Network (CIDR)
+        <FormLabel label="Network (CIDR)">
           <input
             required
             value={address}
@@ -676,42 +889,38 @@ function NetworkForm({
             className={`${input} font-mono`}
             placeholder="10.0.0.0/24"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Gateway
+        </FormLabel>
+        <FormLabel label="Gateway">
           <input
             value={gateway}
             onChange={(e) => setGateway(e.target.value)}
             className={`${input} font-mono`}
             placeholder="10.0.0.1"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          DNS servers
+        </FormLabel>
+        <FormLabel label="DNS servers">
           <input
             value={dns}
             onChange={(e) => setDns(e.target.value)}
             className={`${input} font-mono`}
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          NTP servers
+        </FormLabel>
+        <FormLabel label="NTP servers">
           <input
             value={ntp}
             onChange={(e) => setNtp(e.target.value)}
             className={`${input} font-mono`}
             placeholder="pool.ntp.org"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Domain
+        </FormLabel>
+        <FormLabel label="Domain">
           <input
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
             className={input}
             placeholder="corp.local"
           />
-        </label>
+        </FormLabel>
       </div>
       <div className="mt-4 flex justify-end">
         <button
@@ -736,6 +945,25 @@ function PoolsPanel({ deviceId }: { deviceId: string }) {
     queryFn: () => listDhcpPools(deviceId),
   });
   const [showForm, setShowForm] = useState(false);
+
+  const cols: ColDef[] = [
+    { id: "name", label: "Name" },
+    { id: "ranges", label: "Ranges" },
+    { id: "next_pool", label: "Next pool" },
+    { id: "comment", label: "Comment" },
+    { id: "actions", label: "", align: "right", noFilter: true, noSort: true },
+  ];
+  const accessors: Record<string, (r: DhcpPool) => string> = {
+    name: (r) => r.name,
+    ranges: (r) => r.ranges,
+    next_pool: (r) => r.next_pool ?? "",
+    comment: (r) => r.comment ?? "",
+    actions: () => "",
+  };
+  const { visible, filters, sort, onFilter, onSort } = useTable({
+    rows: pools ?? [],
+    accessors,
+  });
 
   const del = useMutation({
     mutationFn: (id: string) => deleteDhcpPool(deviceId, id),
@@ -773,31 +1001,22 @@ function PoolsPanel({ deviceId }: { deviceId: string }) {
 
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Name</th>
-              <th className="px-3 py-2 font-medium">Ranges</th>
-              <th className="px-3 py-2 font-medium">Next pool</th>
-              <th className="px-3 py-2 font-medium">Comment</th>
-              <th className="px-3 py-2 font-medium text-right" />
-            </tr>
-          </thead>
+          <TableHeader
+            columns={cols}
+            sort={sort}
+            onSort={onSort}
+            filters={filters}
+            onFilter={onFilter}
+          />
           <tbody className="divide-y divide-border">
-            {isLoading && (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
-                  Loading…
-                </td>
-              </tr>
+            {(visible.length === 0 || isLoading) && (
+              <EmptyRow
+                span={cols.length}
+                isLoading={isLoading}
+                empty="No pools defined."
+              />
             )}
-            {!isLoading && (pools ?? []).length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
-                  No pools defined.
-                </td>
-              </tr>
-            )}
-            {pools?.map((p) => (
+            {visible.map((p) => (
               <tr key={p.id ?? p.name} className="hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{p.name}</td>
                 <td className="px-3 py-2 font-mono text-xs">{p.ranges}</td>
@@ -866,8 +1085,7 @@ function PoolForm({
         </p>
       )}
       <div className="grid gap-3 md:grid-cols-3">
-        <label className="block space-y-1 text-sm font-medium">
-          Name
+        <FormLabel label="Name">
           <input
             required
             value={name}
@@ -875,9 +1093,8 @@ function PoolForm({
             className={input}
             placeholder="lan-pool"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Ranges
+        </FormLabel>
+        <FormLabel label="Ranges">
           <input
             required
             value={ranges}
@@ -885,15 +1102,14 @@ function PoolForm({
             className={`${input} font-mono`}
             placeholder="10.0.0.10-10.0.0.250"
           />
-        </label>
-        <label className="block space-y-1 text-sm font-medium">
-          Comment
+        </FormLabel>
+        <FormLabel label="Comment">
           <input
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             className={input}
           />
-        </label>
+        </FormLabel>
       </div>
       <div className="mt-4 flex justify-end">
         <button
@@ -906,6 +1122,37 @@ function PoolForm({
       </div>
     </form>
   );
+}
+
+function FormLabel({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block space-y-1 text-sm font-medium">
+      {label}
+      {children}
+    </label>
+  );
+}
+
+// IPv4 → 32-bit integer for numeric sort. Returns 0 for anything that
+// isn't a dotted-quad so non-IPs sort to the top under "asc".
+function ipToInt(s: string): number {
+  const head = s.split("/")[0]?.split("-")[0]?.trim();
+  if (!head) return 0;
+  const parts = head.split(".");
+  if (parts.length !== 4) return 0;
+  let acc = 0;
+  for (const p of parts) {
+    const n = Number(p);
+    if (!Number.isFinite(n) || n < 0 || n > 255) return 0;
+    acc = acc * 256 + n;
+  }
+  return acc;
 }
 
 // Silence unused-import warnings until the edit forms come online.
