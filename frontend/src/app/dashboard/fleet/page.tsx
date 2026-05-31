@@ -170,6 +170,13 @@ export default function FleetPage() {
             {totalDevices === 1 ? "" : "s"}
           </div>
           <Link
+            href="/dashboard/wg-s2s/new"
+            className="rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10"
+            title="Build a site-to-site WireGuard tunnel between two MikroTik routers"
+          >
+            🔗 S2S WG
+          </Link>
+          <Link
             href="/dashboard/fleet/new"
             className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
           >

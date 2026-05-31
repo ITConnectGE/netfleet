@@ -29,6 +29,7 @@ from app.api.v1 import (
     updates,
     users,
     vpn,
+    wg_s2s,
 )
 
 router = APIRouter()
@@ -60,6 +61,7 @@ router.include_router(updates.router, prefix="/system/update", tags=["updates"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(access.router, prefix="/access", tags=["access"])
 router.include_router(dhcp.router, prefix="/devices", tags=["dhcp"])
+router.include_router(wg_s2s.router, prefix="/wireguard-tunnels/site-to-site", tags=["wireguard-s2s"])
 router.include_router(
     access_requests.router, prefix="/access-requests", tags=["access-requests"]
 )

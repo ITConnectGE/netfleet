@@ -119,19 +119,24 @@ function Row({
         onClick={onNavigate}
         className={
           item.unread
-            ? "flex items-start gap-2 px-3 py-2 hover:bg-accent"
+            ? "flex items-start gap-2 bg-sky-50/70 px-3 py-2 hover:bg-sky-100/80"
             : "flex items-start gap-2 px-3 py-2 hover:bg-accent"
         }
       >
         <span
           className={
             item.unread
-              ? "mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-primary"
+              ? "mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-sky-500 ring-2 ring-sky-200"
               : "mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-transparent"
           }
+          aria-label={item.unread ? "Unread" : undefined}
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium">{item.title}</div>
+          <div
+            className={`truncate text-xs ${item.unread ? "font-semibold text-foreground" : "font-medium"}`}
+          >
+            {item.title}
+          </div>
           {item.subtitle && (
             <div className="truncate text-[11px] text-muted-foreground">
               {item.subtitle}
