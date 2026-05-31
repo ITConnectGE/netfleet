@@ -72,7 +72,11 @@ export default function DashboardPage() {
               fw?.updates_available ?? "—"
             )
           }
-          href="/dashboard/devices"
+          href={
+            fw && (fw.updates_available ?? 0) > 0
+              ? "/dashboard/devices?firmware=available"
+              : "/dashboard/devices"
+          }
           hint={
             fw
               ? allUpToDate

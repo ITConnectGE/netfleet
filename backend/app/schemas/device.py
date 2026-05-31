@@ -64,6 +64,10 @@ class DevicePublic(BaseModel):
     model: str | None
     serial: str | None
     firmware: str | None
+    firmware_available: str | None
+    firmware_checked_at: datetime | None
+    routerboard_current: str | None
+    routerboard_available: str | None
     status: DeviceStatus
     status_error: str | None
     last_seen_at: datetime | None

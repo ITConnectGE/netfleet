@@ -19,6 +19,10 @@ export interface Device {
   model: string | null;
   serial: string | null;
   firmware: string | null;
+  firmware_available: string | null;
+  firmware_checked_at: string | null;
+  routerboard_current: string | null;
+  routerboard_available: string | null;
   status: DeviceStatus;
   status_error: string | null;
   last_seen_at: string | null;

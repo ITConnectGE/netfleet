@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { StatusPill } from "@/components/status-pill";
 import {
@@ -17,6 +18,10 @@ import { listSites, type Site } from "@/lib/sites";
 
 export default function DevicesPage() {
   const qc = useQueryClient();
+  const searchParams = useSearchParams();
+  const firmwareFilter = searchParams.get("firmware"); // "available" | null
+  const statusFilter = searchParams.get("status"); // "online" | "offline" | "error" | null
+
   const { data: devices, isLoading } = useQuery<Device[]>({
     queryKey: ["devices"],
     queryFn: () => listDevices(),
@@ -27,6 +32,28 @@ export default function DevicesPage() {
 
   const siteIndex = Object.fromEntries((sites ?? []).map((s) => [s.id, s.name]));
   const vendorIndex = Object.fromEntries((drivers ?? []).map((d) => [d.vendor, d.display_name]));
+
+  // Derived row set after filters. Kept here so the empty-state and the
+  // counter pill both reflect the active filter.
+  const filtered = useMemo(() => {
+    if (!devices) return undefined;
+    return devices.filter((d) => {
+      if (statusFilter && d.status !== statusFilter) return false;
+      if (firmwareFilter === "available") {
+        const osUp =
+          d.firmware_available &&
+          d.firmware &&
+          d.firmware_available !== d.firmware;
+        const rbUp =
+          d.routerboard_available &&
+          d.routerboard_current &&
+          d.routerboard_available !== d.routerboard_current;
+        if (!osUp && !rbUp) return false;
+      }
+      return true;
+    });
+  }, [devices, firmwareFilter, statusFilter]);
+  const activeFilter = firmwareFilter === "available" ? "firmware updates" : statusFilter ?? null;
 
   return (
     <div>
@@ -69,6 +96,21 @@ export default function DevicesPage() {
         />
       )}
 
+      {activeFilter && (
+        <div className="mt-4 flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>
+            Filtered by <strong>{activeFilter}</strong> — showing{" "}
+            {filtered?.length ?? 0} of {devices?.length ?? 0} devices.
+          </span>
+          <Link
+            href="/dashboard/devices"
+            className="font-medium underline-offset-2 hover:underline"
+          >
+            Clear
+          </Link>
+        </div>
+      )}
+
       <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
           <thead className="border-b border-border bg-muted/50">
@@ -77,6 +119,7 @@ export default function DevicesPage() {
               <th className="px-4 py-2.5 font-medium">Site</th>
               <th className="px-4 py-2.5 font-medium">Vendor</th>
               <th className="px-4 py-2.5 font-medium">Host</th>
+              <th className="px-4 py-2.5 font-medium">Firmware</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
               <th className="px-4 py-2.5 font-medium" />
             </tr>
@@ -84,19 +127,21 @@ export default function DevicesPage() {
           <tbody className="divide-y divide-border">
             {isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             )}
-            {!isLoading && (!devices || devices.length === 0) && (
+            {!isLoading && filtered && filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                  No devices yet.
+                <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
+                  {activeFilter
+                    ? `No devices match the ${activeFilter} filter.`
+                    : "No devices yet."}
                 </td>
               </tr>
             )}
-            {devices?.map((d) => (
+            {filtered?.map((d) => (
               <DeviceRow
                 key={d.id}
                 device={d}
@@ -120,6 +165,15 @@ function DeviceRow({
   siteName: string;
   vendorName: string;
 }) {
+  const osUpgrade =
+    device.firmware_available &&
+    device.firmware &&
+    device.firmware_available !== device.firmware;
+  const rbUpgrade =
+    device.routerboard_available &&
+    device.routerboard_current &&
+    device.routerboard_available !== device.routerboard_current;
+
   return (
     <tr className="hover:bg-accent/30">
       <td className="px-4 py-3 font-medium">
@@ -131,6 +185,19 @@ function DeviceRow({
       <td className="px-4 py-3">{vendorName}</td>
       <td className="px-4 py-3 font-mono text-xs">
         {device.host}:{device.port}
+      </td>
+      <td className="px-4 py-3 font-mono text-xs">
+        {device.firmware ?? "—"}
+        {osUpgrade && (
+          <span className="ml-1.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
+            → {device.firmware_available}
+          </span>
+        )}
+        {rbUpgrade && (
+          <span className="ml-1.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
+            RB → {device.routerboard_available}
+          </span>
+        )}
       </td>
       <td className="px-4 py-3">
         <StatusPill status={device.status} />
