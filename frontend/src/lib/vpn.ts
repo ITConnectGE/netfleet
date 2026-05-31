@@ -195,6 +195,34 @@ export async function revealWgPeerKeys(
   }
 }
 
+export interface WgEndpointSuggestion {
+  address: string;
+  interface: string;
+  comment: string | null;
+}
+
+export interface WgSubnetSuggestion {
+  cidr: string;
+  interface: string;
+  comment: string | null;
+}
+
+export async function listWgEndpointSuggestions(
+  deviceId: string,
+): Promise<WgEndpointSuggestion[]> {
+  return api
+    .get(`devices/${deviceId}/wireguard/-/endpoints-suggested`)
+    .json<WgEndpointSuggestion[]>();
+}
+
+export async function listWgLanSubnets(
+  deviceId: string,
+): Promise<WgSubnetSuggestion[]> {
+  return api
+    .get(`devices/${deviceId}/wireguard/-/lan-subnets-suggested`)
+    .json<WgSubnetSuggestion[]>();
+}
+
 export async function downloadWgClientConfig(
   deviceId: string,
   peerId: string,

@@ -488,6 +488,13 @@ class VendorDriver(Protocol):
 
     # IP addresses
     async def ip_addresses_list(self, creds: DeviceCredentials) -> list[IpAddress]: ...
+    async def interface_list_members(
+        self, creds: DeviceCredentials, list_name: str
+    ) -> list[str]:
+        """Return the names of interfaces belonging to the given
+        ``/interface/list`` (e.g. ``WAN``, ``LAN``). Empty list when
+        the named list doesn't exist on the device."""
+        ...
 
     # ARP
     async def ip_arp_list(self, creds: DeviceCredentials) -> list[ArpEntry]: ...

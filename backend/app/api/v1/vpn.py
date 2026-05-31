@@ -8,12 +8,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from app.api.dependencies import (
     client_ip,
     db_session,
     get_current_user,
     require_permission,
 )
+from app.drivers import get_driver
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.secret_audit import RevealRequest
@@ -31,8 +34,28 @@ from app.services import audit as audit_svc
 from app.services import device as device_svc
 from app.services import vpn as vpn_svc
 from app.services import wireguard as wg
+from app.services.device import _to_driver_creds
 
 router = APIRouter()
+
+
+class WgEndpointSuggestion(BaseModel):
+    """One row in /devices/{id}/wireguard/-/endpoints-suggested."""
+
+    address: str
+    interface: str
+    comment: str | None = None
+
+
+class WgSubnetSuggestion(BaseModel):
+    """One row in /devices/{id}/wireguard/-/lan-subnets-suggested.
+
+    ``cidr`` is the subnet in slash-notation (e.g. 10.0.0.0/24) — that's
+    what the operator pastes into AllowedIPs."""
+
+    cidr: str
+    interface: str
+    comment: str | None = None
 
 
 # ---------------- PPP secrets ----------------
@@ -634,3 +657,109 @@ async def generate_wg_client_config(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         media_type="text/plain",
     )
+
+
+@router.get(
+    "/{device_id}/wireguard/-/endpoints-suggested",
+    response_model=list[WgEndpointSuggestion],
+)
+async def list_wg_endpoint_suggestions(
+    device_id: UUID,
+    user: User = Depends(require_permission("vpn.wireguard.peer", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> list[WgEndpointSuggestion]:
+    """Return the device's WAN IPs so the operator can pick one as the
+    client config Endpoint without typing it. We treat any interface
+    listed in /interface/list list=WAN as a public-facing interface;
+    the operator can still type a different value (CGNAT-bypass DDNS,
+    floating IP, etc.) in the UI."""
+    device = await get_device_for_actor(session, user, device_id)
+    driver = get_driver(device.vendor)
+    creds = _to_driver_creds(device)
+    try:
+        wan_ifaces = set(
+            (await driver.interface_list_members(creds, "WAN")) or []
+        )
+        addresses = await driver.ip_addresses_list(creds)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    out: list[WgEndpointSuggestion] = []
+    for a in addresses:
+        if not a.interface or a.disabled or a.invalid:
+            continue
+        if wan_ifaces and a.interface not in wan_ifaces:
+            continue
+        # Strip "/24" etc. — the endpoint takes a bare host.
+        host = (a.address or "").split("/", 1)[0]
+        if not host:
+            continue
+        out.append(
+            WgEndpointSuggestion(
+                address=host, interface=a.interface, comment=a.comment
+            )
+        )
+    return out
+
+
+@router.get(
+    "/{device_id}/wireguard/-/lan-subnets-suggested",
+    response_model=list[WgSubnetSuggestion],
+)
+async def list_wg_lan_subnets(
+    device_id: UUID,
+    user: User = Depends(require_permission("vpn.wireguard.peer", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> list[WgSubnetSuggestion]:
+    """Return the device's known IPv4 subnets so the AllowedIPs picker
+    can show "tick the LANs this peer needs to reach". Interfaces that
+    appear in /interface/list list=WAN are excluded — peer AllowedIPs
+    aimed at WANs are usually accidental."""
+    device = await get_device_for_actor(session, user, device_id)
+    driver = get_driver(device.vendor)
+    creds = _to_driver_creds(device)
+    try:
+        wan_ifaces = set(
+            (await driver.interface_list_members(creds, "WAN")) or []
+        )
+        addresses = await driver.ip_addresses_list(creds)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    seen: set[str] = set()
+    out: list[WgSubnetSuggestion] = []
+    for a in addresses:
+        if not a.interface or a.disabled or a.invalid:
+            continue
+        if a.interface in wan_ifaces:
+            continue
+        # We want the subnet, not the host bit. RouterOS exposes
+        # ``address`` like "10.0.0.1/24" and ``network`` as "10.0.0.0".
+        addr = (a.address or "").strip()
+        if "/" not in addr:
+            continue
+        host, prefix = addr.split("/", 1)
+        cidr = (
+            f"{a.network}/{prefix}"
+            if a.network
+            else f"{host}/{prefix}"
+        )
+        if cidr in seen:
+            continue
+        seen.add(cidr)
+        out.append(
+            WgSubnetSuggestion(
+                cidr=cidr, interface=a.interface, comment=a.comment
+            )
+        )
+    return out
+
+
+async def get_device_for_actor(
+    session: AsyncSession, actor: User, device_id: UUID
+):
+    """Tiny convenience: pull the device row + 404 if not in this org."""
+    try:
+        return await device_svc.get_device(session, actor.organization_id, device_id)
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

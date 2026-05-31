@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 import {
   createWgInterface,
@@ -10,10 +10,14 @@ import {
   deleteWgInterface,
   deleteWgPeer,
   downloadWgClientConfig,
+  listWgEndpointSuggestions,
   listWgInterfaces,
+  listWgLanSubnets,
   listWgPeers,
+  type WgEndpointSuggestion,
   type WgInterface,
   type WgPeer,
+  type WgSubnetSuggestion,
 } from "@/lib/vpn";
 
 export default function WireguardPage() {
@@ -474,8 +478,37 @@ function ConfigModal({
   const [port, setPort] = useState(51820);
   const [clientAddr, setClientAddr] = useState(peer.allowed_address ?? "");
   const [dns, setDns] = useState("1.1.1.1");
-  const [allowedIps, setAllowedIps] = useState("0.0.0.0/0, ::/0");
+  const [subnetPicks, setSubnetPicks] = useState<Set<string>>(
+    () => new Set(["0.0.0.0/0", "::/0"]),
+  );
+  const [extraCidrs, setExtraCidrs] = useState("");
   const [keepalive, setKeepalive] = useState(25);
+
+  const { data: endpointSuggestions } = useQuery<WgEndpointSuggestion[]>({
+    queryKey: ["wg-endpoint-suggestions", deviceId],
+    queryFn: () => listWgEndpointSuggestions(deviceId),
+  });
+  const { data: lanSubnets } = useQuery<WgSubnetSuggestion[]>({
+    queryKey: ["wg-lan-subnets", deviceId],
+    queryFn: () => listWgLanSubnets(deviceId),
+  });
+
+  const allowedIps = useMemo(() => {
+    const fromExtra = extraCidrs
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return [...Array.from(subnetPicks), ...fromExtra].join(", ");
+  }, [subnetPicks, extraCidrs]);
+
+  function toggleSubnet(cidr: string, on: boolean) {
+    setSubnetPicks((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(cidr);
+      else next.delete(cidr);
+      return next;
+    });
+  }
 
   const [confText, setConfText] = useState<string | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
@@ -574,7 +607,41 @@ function ConfigModal({
               onChange={(e) => setEndpoint(e.target.value)}
               className={input}
               placeholder="vpn.example.com"
+              list="c-ep-suggestions"
             />
+            {endpointSuggestions && endpointSuggestions.length > 0 && (
+              <>
+                <datalist id="c-ep-suggestions">
+                  {endpointSuggestions.map((s) => (
+                    <option key={`${s.address}:${s.interface}`} value={s.address}>
+                      {s.interface}
+                    </option>
+                  ))}
+                </datalist>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {endpointSuggestions.map((s) => (
+                    <button
+                      key={`${s.address}:${s.interface}`}
+                      type="button"
+                      onClick={() => setEndpoint(s.address)}
+                      className={`rounded-md border px-2 py-0.5 text-[11px] font-mono transition hover:bg-accent ${
+                        endpoint === s.address
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-input bg-background text-muted-foreground"
+                      }`}
+                      title={`Interface: ${s.interface}`}
+                    >
+                      {s.address}{" "}
+                      <span className="text-muted-foreground">· {s.interface}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  WAN IPs detected on this router (from /interface/list list=WAN). Type
+                  a custom value to override.
+                </p>
+              </>
+            )}
           </Field>
           <Field label="Server port" htmlFor="c-port">
             <input
@@ -607,14 +674,75 @@ function ConfigModal({
               placeholder="1.1.1.1"
             />
           </Field>
-          <Field label="Allowed IPs (split tunnel)" htmlFor="c-ai">
-            <input
-              id="c-ai"
-              value={allowedIps}
-              onChange={(e) => setAllowedIps(e.target.value)}
-              className={`${input} font-mono`}
-            />
-          </Field>
+          <div className="space-y-1.5">
+            <div className="text-sm font-medium">
+              Allowed IPs{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                split tunnel · pick which traffic flows through the VPN
+              </span>
+            </div>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={subnetPicks.has("0.0.0.0/0")}
+                  onChange={(e) => toggleSubnet("0.0.0.0/0", e.target.checked)}
+                  className="size-4"
+                />
+                <span className="font-mono">0.0.0.0/0</span>
+                <span className="text-muted-foreground">
+                  · everything (full tunnel)
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={subnetPicks.has("::/0")}
+                  onChange={(e) => toggleSubnet("::/0", e.target.checked)}
+                  className="size-4"
+                />
+                <span className="font-mono">::/0</span>
+                <span className="text-muted-foreground">· all IPv6</span>
+              </label>
+              {lanSubnets?.map((s) => (
+                <label
+                  key={s.cidr}
+                  className="flex items-center gap-2 text-xs"
+                  title={
+                    s.comment
+                      ? `${s.interface} · ${s.comment}`
+                      : `interface ${s.interface}`
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={subnetPicks.has(s.cidr)}
+                    onChange={(e) => toggleSubnet(s.cidr, e.target.checked)}
+                    className="size-4"
+                  />
+                  <span className="font-mono">{s.cidr}</span>
+                  <span className="text-muted-foreground">· {s.interface}</span>
+                </label>
+              ))}
+              {lanSubnets && lanSubnets.length === 0 && (
+                <p className="text-[11px] italic text-muted-foreground">
+                  No LAN subnets discovered on this device.
+                </p>
+              )}
+            </div>
+            <label className="block text-[11px]">
+              Extra CIDRs (comma or space separated)
+              <input
+                value={extraCidrs}
+                onChange={(e) => setExtraCidrs(e.target.value)}
+                className={`${input} mt-1 font-mono`}
+                placeholder="172.16.0.0/12"
+              />
+            </label>
+            <p className="text-[11px] italic text-muted-foreground">
+              Final value → <span className="font-mono">{allowedIps || "—"}</span>
+            </p>
+          </div>
           <Field label="Keepalive" htmlFor="c-ka">
             <input
               id="c-ka"

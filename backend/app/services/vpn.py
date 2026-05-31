@@ -12,6 +12,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.drivers import get_driver
@@ -288,6 +289,26 @@ async def add_wg_peer(
     except Exception as e:
         raise OperationError(str(e)) from e
 
+    # Cache the PSK locally — RouterOS 7.x masks preshared-key in
+    # /interface/wireguard/peers/print, so without this the operator's
+    # only chance to copy the PSK is the one-shot create response. With
+    # the cache we can rebuild client configs forever.
+    if preshared_key and new_id:
+        from datetime import UTC, datetime
+
+        from app.core.security import encrypt_field
+        from app.models.wg_peer_secret import WgPeerSecret
+
+        session.add(
+            WgPeerSecret(
+                device_id=device_id,
+                router_peer_id=new_id,
+                preshared_key_encrypted=encrypt_field(preshared_key),
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+
     # New peer means fresh material — baseline rotation entry.
     await secret_audit_svc.record_rotation(
         session,
@@ -340,7 +361,12 @@ async def reveal_wg_peer_keys(
     ip_address: str | None,
     user_agent: str | None,
 ) -> dict[str, str | None]:
-    """Returns {public_key, preshared_key} for the peer and records a reveal."""
+    """Returns {public_key, preshared_key} for the peer and records a reveal.
+
+    The preshared key is sourced from NetFleet's own cache when available
+    (RouterOS 7 masks /interface/wireguard/peers/print preshared-key
+    output), falling back to whatever the device returns for peers that
+    pre-date the cache table."""
     device = await get_device(session, organization_id, device_id)
     try:
         keys = await get_driver(device.vendor).wireguard_peer_reveal_keys(
@@ -348,6 +374,25 @@ async def reveal_wg_peer_keys(
         )
     except Exception as e:
         raise OperationError(str(e)) from e
+
+    # Replace the masked-or-missing PSK with our local copy if we have one.
+    from app.core.security import decrypt_field
+    from app.models.wg_peer_secret import WgPeerSecret
+
+    cached = (
+        await session.execute(
+            select(WgPeerSecret).where(
+                WgPeerSecret.device_id == device_id,
+                WgPeerSecret.router_peer_id == peer_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if cached is not None:
+        try:
+            keys["preshared_key"] = decrypt_field(cached.preshared_key_encrypted)
+        except Exception:  # noqa: BLE001
+            # Defective row — fall back to whatever the device returned.
+            pass
 
     if keys.get("preshared_key"):
         await secret_audit_svc.record_reveal(

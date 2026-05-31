@@ -320,6 +320,17 @@ class MikrotikDriver:
             for r in rows
         ]
 
+    async def interface_list_members(
+        self, creds: DeviceCredentials, list_name: str
+    ) -> list[str]:
+        rows = await self._call(creds, "/interface/list/member/print")
+        return [
+            str(r.get("interface", ""))
+            for r in rows
+            if str(r.get("list", "")).lower() == list_name.lower()
+            and r.get("interface")
+        ]
+
     # ============== ARP ==============
 
     async def ip_arp_list(self, creds: DeviceCredentials) -> list[ArpEntry]:
