@@ -5,9 +5,17 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
+  getSmsPresets,
+  getSmsSettings,
   getSmtpSettings,
+  testSms,
   testSmtp,
+  updateSmsSettings,
   updateSmtpSettings,
+  type SmsProviderPreset,
+  type SmsSettings,
+  type SmsSettingsUpdate,
+  type SmsTestResult,
   type SmtpSettings,
   type SmtpSettingsUpdate,
   type SmtpTestResult,
@@ -41,8 +49,413 @@ export default function SettingsPage() {
         </Link>
 
         <SmtpSection />
+        <SmsSection />
       </div>
     </div>
+  );
+}
+
+function SmsSection() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<SmsSettings>({
+    queryKey: ["sms-settings"],
+    queryFn: getSmsSettings,
+  });
+  const { data: presets } = useQuery<SmsProviderPreset[]>({
+    queryKey: ["sms-presets"],
+    queryFn: getSmsPresets,
+  });
+
+  const [draft, setDraft] = useState<SmsSettingsUpdate>({});
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [testTo, setTestTo] = useState("");
+  const [testText, setTestText] = useState("NetFleet SMS test");
+  const [testResult, setTestResult] = useState<SmsTestResult | null>(null);
+
+  useEffect(() => {
+    if (data) {
+      setDraft({
+        sms_enabled: data.sms_enabled,
+        sms_provider: data.sms_provider,
+        sms_api_url: data.sms_api_url ?? "",
+        sms_http_method: data.sms_http_method,
+        sms_body_format: data.sms_body_format,
+        sms_body_template: data.sms_body_template ?? "",
+        sms_auth_header_name: data.sms_auth_header_name ?? "",
+        sms_auth_header_value_template: data.sms_auth_header_value_template ?? "",
+        sms_sender: data.sms_sender ?? "",
+        sms_success_status_min: data.sms_success_status_min,
+        sms_success_status_max: data.sms_success_status_max,
+        sms_success_body_contains: data.sms_success_body_contains ?? "",
+        sms_timeout_seconds: data.sms_timeout_seconds,
+      });
+      setKeyTouched(false);
+    }
+  }, [data]);
+
+  const applyPreset = (key: string) => {
+    const p = presets?.find((x) => x.key === key);
+    if (!p) return;
+    setDraft((d) => ({
+      ...d,
+      sms_provider: p.key,
+      sms_api_url: p.api_url,
+      sms_http_method: p.http_method,
+      sms_body_format: p.body_format,
+      sms_body_template: p.body_template,
+      sms_auth_header_name: p.auth_header_name ?? "",
+      sms_auth_header_value_template: p.auth_header_value_template ?? "",
+      sms_success_status_min: p.success_status_min,
+      sms_success_status_max: p.success_status_max,
+      sms_success_body_contains: p.success_body_contains ?? "",
+    }));
+  };
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload: SmsSettingsUpdate = { ...draft };
+      if (!keyTouched) delete payload.sms_api_key;
+      const nullable: (keyof SmsSettingsUpdate)[] = [
+        "sms_api_url",
+        "sms_body_template",
+        "sms_auth_header_name",
+        "sms_auth_header_value_template",
+        "sms_sender",
+        "sms_success_body_contains",
+      ];
+      for (const k of nullable) {
+        if (payload[k] === "") (payload as Record<string, unknown>)[k] = null;
+      }
+      return updateSmsSettings(payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sms-settings"] });
+      setSavedAt(Date.now());
+      setError(null);
+      setKeyTouched(false);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const test = useMutation({
+    mutationFn: () => testSms(testTo, testText),
+    onSuccess: (r) => setTestResult(r),
+    onError: (e: Error) =>
+      setTestResult({
+        ok: false,
+        http_status: null,
+        response_body: null,
+        error: e.message,
+      }),
+  });
+
+  if (isLoading || !data) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  const activePreset = presets?.find((p) => p.key === draft.sms_provider);
+
+  return (
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        save.mutate();
+      }}
+      className="rounded-lg border border-border bg-card p-6"
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">SMS gateway</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Generic HTTP webhook with provider presets. Templates use{" "}
+            <code>{"{key}"}</code>, <code>{"{sender}"}</code>,{" "}
+            <code>{"{destination}"}</code>, <code>{"{content}"}</code> placeholders.
+          </p>
+        </div>
+        <label className="flex shrink-0 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.sms_enabled ?? false}
+            onChange={(e) => setDraft((d) => ({ ...d, sms_enabled: e.target.checked }))}
+            className="size-4 rounded"
+          />
+          Enabled
+        </label>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+      {savedAt && !error && (
+        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Saved.
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <Field label="Provider preset">
+          <select
+            value={draft.sms_provider ?? "custom"}
+            onChange={(e) => applyPreset(e.target.value)}
+            className={inputClass}
+          >
+            {presets?.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Sender (from)">
+          <input
+            type="text"
+            value={draft.sms_sender ?? ""}
+            onChange={(e) => setDraft((d) => ({ ...d, sms_sender: e.target.value }))}
+            placeholder="NetFleet"
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="API URL"
+          hint={activePreset?.notes ?? undefined}
+        >
+          <input
+            type="text"
+            value={draft.sms_api_url ?? ""}
+            onChange={(e) => setDraft((d) => ({ ...d, sms_api_url: e.target.value }))}
+            placeholder="https://example.com/sms/send"
+            className={`${inputClass} font-mono text-xs`}
+          />
+        </Field>
+        <Field
+          label="API key"
+          hint={
+            data.has_sms_api_key && !keyTouched
+              ? "Leave blank to keep the existing key"
+              : undefined
+          }
+        >
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder={data.has_sms_api_key ? "•••••••• (set)" : ""}
+            value={draft.sms_api_key ?? ""}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, sms_api_key: e.target.value }));
+              setKeyTouched(true);
+            }}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="HTTP method">
+          <select
+            value={draft.sms_http_method ?? "POST"}
+            onChange={(e) => setDraft((d) => ({ ...d, sms_http_method: e.target.value }))}
+            className={inputClass}
+          >
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+          </select>
+        </Field>
+        <Field label="Body format">
+          <select
+            value={draft.sms_body_format ?? "form"}
+            onChange={(e) => setDraft((d) => ({ ...d, sms_body_format: e.target.value }))}
+            className={inputClass}
+          >
+            <option value="query">Query string (in URL)</option>
+            <option value="form">Form (application/x-www-form-urlencoded)</option>
+            <option value="json">JSON (application/json)</option>
+          </select>
+        </Field>
+        <div className="md:col-span-2">
+          <Field
+            label="Body template"
+            hint="Placeholders: {key} {sender} {destination} {content}"
+          >
+            <textarea
+              rows={3}
+              value={draft.sms_body_template ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, sms_body_template: e.target.value }))
+              }
+              className={`${inputClass} font-mono text-xs`}
+              placeholder='key={key}&destination={destination}&sender={sender}&content={content}'
+            />
+          </Field>
+        </div>
+      </div>
+
+      <details className="mt-5 rounded-md border border-border p-4">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          Advanced (auth header, success check, timeout)
+        </summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Auth header name">
+            <input
+              type="text"
+              value={draft.sms_auth_header_name ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, sms_auth_header_name: e.target.value }))
+              }
+              placeholder="Authorization"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Auth header value template">
+            <input
+              type="text"
+              value={draft.sms_auth_header_value_template ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({
+                  ...d,
+                  sms_auth_header_value_template: e.target.value,
+                }))
+              }
+              placeholder="Bearer {key}"
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </Field>
+          <Field label="Success status range">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={100}
+                max={599}
+                value={draft.sms_success_status_min ?? 200}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    sms_success_status_min: Number(e.target.value),
+                  }))
+                }
+                className={inputClass}
+              />
+              <span className="text-muted-foreground">to</span>
+              <input
+                type="number"
+                min={100}
+                max={599}
+                value={draft.sms_success_status_max ?? 299}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    sms_success_status_max: Number(e.target.value),
+                  }))
+                }
+                className={inputClass}
+              />
+            </div>
+          </Field>
+          <Field
+            label="Success body must contain (optional)"
+            hint="Substring that must appear in the gateway's response body"
+          >
+            <input
+              type="text"
+              value={draft.sms_success_body_contains ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, sms_success_body_contains: e.target.value }))
+              }
+              placeholder="e.g. Success"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Timeout (seconds)">
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={draft.sms_timeout_seconds ?? 10}
+              onChange={(e) =>
+                setDraft((d) => ({
+                  ...d,
+                  sms_timeout_seconds: Number(e.target.value),
+                }))
+              }
+              className={inputClass}
+            />
+          </Field>
+        </div>
+      </details>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <button
+          type="submit"
+          disabled={save.isPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="tel"
+            placeholder="+995..."
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+            className="w-44 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <input
+            type="text"
+            placeholder="message"
+            value={testText}
+            onChange={(e) => setTestText(e.target.value)}
+            className="w-64 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setTestResult(null);
+              test.mutate();
+            }}
+            disabled={test.isPending || !testTo}
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
+          >
+            {test.isPending ? "Sending…" : "Send test"}
+          </button>
+        </div>
+      </div>
+
+      {testResult && (
+        <div
+          className={`mt-4 rounded-md border px-3 py-2 text-sm ${
+            testResult.ok
+              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+              : "border-red-300 bg-red-50 text-red-900"
+          }`}
+        >
+          {testResult.ok ? (
+            <>
+              Sent. Gateway returned HTTP {testResult.http_status}.{" "}
+              {testResult.response_body && (
+                <code className="break-all text-xs">{testResult.response_body}</code>
+              )}
+            </>
+          ) : (
+            <>
+              Failed: {testResult.error}
+              {testResult.http_status !== null && (
+                <> (HTTP {testResult.http_status})</>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {data.sms_last_test_at && !testResult && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Last test: {new Date(data.sms_last_test_at).toLocaleString()} —{" "}
+          {data.sms_last_test_ok ? "ok" : "failed"}
+          {data.sms_last_test_message && ` (${data.sms_last_test_message})`}
+        </p>
+      )}
+    </form>
   );
 }
 

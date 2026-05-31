@@ -10,6 +10,11 @@ from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.settings import (
+    SmsProviderPreset,
+    SmsSettingsPublic,
+    SmsSettingsUpdate,
+    SmsTestRequest,
+    SmsTestResult,
     SmtpSettingsPublic,
     SmtpSettingsUpdate,
     SmtpTestRequest,
@@ -18,6 +23,7 @@ from app.schemas.settings import (
 from app.services import audit as audit_svc
 from app.services import email as email_svc
 from app.services import settings as settings_svc
+from app.services import sms as sms_svc
 
 router = APIRouter()
 
@@ -109,3 +115,107 @@ async def test_smtp(
     )
     await session.commit()
     return result
+
+
+# ---------------- SMS gateway ----------------
+
+
+def _sms_to_public(org: Organization) -> SmsSettingsPublic:
+    return SmsSettingsPublic(
+        sms_enabled=org.sms_enabled,
+        sms_provider=org.sms_provider,
+        sms_api_url=org.sms_api_url,
+        sms_http_method=org.sms_http_method,
+        sms_body_format=org.sms_body_format,
+        sms_body_template=org.sms_body_template,
+        sms_auth_header_name=org.sms_auth_header_name,
+        sms_auth_header_value_template=org.sms_auth_header_value_template,
+        sms_sender=org.sms_sender,
+        sms_success_status_min=org.sms_success_status_min,
+        sms_success_status_max=org.sms_success_status_max,
+        sms_success_body_contains=org.sms_success_body_contains,
+        sms_timeout_seconds=org.sms_timeout_seconds,
+        has_sms_api_key=bool(org.sms_api_key_encrypted),
+        sms_last_test_at=org.sms_last_test_at,
+        sms_last_test_ok=org.sms_last_test_ok,
+        sms_last_test_message=org.sms_last_test_message,
+    )
+
+
+@router.get("/sms/presets", response_model=list[SmsProviderPreset])
+async def list_sms_presets(
+    _: User = Depends(require_permission("settings", "read")),
+) -> list[SmsProviderPreset]:
+    return [SmsProviderPreset(**p) for p in sms_svc.list_presets()]
+
+
+@router.get("/sms", response_model=SmsSettingsPublic)
+async def get_sms(
+    user: User = Depends(require_permission("settings", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> SmsSettingsPublic:
+    org = await settings_svc.get_organization(session, user.organization_id)
+    return _sms_to_public(org)
+
+
+@router.patch("/sms", response_model=SmsSettingsPublic)
+async def update_sms(
+    payload: SmsSettingsUpdate,
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> SmsSettingsPublic:
+    org = await sms_svc.update_sms(session, user.organization_id, payload)
+
+    audit_payload = payload.model_dump(exclude_unset=True, exclude={"sms_api_key"})
+    if payload.sms_api_key is not None:
+        audit_payload["sms_api_key"] = "***REDACTED***"
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="update_sms",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=audit_payload,
+    )
+    await session.commit()
+    return _sms_to_public(org)
+
+
+@router.post("/sms/test", response_model=SmsTestResult)
+async def test_sms(
+    payload: SmsTestRequest,
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> SmsTestResult:
+    ok, status_code, body, err = await sms_svc.test_sms(
+        session,
+        user.organization_id,
+        destination=payload.to,
+        content=payload.content,
+    )
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="test_sms",
+        outcome=AuditOutcome.OK if ok else AuditOutcome.FAILED,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"to": payload.to, "http_status": status_code},
+        error_message=err,
+    )
+    await session.commit()
+    return SmsTestResult(
+        ok=ok,
+        http_status=status_code,
+        response_body=body,
+        error=err,
+    )
