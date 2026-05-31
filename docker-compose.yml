@@ -109,7 +109,9 @@ services:
     restart: unless-stopped
     environment: *api-env
     volumes:
-      - /opt/netfleet/data/backups/devices:/backups/devices
+      # Whole /backups tree so the API can both pull device backups
+      # (devices/) and create system backup tarballs (system/).
+      - /opt/netfleet/data/backups:/backups
     networks:
       - internal
     depends_on:
@@ -130,7 +132,7 @@ services:
     command: ["python", "-m", "app.workers.scheduler"]
     environment: *api-env
     volumes:
-      - /opt/netfleet/data/backups/devices:/backups/devices
+      - /opt/netfleet/data/backups:/backups
     networks:
       - internal
     depends_on:

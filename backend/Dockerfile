@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates tini \
+    curl ca-certificates tini postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

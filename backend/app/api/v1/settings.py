@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, require_permission
@@ -26,6 +27,7 @@ from app.services import audit as audit_svc
 from app.services import email as email_svc
 from app.services import settings as settings_svc
 from app.services import sms as sms_svc
+from app.services import system_backup as sysbackup_svc
 
 router = APIRouter()
 
@@ -260,3 +262,115 @@ async def test_sms(
         response_body=body,
         error=err,
     )
+
+
+# ---------------- System backup (full DB + device files) ----------------
+
+
+@router.get("/system-backup")
+async def list_system_backups(
+    _: User = Depends(require_permission("settings", "read")),
+) -> dict:
+    return {
+        "bundles": sysbackup_svc.list_system_backups(),
+        "used_bytes": sysbackup_svc.used_disk_bytes(),
+        "free_bytes": sysbackup_svc.free_disk_bytes(),
+    }
+
+
+@router.post("/system-backup", status_code=status.HTTP_201_CREATED)
+async def create_system_backup(
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    try:
+        path = await sysbackup_svc.create_system_backup(
+            session, organization_id=user.organization_id
+        )
+    except Exception as e:
+        await audit_svc.write_audit(
+            session,
+            user_id=user.id,
+            organization_id=user.organization_id,
+            section="settings",
+            action="system_backup_create",
+            outcome=AuditOutcome.FAILED,
+            ip_address=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            error_message=str(e),
+        )
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="system_backup_create",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"filename": path.name, "size_bytes": path.stat().st_size},
+    )
+    await session.commit()
+    return {"filename": path.name, "size_bytes": path.stat().st_size}
+
+
+@router.get("/system-backup/{filename}")
+async def download_system_backup(
+    filename: str,
+    request: Request,
+    user: User = Depends(require_permission("settings", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> FileResponse:
+    try:
+        path = sysbackup_svc.resolve_backup_path(filename)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="system_backup_download",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"filename": filename},
+    )
+    await session.commit()
+    return FileResponse(
+        path,
+        media_type="application/gzip",
+        filename=filename,
+    )
+
+
+@router.delete("/system-backup/{filename}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_system_backup(
+    filename: str,
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        sysbackup_svc.delete_system_backup(filename)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="system_backup_delete",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"filename": filename},
+    )
+    await session.commit()

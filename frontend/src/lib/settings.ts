@@ -144,6 +144,40 @@ export async function updateOrgInfo(payload: OrgInfo): Promise<OrgInfo> {
   }
 }
 
+// ---------------- System backup ----------------
+
+export interface SystemBackupBundle {
+  filename: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface SystemBackupListResponse {
+  bundles: SystemBackupBundle[];
+  used_bytes: number;
+  free_bytes: number;
+}
+
+export async function listSystemBackups(): Promise<SystemBackupListResponse> {
+  return api.get("settings/system-backup").json<SystemBackupListResponse>();
+}
+
+export async function createSystemBackup(): Promise<SystemBackupBundle> {
+  try {
+    return await api.post("settings/system-backup", { timeout: 600_000 }).json<SystemBackupBundle>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function deleteSystemBackup(filename: string): Promise<void> {
+  try {
+    await api.delete(`settings/system-backup/${encodeURIComponent(filename)}`);
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function testSms(to: string, content: string): Promise<SmsTestResult> {
   try {
     return await api

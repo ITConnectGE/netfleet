@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
+  createSystemBackup,
+  deleteSystemBackup,
   getOrgInfo,
   getSmsPresets,
   getSmsSettings,
   getSmtpSettings,
+  listSystemBackups,
   testSms,
   testSmtp,
   updateOrgInfo,
@@ -22,6 +25,7 @@ import {
   type SmtpSettings,
   type SmtpSettingsUpdate,
   type SmtpTestResult,
+  type SystemBackupListResponse,
 } from "@/lib/settings";
 
 export default function SettingsPage() {
@@ -54,9 +58,173 @@ export default function SettingsPage() {
         <OrgInfoSection />
         <SmtpSection />
         <SmsSection />
+        <SystemBackupSection />
       </div>
     </div>
   );
+}
+
+function SystemBackupSection() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<SystemBackupListResponse>({
+    queryKey: ["system-backups"],
+    queryFn: listSystemBackups,
+  });
+
+  const create = useMutation({
+    mutationFn: () => createSystemBackup(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-backups"] }),
+  });
+  const del = useMutation({
+    mutationFn: (filename: string) => deleteSystemBackup(filename),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-backups"] }),
+  });
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">System backup &amp; restore</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Full Postgres dump + on-disk device backup tree, packaged as a
+            single <code>.tar.gz</code>. Used to migrate NetFleet to another
+            host. The version tag is baked into the filename and the bundle&apos;s
+            <code>meta.json</code>.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => create.mutate()}
+          disabled={create.isPending}
+          className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {create.isPending ? "Building…" : "Create backup now"}
+        </button>
+      </div>
+
+      <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <strong>Heads up:</strong> the bundle deliberately excludes
+        <code className="mx-1">NETFLEET_JWT_SECRET</code> and
+        <code className="mx-1">NETFLEET_FERNET_KEY</code>. Without those keys
+        every encrypted device credential is unreadable, so when migrating you
+        must copy <code>/opt/netfleet/.env</code> to the new host yourself
+        before running <code>restore.sh</code>.
+      </div>
+
+      {create.error && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(create.error as Error).message}
+        </div>
+      )}
+
+      <div className="mt-5 overflow-hidden rounded-md border border-border">
+        <table className="w-full text-sm">
+          <thead className="border-b border-border bg-muted/50">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium">File</th>
+              <th className="px-3 py-2 font-medium">Size</th>
+              <th className="px-3 py-2 font-medium">Created</th>
+              <th className="px-3 py-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {isLoading && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                  Loading…
+                </td>
+              </tr>
+            )}
+            {!isLoading && (!data || data.bundles.length === 0) && (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                  No bundles yet. Click <strong>Create backup now</strong>.
+                </td>
+              </tr>
+            )}
+            {data?.bundles.map((b) => (
+              <tr key={b.filename} className="hover:bg-accent/30">
+                <td className="px-3 py-2 font-mono text-xs">{b.filename}</td>
+                <td className="px-3 py-2 font-mono text-xs">{formatSize(b.size_bytes)}</td>
+                <td className="px-3 py-2 text-xs">
+                  {new Date(b.created_at).toLocaleString()}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <a
+                    href={`/api/v1/settings/system-backup/${encodeURIComponent(b.filename)}`}
+                    download={b.filename}
+                    className="mr-3 text-xs text-primary hover:underline"
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`Delete ${b.filename}?`)) del.mutate(b.filename);
+                    }}
+                    className="text-xs text-destructive hover:underline"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {data && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Disk: {formatSize(data.used_bytes)} used · {formatSize(data.free_bytes)} free.
+        </p>
+      )}
+
+      <details className="mt-5 rounded-md border border-border p-4">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          How to restore on a different host
+        </summary>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-xs text-muted-foreground">
+          <li>Install Docker + Docker Compose on the destination host.</li>
+          <li>
+            Run the installer to lay out <code>/opt/netfleet</code> (or copy the
+            directory from the source).
+          </li>
+          <li>
+            Copy <code>/opt/netfleet/.env</code> from the source host. This is
+            the only place <code>NETFLEET_JWT_SECRET</code> and{" "}
+            <code>NETFLEET_FERNET_KEY</code> live.
+          </li>
+          <li>
+            Copy the bundle <code>.tar.gz</code> to the destination, e.g. into{" "}
+            <code>/tmp</code>.
+          </li>
+          <li>
+            Bring the stack up once: <code>docker compose up -d</code>. Wait
+            until postgres is healthy.
+          </li>
+          <li>
+            Extract the bundle&apos;s <code>restore.sh</code> and run it:
+            <pre className="mt-1 overflow-x-auto rounded bg-zinc-100 p-2 font-mono text-[10px] dark:bg-zinc-900">
+              tar -xzf /tmp/netfleet-system-….tar.gz restore.sh{"\n"}
+              bash restore.sh /tmp/netfleet-system-….tar.gz
+            </pre>
+          </li>
+          <li>Open NetFleet, log in, click <strong>Test connection</strong> on each device.</li>
+        </ol>
+      </details>
+    </div>
+  );
+}
+
+function formatSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
 }
 
 function OrgInfoSection() {
