@@ -12,6 +12,7 @@ from app.api.v1 import (
     firewall,
     firmware,
     network,
+    notifications,
     oidc,
     queues,
     reports,
@@ -53,6 +54,7 @@ router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(events.router, prefix="/events", tags=["events"])
 router.include_router(settings_api.router, prefix="/settings", tags=["settings"])
 router.include_router(updates.router, prefix="/system/update", tags=["updates"])
+router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 
 # Health is at the root of /api/v1 for easy probe endpoints
 router.add_api_route("/health", system.health, methods=["GET"], tags=["system"])

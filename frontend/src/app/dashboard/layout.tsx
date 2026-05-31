@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { LogoMark } from "@/components/logo";
+import { NotificationBell } from "@/components/notification-bell";
 import { ToastProvider } from "@/components/toast";
 import { UpdateBanner } from "@/components/update-banner";
 import { api } from "@/lib/api";
@@ -27,7 +28,8 @@ const NAV = [
   { href: "/dashboard/fleet", label: "Fleet" },
   { href: "/dashboard/bulk", label: "Bulk" },
   { href: "/dashboard/users", label: "Users" },
-  { href: "/dashboard/roles", label: "Roles" },
+  // Roles lived here in Phases 1-6; P21 Stage 2 moved them under
+  // Settings → Access control to clean up the top bar.
   { href: "/dashboard/events", label: "Events" },
   { href: "/dashboard/audit", label: "Audit log" },
   { href: "/dashboard/reports", label: "Reports" },
@@ -105,10 +107,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-right text-xs">
+            <NotificationBell />
+            <Link
+              href="/dashboard/profile"
+              title="Open profile"
+              className="rounded-md px-2 py-1 text-right text-xs transition hover:bg-accent"
+            >
               <div className="font-medium">{me.display_name ?? me.email}</div>
               <div className="text-muted-foreground">{me.is_admin ? "Admin" : "Member"}</div>
-            </div>
+            </Link>
             <button
               onClick={async () => {
                 await logout();

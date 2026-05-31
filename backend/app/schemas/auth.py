@@ -60,12 +60,26 @@ class UserPublic(BaseModel):
     id: UUID
     email: EmailStr
     display_name: str | None
+    mobile_phone: str | None = None
     is_admin: bool
     totp_enrolled: bool
     auth_method: Literal["local", "oidc"]
     organization_id: UUID
 
     model_config = {"from_attributes": True}
+
+
+class ProfileUpdateRequest(BaseModel):
+    """Fields the user can change about themselves from /dashboard/profile.
+
+    Email, admin flag and auth_method are intentionally excluded — those
+    are admin-only changes via /users/{id}.
+    """
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    # E.164 with optional leading "+". Loose so callers can write
+    # "+995 555 12 34 56"; we strip spaces server-side before saving.
+    mobile_phone: str | None = Field(default=None, max_length=32)
 
 
 class SetupRequest(BaseModel):

@@ -39,6 +39,7 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
 
     email: Mapped[str] = mapped_column(String(254), nullable=False, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255))
+    mobile_phone: Mapped[str | None] = mapped_column(String(32))
 
     # local auth
     password_hash: Mapped[str | None] = mapped_column(String(255))
@@ -59,6 +60,9 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
     is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Watermark for the navbar notifications bell — events with a
+    # timestamp greater than this are counted as "unread".
+    notifications_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     organization: Mapped[Organization] = relationship("Organization", back_populates="users")
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(

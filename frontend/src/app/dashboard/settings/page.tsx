@@ -55,6 +55,22 @@ export default function SettingsPage() {
           </div>
         </Link>
 
+        <Link
+          href="/dashboard/roles"
+          className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold">Access control</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Roles and the permission matrix. Assign roles to users from the
+                Users page.
+              </p>
+            </div>
+            <span className="text-sm text-primary">Open →</span>
+          </div>
+        </Link>
+
         <OrgInfoSection />
         <SmtpSection />
         <SmsSection />

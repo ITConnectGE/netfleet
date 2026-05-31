@@ -12,6 +12,7 @@ from app.schemas.auth import (
     LoginRequest,
     LoginResponseFinal,
     LoginResponseMfaRequired,
+    ProfileUpdateRequest,
     RefreshRequest,
     TokenPair,
     TotpEnrollConfirmRequest,
@@ -122,6 +123,28 @@ async def logout(
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+@router.patch("/me", response_model=UserPublic)
+async def update_me(
+    body: ProfileUpdateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> User:
+    data = body.model_dump(exclude_unset=True)
+    if "display_name" in data:
+        user.display_name = data["display_name"]
+    if "mobile_phone" in data:
+        raw = data["mobile_phone"]
+        if raw is not None:
+            # Strip whitespace + common separators; keep leading "+".
+            cleaned = "".join(c for c in raw if c.isdigit() or c == "+")
+            user.mobile_phone = cleaned or None
+        else:
+            user.mobile_phone = None
+    await session.commit()
+    await session.refresh(user)
     return user
 
 

@@ -5,10 +5,24 @@ export interface UserPublic {
   id: string;
   email: string;
   display_name: string | null;
+  mobile_phone: string | null;
   is_admin: boolean;
   totp_enrolled: boolean;
   auth_method: "local" | "oidc";
   organization_id: string;
+}
+
+export interface ProfileUpdate {
+  display_name?: string | null;
+  mobile_phone?: string | null;
+}
+
+export async function updateProfile(payload: ProfileUpdate): Promise<UserPublic> {
+  try {
+    return await api.patch("auth/me", { json: payload }).json<UserPublic>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
 
 export interface LoginFinal {

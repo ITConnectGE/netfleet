@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useMemo, useState, type FormEvent } from "react";
 
 import {
@@ -79,9 +80,16 @@ export default function RolesPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Roles</h1>
+          <Link
+            href="/dashboard/settings"
+            className="text-xs text-muted-foreground hover:underline"
+          >
+            ← Settings
+          </Link>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Access control</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Bundles of permissions you can assign to IT support staff with site- or device-level scope.
+            Roles and the permission matrix. Assign them to users (with
+            optional site- or device-level scope) from the Users page.
           </p>
         </div>
         <button
