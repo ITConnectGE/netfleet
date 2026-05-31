@@ -820,9 +820,12 @@ class MikrotikDriver:
                     raw=r,
                 )
             )
-        # RouterOS log is oldest-first; we want newest-first, capped.
-        out.reverse()
-        return out[:limit]
+        # RouterOS' /log/print returns oldest-first, which is the natural
+        # terminal-tail order operators are used to (newest at the bottom).
+        # Take the LAST `limit` lines so the cap drops old entries instead
+        # of fresh ones. The frontend's auto-scroll-to-bottom then lands on
+        # the latest line by default.
+        return out[-limit:]
 
     # ============== IP services ==============
 
