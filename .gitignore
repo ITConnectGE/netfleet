@@ -89,7 +89,11 @@ docker-compose.override.yml
 
 # --- Logs ---
 *.log
-logs/
+# Anchor to repo root so it doesn't gobble app routes like
+# frontend/src/app/dashboard/devices/[id]/logs/
+/logs/
+/backend/logs/
+/frontend/logs/
 
 # --- Misc ---
 *.tmp
