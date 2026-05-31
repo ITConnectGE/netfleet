@@ -47,51 +47,52 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
 
   return (
     <div>
-      {/* Sticky contextual header — visible from every device sub-page so
-          the user always knows which client / site / box they're operating
-          on. */}
+      {/* Sticky contextual header — Tailwind UI "Breadcrumbs with chevrons"
+          variant so it lines up with the rest of the app's standard look. */}
       <div className="sticky top-0 z-20 -mx-4 -mt-8 mb-4 border-b border-border bg-background/85 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-          <Link
-            href="/dashboard/devices"
-            className="text-muted-foreground hover:text-foreground hover:underline"
-          >
-            ← Devices
-          </Link>
-          <span className="text-muted-foreground">·</span>
-          {tenant ? (
-            <Link
-              href={`/dashboard/tenants/${tenant.id}`}
-              className="font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              {tenant.name}
-            </Link>
-          ) : (
-            <span className="text-muted-foreground">…</span>
-          )}
-          <span className="text-muted-foreground">/</span>
-          {site ? (
-            <Link
-              href={`/dashboard/sites/${site.id}`}
-              className="font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              {site.name}
-            </Link>
-          ) : (
-            <span className="text-muted-foreground">…</span>
-          )}
-          <span className="text-muted-foreground">/</span>
-          <span className="text-base font-semibold text-foreground">
-            {device?.name ?? "…"}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <nav className="flex" aria-label="Breadcrumb">
+            <ol role="list" className="flex items-center space-x-2">
+              <li>
+                <Link
+                  href="/dashboard"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="Home"
+                >
+                  <HomeIcon className="size-4 shrink-0" aria-hidden="true" />
+                  <span className="sr-only">Home</span>
+                </Link>
+              </li>
+              <BreadcrumbItem
+                href="/dashboard/devices"
+                label="Devices"
+                current={false}
+              />
+              <BreadcrumbItem
+                href={tenant ? `/dashboard/tenants/${tenant.id}` : undefined}
+                label={tenant?.name ?? "…"}
+                current={false}
+              />
+              <BreadcrumbItem
+                href={site ? `/dashboard/sites/${site.id}` : undefined}
+                label={site?.name ?? "…"}
+                current={false}
+              />
+              <BreadcrumbItem
+                href={undefined}
+                label={device?.name ?? "…"}
+                current={true}
+              />
+            </ol>
+          </nav>
           {device && (
-            <span className="ml-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
               <StatusPill status={device.status} />
               <span className="font-mono">
                 {device.host}:{device.port}
               </span>
               <span>· {device.vendor}</span>
-            </span>
+            </div>
           )}
         </div>
       </div>
@@ -118,5 +119,72 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
       </nav>
       {children}
     </div>
+  );
+}
+
+function BreadcrumbItem({
+  href,
+  label,
+  current,
+}: {
+  href: string | undefined;
+  label: string;
+  current: boolean;
+}) {
+  // Render as a chevron + label pair. Matches the Tailwind UI breadcrumb
+  // pattern: separator lives inside the same <li> as the link it precedes.
+  return (
+    <li>
+      <div className="flex items-center">
+        <ChevronRightIcon
+          className="size-4 shrink-0 text-muted-foreground/60"
+          aria-hidden="true"
+        />
+        {href ? (
+          <Link
+            href={href}
+            className="ml-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            aria-current={current ? "page" : undefined}
+          >
+            {label}
+          </Link>
+        ) : (
+          <span
+            className={
+              current
+                ? "ml-2 text-sm font-semibold text-foreground"
+                : "ml-2 text-sm font-medium text-muted-foreground"
+            }
+            aria-current={current ? "page" : undefined}
+          >
+            {label}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function HomeIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" {...props}>
+      <path
+        fillRule="evenodd"
+        d="M9.293 2.293a1 1 0 011.414 0l7 7A1 1 0 0117 11h-1v6a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3H9v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-6H3a1 1 0 01-.707-1.707l7-7z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function ChevronRightIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" {...props}>
+      <path
+        fillRule="evenodd"
+        d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+        clipRule="evenodd"
+      />
+    </svg>
   );
 }
