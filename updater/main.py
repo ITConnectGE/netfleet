@@ -270,6 +270,26 @@ async def _backup_postgres(target_version: str) -> Path:
     return out_path
 
 
+# ---------------- Image cleanup ----------------
+
+
+async def _prune_old_images() -> None:
+    """Remove unreferenced images older than the rollback window.
+
+    `docker image prune -af --filter until=72h` removes images that
+      (a) are not used by any container (running OR stopped), AND
+      (b) were created more than 72 hours ago.
+
+    Anything we just pulled stays — `created` is the image's build
+    timestamp from the registry, but Docker's prune actually checks
+    when the image was last referenced locally, which is the moment of
+    the pull. So the current and previous-batch images survive while
+    the long tail of stale tags gets reclaimed.
+    """
+    _state.append_log("$ docker image prune -af --filter until=72h")
+    await _run(["docker", "image", "prune", "-af", "--filter", "until=72h"])
+
+
 # ---------------- Persist new VERSION to .env ----------------
 
 
@@ -350,6 +370,16 @@ async def _run_update(target_version: str, backup: bool) -> None:
         await _wait_for_health(HEALTH_TIMEOUT_SECONDS)
 
         await _persist_version(image_tag)
+
+        # House-keeping — reclaim disk from the previous-version images so the
+        # host doesn't slowly fill up after a string of upgrades. A 72h `until`
+        # filter keeps anything pulled in the last three days (so the prior
+        # version is still around for an emergency rollback) and never touches
+        # images that are currently in use.
+        try:
+            await _prune_old_images()
+        except Exception as e:  # noqa: BLE001
+            _state.append_log(f"image prune skipped: {e}")
 
         _state.finished_at_iso = datetime.now(UTC).isoformat()
         _state.set_state(
