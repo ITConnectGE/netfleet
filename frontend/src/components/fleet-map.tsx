@@ -36,6 +36,18 @@ const COLOURS: Record<Health, { fill: string; stroke: string }> = {
   grey: { fill: "#9ca3af", stroke: "#374151" },
 };
 
+// Stack the layers so issue markers float above healthy ones when sites
+// overlap on the map (think two clients in the same building). Without
+// this the iteration order decides who's on top, which means a green
+// "everything fine" marker can hide a red "something's down" marker
+// directly beneath it — exactly what we don't want.
+const Z_INDEX_BY_HEALTH: Record<Health, number> = {
+  red: 3000,
+  amber: 2000,
+  grey: 500,
+  green: 0,
+};
+
 function pin(health: Health): L.DivIcon {
   const c = COLOURS[health];
   return L.divIcon({
@@ -115,6 +127,7 @@ export default function FleetMap({
               key={s.id}
               position={[s.latitude, s.longitude]}
               icon={pin(health)}
+              zIndexOffset={Z_INDEX_BY_HEALTH[health]}
             >
               <Popup>
                 <div className="min-w-[220px]">
