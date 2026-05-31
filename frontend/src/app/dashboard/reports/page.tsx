@@ -573,7 +573,6 @@ function SecretAccessTable({ data }: { data: SecretAccessReport }) {
         </tbody>
       </Table>
     </Section>
-    </>
   );
 }
 
@@ -712,7 +711,6 @@ function ChangesTable({ data }: { data: ChangeReport }) {
         </tbody>
       </Table>
     </Section>
-    </>
   );
 }
 
