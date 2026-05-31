@@ -331,6 +331,20 @@ class MikrotikDriver:
             and r.get("interface")
         ]
 
+    async def ip_address_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        address: str,
+        interface: str,
+        comment: str | None = None,
+    ) -> str:
+        params: dict[str, Any] = {"address": address, "interface": interface}
+        if comment is not None:
+            params["comment"] = comment
+        rows = await self._call(creds, "/ip/address/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
     # ============== ARP ==============
 
     async def ip_arp_list(self, creds: DeviceCredentials) -> list[ArpEntry]:

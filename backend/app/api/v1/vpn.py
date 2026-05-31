@@ -763,3 +763,103 @@ async def get_device_for_actor(
         return await device_svc.get_device(session, actor.organization_id, device_id)
     except device_svc.DeviceNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+# ---------------- WG per-peer firewall (P21 #6) ----------------
+
+
+class WgPeerRestrictRequest(BaseModel):
+    """Lock a peer down to a fixed destination list.
+
+    For each ``allowed_cidrs`` entry we create one
+    ``/ip/firewall/filter chain=forward action=accept`` rule with
+    src-address = the peer's allowed_address and dst-address = the
+    target CIDR. When ``drop_rest`` is True we add a final
+    ``action=drop`` catch-all from the same source. All produced rules
+    carry the comment ``netfleet wg-peer={comment_tag}`` so the
+    operator can find and revoke them later."""
+
+    allowed_cidrs: list[str] = []
+    drop_rest: bool = True
+    comment_tag: str
+
+
+class WgPeerRestrictResponse(BaseModel):
+    rule_ids: list[str]
+    rules_created: int
+
+
+@router.post(
+    "/{device_id}/wireguard/peers/{peer_id}/restrict",
+    response_model=WgPeerRestrictResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def restrict_wg_peer(
+    device_id: UUID,
+    peer_id: str,
+    payload: WgPeerRestrictRequest,
+    request: Request,
+    user: User = Depends(require_permission("firewall.filter", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> WgPeerRestrictResponse:
+    from app.drivers.base import FilterRule  # local import to avoid cycle
+
+    device = await get_device_for_actor(session, user, device_id)
+    peers = await vpn_svc.list_wg_peers(session, user.organization_id, device_id)
+    peer = next((p for p in peers if p.id == peer_id), None)
+    if peer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="peer not found")
+    if not peer.allowed_address:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="peer has no allowed-address — cannot build src-based rules",
+        )
+
+    driver = get_driver(device.vendor)
+    creds = _to_driver_creds(device)
+    tag = f"netfleet wg-peer={payload.comment_tag}"
+    new_ids: list[str] = []
+    try:
+        for cidr in payload.allowed_cidrs:
+            rule = FilterRule(
+                id=None,
+                chain="forward",
+                action="accept",
+                src_address=peer.allowed_address,
+                dst_address=cidr,
+                comment=f"{tag} allow {cidr}",
+            )
+            new_ids.append(await driver.firewall_filter_add(creds, rule))
+        if payload.drop_rest:
+            rule = FilterRule(
+                id=None,
+                chain="forward",
+                action="drop",
+                src_address=peer.allowed_address,
+                comment=f"{tag} drop rest",
+                log=False,
+            )
+            new_ids.append(await driver.firewall_filter_add(creds, rule))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.filter",
+        action="wg_peer_restrict",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={
+            "peer_id": peer_id,
+            "allowed_cidrs": payload.allowed_cidrs,
+            "drop_rest": payload.drop_rest,
+        },
+        response_meta={"rule_ids": new_ids},
+    )
+    await session.commit()
+
+    return WgPeerRestrictResponse(rule_ids=new_ids, rules_created=len(new_ids))

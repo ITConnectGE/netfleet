@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 
@@ -14,6 +15,7 @@ import {
   listWgInterfaces,
   listWgLanSubnets,
   listWgPeers,
+  restrictWgPeer,
   type WgEndpointSuggestion,
   type WgInterface,
   type WgPeer,
@@ -37,6 +39,7 @@ export default function WireguardPage() {
   const [showIfForm, setShowIfForm] = useState(false);
   const [showPeerForm, setShowPeerForm] = useState(false);
   const [configFor, setConfigFor] = useState<WgPeer | null>(null);
+  const [restrictFor, setRestrictFor] = useState<WgPeer | null>(null);
   const [createdPeerPsk, setCreatedPeerPsk] = useState<{ id: string; psk: string | null } | null>(
     null,
   );
@@ -52,6 +55,14 @@ export default function WireguardPage() {
 
   return (
     <div className="space-y-10">
+      <div className="flex justify-end">
+        <Link
+          href={`/dashboard/devices/${deviceId}/vpn/wireguard/new`}
+          className="rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10"
+        >
+          ✨ Bootstrap WireGuard (interface → address → peers)
+        </Link>
+      </div>
       {/* ---------------- Interfaces ---------------- */}
       <section>
         <div className="flex items-center justify-between">
@@ -219,6 +230,13 @@ export default function WireguardPage() {
                       Download config
                     </button>
                     <button
+                      onClick={() => setRestrictFor(p)}
+                      className="ml-3 text-xs text-primary hover:underline"
+                      title="Build firewall rules that limit which LANs this peer can reach"
+                    >
+                      Restrict
+                    </button>
+                    <button
                       onClick={() => {
                         if (p.id && confirm("Delete this peer?")) {
                           delPeer.mutate(p.id);
@@ -258,6 +276,14 @@ export default function WireguardPage() {
           deviceId={deviceId}
           peer={configFor}
           onClose={() => setConfigFor(null)}
+        />
+      )}
+
+      {restrictFor?.id && (
+        <RestrictModal
+          deviceId={deviceId}
+          peer={restrictFor}
+          onClose={() => setRestrictFor(null)}
         />
       )}
     </div>
@@ -768,6 +794,171 @@ function ConfigModal({
               className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
               {m.isPending ? "Generating…" : "Generate"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function RestrictModal({
+  deviceId,
+  peer,
+  onClose,
+}: {
+  deviceId: string;
+  peer: WgPeer;
+  onClose: () => void;
+}) {
+  const { data: lanSubnets } = useQuery<WgSubnetSuggestion[]>({
+    queryKey: ["wg-lan-subnets", deviceId],
+    queryFn: () => listWgLanSubnets(deviceId),
+  });
+  const [picks, setPicks] = useState<Set<string>>(new Set());
+  const [extra, setExtra] = useState("");
+  const [dropRest, setDropRest] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [createdCount, setCreatedCount] = useState<number | null>(null);
+
+  const tag = useMemo(() => {
+    // Stable identifier that survives renames — peer.id ("*4" etc.) is
+    // the RouterOS-internal handle; falls back to the public key when
+    // the router hasn't yet returned one.
+    return peer.id?.replace(/[^a-zA-Z0-9-]/g, "") || (peer.public_key ?? "").slice(0, 8);
+  }, [peer]);
+
+  function toggle(cidr: string, on: boolean) {
+    setPicks((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(cidr);
+      else next.delete(cidr);
+      return next;
+    });
+  }
+
+  const m = useMutation({
+    mutationFn: () => {
+      const extras = extra
+        .split(/[,\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const allowed = [...Array.from(picks), ...extras];
+      return restrictWgPeer(deviceId, peer.id!, {
+        allowed_cidrs: allowed,
+        drop_rest: dropRest,
+        comment_tag: tag,
+      });
+    },
+    onSuccess: (res) => {
+      setCreatedCount(res.rules_created);
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <Modal title="Restrict peer access" onClose={onClose}>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Build /ip/firewall/filter rules that allow this peer only to the
+        ticked destinations and drop everything else. Source matches the
+        peer&apos;s allowed-address ({peer.allowed_address ?? "—"}). All rules
+        carry the comment{" "}
+        <span className="font-mono">netfleet wg-peer={tag}</span> so you can
+        find and revoke them later.
+      </p>
+
+      {error && (
+        <p className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+
+      {createdCount !== null ? (
+        <div className="mt-4 space-y-3">
+          <p className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+            Created {createdCount} firewall rule{createdCount === 1 ? "" : "s"}.
+            They live in /ip/firewall/filter; the Firewall page shows them.
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setError(null);
+            if (picks.size === 0 && !extra.trim() && !dropRest) {
+              setError("Pick at least one allowed destination or enable drop-rest.");
+              return;
+            }
+            m.mutate();
+          }}
+          className="mt-4 space-y-3"
+        >
+          <div className="text-sm font-medium">Allowed destinations</div>
+          <div className="space-y-1 text-xs">
+            {lanSubnets?.length === 0 && (
+              <p className="italic text-muted-foreground">
+                No LAN subnets discovered.
+              </p>
+            )}
+            {lanSubnets?.map((s) => (
+              <label
+                key={s.cidr}
+                className="flex items-center gap-2"
+                title={s.comment ? `${s.interface} · ${s.comment}` : s.interface}
+              >
+                <input
+                  type="checkbox"
+                  checked={picks.has(s.cidr)}
+                  onChange={(e) => toggle(s.cidr, e.target.checked)}
+                  className="size-4"
+                />
+                <span className="font-mono">{s.cidr}</span>
+                <span className="text-muted-foreground">· {s.interface}</span>
+              </label>
+            ))}
+          </div>
+          <label className="block text-xs">
+            Extra CIDRs (comma or space separated)
+            <input
+              value={extra}
+              onChange={(e) => setExtra(e.target.value)}
+              className={`${input} mt-1 font-mono`}
+              placeholder="172.16.5.10/32"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={dropRest}
+              onChange={(e) => setDropRest(e.target.checked)}
+              className="size-4"
+            />
+            Drop everything else from this peer
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={m.isPending}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {m.isPending ? "Creating rules…" : "Create restrict rules"}
             </button>
           </div>
         </form>

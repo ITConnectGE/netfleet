@@ -488,6 +488,14 @@ class VendorDriver(Protocol):
 
     # IP addresses
     async def ip_addresses_list(self, creds: DeviceCredentials) -> list[IpAddress]: ...
+    async def ip_address_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        address: str,
+        interface: str,
+        comment: str | None = None,
+    ) -> str: ...
     async def interface_list_members(
         self, creds: DeviceCredentials, list_name: str
     ) -> list[str]:

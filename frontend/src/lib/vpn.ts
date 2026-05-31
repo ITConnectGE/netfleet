@@ -207,6 +207,25 @@ export interface WgSubnetSuggestion {
   comment: string | null;
 }
 
+export interface AddressCreate {
+  address: string;
+  interface: string;
+  comment?: string | null;
+}
+
+export async function createIpAddress(
+  deviceId: string,
+  payload: AddressCreate,
+): Promise<{ id: string }> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/addresses`, { json: payload })
+      .json<{ id: string }>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function listWgEndpointSuggestions(
   deviceId: string,
 ): Promise<WgEndpointSuggestion[]> {
@@ -221,6 +240,34 @@ export async function listWgLanSubnets(
   return api
     .get(`devices/${deviceId}/wireguard/-/lan-subnets-suggested`)
     .json<WgSubnetSuggestion[]>();
+}
+
+export interface WgPeerRestrictRequest {
+  allowed_cidrs: string[];
+  drop_rest: boolean;
+  comment_tag: string;
+}
+
+export interface WgPeerRestrictResponse {
+  rule_ids: string[];
+  rules_created: number;
+}
+
+export async function restrictWgPeer(
+  deviceId: string,
+  peerId: string,
+  payload: WgPeerRestrictRequest,
+): Promise<WgPeerRestrictResponse> {
+  try {
+    return await api
+      .post(
+        `devices/${deviceId}/wireguard/peers/${encodeURIComponent(peerId)}/restrict`,
+        { json: payload },
+      )
+      .json<WgPeerRestrictResponse>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
 }
 
 export async function downloadWgClientConfig(

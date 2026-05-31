@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -186,6 +187,51 @@ async def list_addresses(
         )
         for a in items
     ]
+
+
+class _IpAddressCreate(BaseModel):
+    address: str
+    interface: str
+    comment: str | None = None
+
+
+@router.post(
+    "/{device_id}/addresses",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_address(
+    device_id: UUID,
+    payload: _IpAddressCreate,
+    request: Request,
+    user: User = Depends(require_permission("ip.address", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        new_id = await get_driver(device.vendor).ip_address_add(
+            _to_driver_creds(device),
+            address=payload.address,
+            interface=payload.interface,
+            comment=payload.comment,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="ip.address",
+        action="create",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(),
+        response_meta={"id": new_id},
+    )
+    await session.commit()
+    return {"id": new_id}
 
 
 # ---------------- ARP ----------------
