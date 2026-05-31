@@ -239,16 +239,26 @@ function OrgInfoSection() {
     queryKey: ["org-info"],
     queryFn: getOrgInfo,
   });
-  const [value, setValue] = useState("");
+  // One IP per row. Storage on the wire stays comma-separated so no
+  // backend / migration change — we just split / join here.
+  const [rows, setRows] = useState<string[]>([""]);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (data) setValue(data.netfleet_external_ips ?? "");
+    if (!data) return;
+    const parts = (data.netfleet_external_ips ?? "")
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    setRows(parts.length > 0 ? parts : [""]);
   }, [data]);
 
   const save = useMutation({
-    mutationFn: () => updateOrgInfo({ netfleet_external_ips: value || null }),
+    mutationFn: () => {
+      const joined = rows.map((r) => r.trim()).filter(Boolean).join(",");
+      return updateOrgInfo({ netfleet_external_ips: joined || null });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["org-info"] });
       setSavedAt(Date.now());
@@ -273,8 +283,9 @@ function OrgInfoSection() {
       <h2 className="text-lg font-semibold">NetFleet external IP(s)</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         The egress IP(s) managed devices see when NetFleet connects to them.
-        Used to whitelist NetFleet in the device-onboarding script. Comma-
-        separated IPs or CIDRs (e.g. <code>203.0.113.10,198.51.100.0/29</code>).
+        Used to whitelist NetFleet in the device-onboarding script. One IP or
+        CIDR per row (e.g. <code>203.0.113.10</code> or{" "}
+        <code>198.51.100.0/29</code>).
       </p>
 
       {error && (
@@ -288,13 +299,47 @@ function OrgInfoSection() {
         </div>
       )}
 
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="203.0.113.10,198.51.100.0/29"
-        className={`${inputClass} mt-4 font-mono text-sm`}
-      />
+      <div className="mt-4 space-y-2">
+        {rows.map((value, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => {
+                const next = [...rows];
+                next[idx] = e.target.value;
+                setRows(next);
+              }}
+              placeholder="203.0.113.10"
+              className={`${inputClass} font-mono text-sm`}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (rows.length === 1) {
+                  setRows([""]);
+                  return;
+                }
+                setRows(rows.filter((_, i) => i !== idx));
+              }}
+              aria-label={`Remove row ${idx + 1}`}
+              className="shrink-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              title="Remove"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setRows([...rows, ""])}
+        className="mt-2 inline-flex items-center gap-1 rounded-md border border-dashed border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+      >
+        + Add another IP
+      </button>
+
       <div className="mt-4 flex justify-end">
         <button
           type="submit"
