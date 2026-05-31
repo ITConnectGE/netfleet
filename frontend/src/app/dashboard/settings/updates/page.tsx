@@ -16,7 +16,11 @@ export default function UpdatesPage() {
   const qc = useQueryClient();
   const { data, isLoading, error, dataUpdatedAt } = useQuery<UpdateStatus>({
     queryKey: ["update-status"],
-    queryFn: getUpdateStatus,
+    // getUpdateStatus now takes an optional `force` boolean. TanStack
+    // Query passes a QueryFunctionContext to queryFn, so pointing it at
+    // the function directly would forward that object as `force` and
+    // make searchParams=[object Object]. Always poll without force.
+    queryFn: () => getUpdateStatus(),
     // Poll fast while a job is running, slow otherwise
     refetchInterval: (q) => (q.state.data && isInProgress(q.state.data.state) ? 2000 : 30_000),
   });
