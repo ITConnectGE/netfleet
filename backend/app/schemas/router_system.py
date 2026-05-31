@@ -93,3 +93,15 @@ class SnmpCommunityCreate(BaseModel):
     security: Literal["none", "authorized", "private"] | None = None
     read_access: bool = True
     write_access: bool = False
+
+
+class SnmpCommunityUpdate(BaseModel):
+    """All-optional patch. Renaming a community is allowed because RouterOS
+    keys rows by `.id` internally, not by name."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    addresses: str | None = Field(default=None, max_length=255)
+    security: Literal["none", "authorized", "private"] | None = None
+    read_access: bool | None = None
+    write_access: bool | None = None
+    disabled: bool | None = None

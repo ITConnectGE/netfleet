@@ -87,10 +87,10 @@ export default function ReportsPage() {
 
         {tab === "user" && (
           <TextField
-            label="User ID (optional)"
+            label="User ID"
             value={userId}
             onChange={setUserId}
-            placeholder="leave blank for all"
+            example="Leave blank to include every user"
           />
         )}
         {tab === "device" && (
@@ -98,23 +98,24 @@ export default function ReportsPage() {
             label="Device ID"
             value={deviceId}
             onChange={setDeviceId}
-            placeholder="required"
+            example="Required for device-scoped reports"
           />
         )}
         {tab === "secret" && (
           <TextField
-            label="User ID (optional)"
+            label="User ID"
             value={userId}
             onChange={setUserId}
-            placeholder="leave blank for all"
+            example="Leave blank to include every user"
           />
         )}
         {tab === "changes" && (
           <TextField
-            label="Section (optional)"
+            label="Section"
             value={section}
             onChange={setSection}
-            placeholder="e.g. firewall.filter"
+            placeholder="firewall.filter"
+            example="Optional · matches the audit section identifier"
           />
         )}
 
@@ -192,11 +193,13 @@ function TextField({
   value,
   onChange,
   placeholder,
+  example,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  example?: string;
 }) {
   return (
     <label className="block space-y-1 text-xs font-medium text-muted-foreground">
@@ -207,6 +210,11 @@ function TextField({
         placeholder={placeholder}
         className={`${input} font-mono`}
       />
+      {example && (
+        <span className="block text-[11px] italic font-normal normal-case text-muted-foreground">
+          {example}
+        </span>
+      )}
     </label>
   );
 }

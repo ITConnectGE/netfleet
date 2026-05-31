@@ -582,6 +582,18 @@ class VendorDriver(Protocol):
     async def snmp_community_remove(
         self, creds: DeviceCredentials, community_id: str
     ) -> None: ...
+    async def snmp_community_update(
+        self,
+        creds: DeviceCredentials,
+        community_id: str,
+        *,
+        name: str | None = None,
+        addresses: str | None = None,
+        security: str | None = None,
+        read_access: bool | None = None,
+        write_access: bool | None = None,
+        disabled: bool | None = None,
+    ) -> None: ...
 
     # IP services
     async def ip_services_list(self, creds: DeviceCredentials) -> list[IpService]: ...

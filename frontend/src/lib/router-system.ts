@@ -75,6 +75,15 @@ export interface SnmpCommunityCreate {
   write_access: boolean;
 }
 
+export interface SnmpCommunityUpdate {
+  name?: string;
+  addresses?: string | null;
+  security?: "none" | "authorized" | "private";
+  read_access?: boolean;
+  write_access?: boolean;
+  disabled?: boolean;
+}
+
 export async function getNtp(deviceId: string): Promise<NtpClient> {
   return api.get(`devices/${deviceId}/ntp`).json<NtpClient>();
 }
@@ -149,6 +158,19 @@ export async function createSnmpCommunity(
 export async function deleteSnmpCommunity(deviceId: string, id: string): Promise<void> {
   try {
     await api.delete(`devices/${deviceId}/snmp/communities/${encodeURIComponent(id)}`);
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+export async function updateSnmpCommunity(
+  deviceId: string,
+  id: string,
+  payload: SnmpCommunityUpdate,
+): Promise<void> {
+  try {
+    await api.patch(`devices/${deviceId}/snmp/communities/${encodeURIComponent(id)}`, {
+      json: payload,
+    });
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

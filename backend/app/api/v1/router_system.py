@@ -26,6 +26,7 @@ from app.schemas.router_system import (
     NtpServerUpdate,
     SnmpCommunityCreate,
     SnmpCommunityPublic,
+    SnmpCommunityUpdate,
     SnmpPublic,
     SnmpUpdate,
 )
@@ -354,6 +355,51 @@ async def create_snmp_community(
     )
     await session.commit()
     return {"id": new_id}
+
+
+@router.patch(
+    "/{device_id}/snmp/communities/{community_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def update_snmp_community(
+    device_id: UUID,
+    community_id: str,
+    payload: SnmpCommunityUpdate,
+    request: Request,
+    user: User = Depends(require_permission("system.info", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).snmp_community_update(
+            _to_driver_creds(device),
+            community_id,
+            name=payload.name,
+            addresses=payload.addresses,
+            security=payload.security,
+            read_access=payload.read_access,
+            write_access=payload.write_access,
+            disabled=payload.disabled,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.snmp",
+        action="update_community",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={
+            "community_id": community_id,
+            **payload.model_dump(exclude_unset=True),
+        },
+    )
+    await session.commit()
 
 
 @router.delete(

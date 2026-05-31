@@ -797,6 +797,35 @@ class MikrotikDriver:
     ) -> None:
         await self._call(creds, "/snmp/community/remove", **{".id": community_id})
 
+    async def snmp_community_update(
+        self,
+        creds: DeviceCredentials,
+        community_id: str,
+        *,
+        name: str | None = None,
+        addresses: str | None = None,
+        security: str | None = None,
+        read_access: bool | None = None,
+        write_access: bool | None = None,
+        disabled: bool | None = None,
+    ) -> None:
+        params: dict[str, Any] = {".id": community_id}
+        if name is not None:
+            params["name"] = name
+        if addresses is not None:
+            # RouterOS treats empty string as "any" — feed it through verbatim
+            # so the caller can clear the whitelist.
+            params["addresses"] = addresses
+        if security is not None:
+            params["security"] = security
+        if read_access is not None:
+            params["read-access"] = "yes" if read_access else "no"
+        if write_access is not None:
+            params["write-access"] = "yes" if write_access else "no"
+        if disabled is not None:
+            params["disabled"] = "yes" if disabled else "no"
+        await self._call(creds, "/snmp/community/set", **params)
+
     # ============== System log ==============
 
     async def log_list(

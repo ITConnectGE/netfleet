@@ -377,12 +377,17 @@ function RuleForm({
           Log hits
         </label>
         {log && (
-          <input
-            value={logPrefix}
-            onChange={(e) => setLogPrefix(e.target.value)}
-            className={`${input} max-w-xs font-mono`}
-            placeholder="log-prefix (e.g. WG-PEER-INVALID)"
-          />
+          <div className="max-w-xs">
+            <input
+              value={logPrefix}
+              onChange={(e) => setLogPrefix(e.target.value)}
+              className={`${input} font-mono`}
+              placeholder="WG-PEER-INVALID"
+            />
+            <p className="mt-1 text-[11px] italic text-muted-foreground">
+              Log prefix tagged on each matching packet (helps grep)
+            </p>
+          </div>
         )}
       </div>
       <div className="mt-5 flex justify-end">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   createSnmpCommunity,
@@ -16,6 +16,7 @@ import {
   updateNtp,
   updateNtpServer,
   updateSnmp,
+  updateSnmpCommunity,
   type DeviceClock,
   type NtpClient,
   type NtpServer,
@@ -23,18 +24,93 @@ import {
   type SnmpSettings,
 } from "@/lib/router-system";
 
+const TABS = [
+  { id: "clock", label: "Clock & time zone" },
+  { id: "ntp", label: "NTP" },
+  { id: "snmp", label: "SNMP" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+function isTabId(v: string | null): v is TabId {
+  return v != null && TABS.some((t) => t.id === v);
+}
+
 export default function SystemPage() {
   const params = useParams<{ id: string }>();
   const deviceId = params.id;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const rawTab = searchParams.get("tab");
+  const activeTab: TabId = isTabId(rawTab) ? rawTab : "clock";
+
+  // Build href once per tab so the buttons render as real anchors —
+  // keeps deep-linking + back-button behaviour the way users expect.
+  const tabHrefs = useMemo(
+    () =>
+      TABS.reduce<Record<TabId, string>>((acc, t) => {
+        acc[t.id] = `${pathname}?tab=${t.id}`;
+        return acc;
+      }, {} as Record<TabId, string>),
+    [pathname],
+  );
+
+  function selectTab(id: TabId) {
+    router.replace(tabHrefs[id], { scroll: false });
+  }
 
   return (
-    <div className="space-y-10">
-      <ClockCard deviceId={deviceId} />
-      <NtpSection deviceId={deviceId} />
-      <TimeZoneSection deviceId={deviceId} />
-      <NtpServerSection deviceId={deviceId} />
-      <SnmpSection deviceId={deviceId} />
-      <SnmpCommunitiesSection deviceId={deviceId} />
+    <div>
+      <h1 className="text-xl font-semibold tracking-tight">System</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Configure router-side services. Changes apply directly to the device.
+      </p>
+
+      <div className="mt-4 border-b border-border">
+        <nav className="-mb-px flex flex-wrap gap-1" aria-label="System sub-pages">
+          {TABS.map((t) => {
+            const active = t.id === activeTab;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => selectTab(t.id)}
+                aria-current={active ? "page" : undefined}
+                className={
+                  active
+                    ? "border-b-2 border-primary px-3 py-2 text-sm font-medium text-primary"
+                    : "border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground hover:border-border hover:text-foreground"
+                }
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <div className="mt-6 space-y-10">
+        {activeTab === "clock" && (
+          <>
+            <ClockCard deviceId={deviceId} />
+            <TimeZoneSection deviceId={deviceId} />
+          </>
+        )}
+        {activeTab === "ntp" && (
+          <>
+            <NtpSection deviceId={deviceId} />
+            <NtpServerSection deviceId={deviceId} />
+          </>
+        )}
+        {activeTab === "snmp" && (
+          <>
+            <SnmpSection deviceId={deviceId} />
+            <SnmpCommunitiesSection deviceId={deviceId} />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -374,48 +450,187 @@ function SnmpCommunitiesSection({ deviceId }: { deviceId: string }) {
               </tr>
             )}
             {items?.map((c) => (
-              <tr key={c.id ?? c.name} className="hover:bg-accent/30">
-                <td className="px-4 py-2.5 font-medium">
-                  {c.name}
-                  {c.disabled && (
-                    <span className="ml-2 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-800">
-                      disabled
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 font-mono text-xs">{c.addresses ?? "any"}</td>
-                <td className="px-4 py-2.5 text-xs">
-                  {c.read_access ? (
-                    <span className="text-emerald-700">✓</span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-xs">
-                  {c.write_access ? (
-                    <span className="text-amber-700">⚠ write</span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  <button
-                    onClick={() => {
-                      if (c.id && confirm(`Delete SNMP community "${c.name}"?`)) {
-                        del.mutate(c.id);
-                      }
-                    }}
-                    className="text-xs text-destructive hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
+              <CommunityRow
+                key={c.id ?? c.name}
+                community={c}
+                deviceId={deviceId}
+                onDelete={() => {
+                  if (c.id && confirm(`Delete SNMP community "${c.name}"?`)) {
+                    del.mutate(c.id);
+                  }
+                }}
+              />
             ))}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function CommunityRow({
+  community,
+  deviceId,
+  onDelete,
+}: {
+  community: SnmpCommunity;
+  deviceId: string;
+  onDelete: () => void;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  // Local form state — only synced from props when the user enters edit
+  // mode, so they keep their unsaved typing across a refetch.
+  const [addresses, setAddresses] = useState(community.addresses ?? "");
+  const [readAccess, setReadAccess] = useState(community.read_access);
+  const [writeAccess, setWriteAccess] = useState(community.write_access);
+  const [disabled, setDisabled] = useState(community.disabled);
+  const [error, setError] = useState<string | null>(null);
+
+  function startEditing() {
+    setAddresses(community.addresses ?? "");
+    setReadAccess(community.read_access);
+    setWriteAccess(community.write_access);
+    setDisabled(community.disabled);
+    setError(null);
+    setEditing(true);
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!community.id) return Promise.reject(new Error("missing community id"));
+      return updateSnmpCommunity(deviceId, community.id, {
+        // Send empty string verbatim — RouterOS treats it as "any source".
+        addresses,
+        read_access: readAccess,
+        write_access: writeAccess,
+        disabled,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["snmp-communities", deviceId] });
+      setEditing(false);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  if (!editing) {
+    return (
+      <tr className="hover:bg-accent/30">
+        <td className="px-4 py-2.5 font-medium">
+          {community.name}
+          {community.disabled && (
+            <span className="ml-2 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-800">
+              disabled
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 font-mono text-xs">
+          {community.addresses ?? "any"}
+        </td>
+        <td className="px-4 py-2.5 text-xs">
+          {community.read_access ? (
+            <span className="text-emerald-700">✓</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 text-xs">
+          {community.write_access ? (
+            <span className="text-amber-700">⚠ write</span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 text-right text-xs">
+          {community.id && (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="mr-3 text-primary hover:underline"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="text-destructive hover:underline"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="bg-accent/20">
+      <td className="px-4 py-2.5 font-medium align-top">
+        {community.name}
+        <div className="mt-1">
+          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={disabled}
+              onChange={(e) => setDisabled(e.target.checked)}
+              className="size-3"
+            />
+            disabled
+          </label>
+        </div>
+      </td>
+      <td className="px-4 py-2.5 align-top">
+        <input
+          value={addresses}
+          onChange={(e) => setAddresses(e.target.value)}
+          placeholder="10.0.0.0/24,192.168.1.5"
+          className="block w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Blank = any source
+        </p>
+        {error && (
+          <p className="mt-1 text-[11px] text-destructive">{error}</p>
+        )}
+      </td>
+      <td className="px-4 py-2.5 align-top">
+        <input
+          type="checkbox"
+          checked={readAccess}
+          onChange={(e) => setReadAccess(e.target.checked)}
+          className="size-4"
+        />
+      </td>
+      <td className="px-4 py-2.5 align-top">
+        <input
+          type="checkbox"
+          checked={writeAccess}
+          onChange={(e) => setWriteAccess(e.target.checked)}
+          className="size-4"
+        />
+      </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-right text-xs align-top">
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          className="mr-2 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setEditing(false);
+          }}
+          className="text-muted-foreground hover:underline"
+        >
+          Cancel
+        </button>
+      </td>
+    </tr>
   );
 }
 

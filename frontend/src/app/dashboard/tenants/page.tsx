@@ -140,13 +140,12 @@ function TenantForm({ onCreated }: { onCreated: () => void }) {
             placeholder="Acme Manufacturing"
           />
         </Field>
-        <Field label="Description" htmlFor="t-desc">
+        <Field label="Description" htmlFor="t-desc" example="Optional · short summary of the customer or business unit">
           <input
             id="t-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={input}
-            placeholder="optional"
           />
         </Field>
         <Field label="Primary contact name" htmlFor="t-cname">
@@ -200,10 +199,12 @@ function slugify(s: string): string {
 function Field({
   label,
   htmlFor,
+  example,
   children,
 }: {
   label: string;
   htmlFor: string;
+  example?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -212,6 +213,9 @@ function Field({
         {label}
       </label>
       {children}
+      {example && (
+        <p className="text-[11px] italic text-muted-foreground">{example}</p>
+      )}
     </div>
   );
 }

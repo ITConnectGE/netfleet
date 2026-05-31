@@ -442,8 +442,10 @@ function PeerForm({
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             className={input}
-            placeholder="e.g. nika-laptop"
           />
+          <p className="text-[11px] italic text-muted-foreground">
+            Optional · who or what this peer belongs to (e.g. nika-laptop)
+          </p>
         </Field>
       </div>
       <div className="mt-5 flex justify-end">

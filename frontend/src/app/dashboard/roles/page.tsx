@@ -272,8 +272,10 @@ function RoleForm({
             value={description ?? ""}
             onChange={(e) => setDescription(e.target.value)}
             className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder="optional"
           />
+          <p className="text-[11px] italic text-muted-foreground">
+            Optional · explain when this role is appropriate to assign
+          </p>
         </label>
       </div>
 

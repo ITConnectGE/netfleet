@@ -7,6 +7,8 @@ import { useState } from "react";
 
 import { FirmwareCard } from "@/components/firmware-card";
 import { StatusPill } from "@/components/status-pill";
+import { useToast } from "@/components/toast";
+import { downloadAuthed } from "@/lib/api";
 import {
   deleteDevice,
   getDevice,
@@ -23,6 +25,7 @@ export default function DeviceDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
+  const toast = useToast();
   const id = params.id;
 
   const { data: device, isLoading } = useQuery<Device>({
@@ -104,6 +107,20 @@ export default function DeviceDetailPage() {
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
           >
             {test.isPending ? "Testing…" : "Test connection"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const safeName = device.name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+              downloadAuthed(
+                `/api/v1/devices/${device.id}/onboarding-script`,
+                `netfleet-onboarding-${safeName}.rsc`,
+              ).catch((e: Error) => toast.error("Download failed", e.message));
+            }}
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+            title="Download the RouterOS onboarding script (.rsc) that prepares this device for NetFleet management"
+          >
+            Onboarding .rsc
           </button>
           <button
             onClick={() => {

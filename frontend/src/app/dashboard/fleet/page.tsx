@@ -9,23 +9,19 @@ import { listDevices, type Device } from "@/lib/devices";
 import { listSites, type Site } from "@/lib/sites";
 import { listTenants, type Tenant } from "@/lib/tenants";
 
-type TenantNode = Tenant & {
-  sites: SiteNode[];
-  device_count: number;
-  online_count: number;
-  offline_count: number;
-};
-
-type SiteNode = Site & {
-  devices: Device[];
-  online_count: number;
-  offline_count: number;
-};
-
 function normFw(v: string | null | undefined): string {
   if (!v) return "";
   return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
+
+type Row = {
+  key: string;
+  tenant: Tenant;
+  site: Site | null;
+  device: Device | null;
+  tenantFirst: boolean;
+  siteFirst: boolean;
+};
 
 export default function FleetPage() {
   const { data: tenants } = useQuery<Tenant[]>({
@@ -41,7 +37,7 @@ export default function FleetPage() {
     queryFn: () => listDevices(),
   });
 
-  const tree = useMemo<TenantNode[]>(() => {
+  const rows = useMemo<Row[]>(() => {
     if (!tenants || !sites || !devices) return [];
     const devicesBySite = new Map<string, Device[]>();
     for (const d of devices) {
@@ -49,84 +45,113 @@ export default function FleetPage() {
       list.push(d);
       devicesBySite.set(d.site_id, list);
     }
-    const sitesByTenant = new Map<string, SiteNode[]>();
+    const sitesByTenant = new Map<string, Site[]>();
     for (const s of sites) {
-      const siteDevices = (devicesBySite.get(s.id) ?? []).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      );
-      const node: SiteNode = {
-        ...s,
-        devices: siteDevices,
-        online_count: siteDevices.filter((d) => d.status === "online").length,
-        offline_count: siteDevices.filter(
-          (d) => d.status === "offline" || d.status === "error",
-        ).length,
-      };
       const list = sitesByTenant.get(s.tenant_id) ?? [];
-      list.push(node);
+      list.push(s);
       sitesByTenant.set(s.tenant_id, list);
     }
-    return tenants
-      .map<TenantNode>((t) => {
-        const tenantSites = (sitesByTenant.get(t.id) ?? []).sort((a, b) =>
+    const out: Row[] = [];
+    const sortedTenants = [...tenants].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    for (const t of sortedTenants) {
+      const tSites = (sitesByTenant.get(t.id) ?? []).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      let tenantFirstUsed = false;
+      if (tSites.length === 0) {
+        out.push({
+          key: `t:${t.id}`,
+          tenant: t,
+          site: null,
+          device: null,
+          tenantFirst: true,
+          siteFirst: false,
+        });
+        continue;
+      }
+      for (const s of tSites) {
+        const sDevices = (devicesBySite.get(s.id) ?? []).sort((a, b) =>
           a.name.localeCompare(b.name),
         );
-        const device_count = tenantSites.reduce(
-          (a, s) => a + s.devices.length,
-          0,
-        );
-        const online_count = tenantSites.reduce(
-          (a, s) => a + s.online_count,
-          0,
-        );
-        const offline_count = tenantSites.reduce(
-          (a, s) => a + s.offline_count,
-          0,
-        );
-        return {
-          ...t,
-          sites: tenantSites,
-          device_count,
-          online_count,
-          offline_count,
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+        let siteFirstUsed = false;
+        if (sDevices.length === 0) {
+          out.push({
+            key: `s:${s.id}`,
+            tenant: t,
+            site: s,
+            device: null,
+            tenantFirst: !tenantFirstUsed,
+            siteFirst: true,
+          });
+          tenantFirstUsed = true;
+          continue;
+        }
+        for (const d of sDevices) {
+          out.push({
+            key: `d:${d.id}`,
+            tenant: t,
+            site: s,
+            device: d,
+            tenantFirst: !tenantFirstUsed,
+            siteFirst: !siteFirstUsed,
+          });
+          tenantFirstUsed = true;
+          siteFirstUsed = true;
+        }
+      }
+    }
+    return out;
   }, [tenants, sites, devices]);
 
   const [filter, setFilter] = useState("");
 
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return tree;
-    const needle = filter.toLowerCase();
-    return tree
-      .map<TenantNode | null>((t) => {
-        const sitesMatched = t.sites
-          .map<SiteNode | null>((s) => {
-            const siteMatch =
-              s.name.toLowerCase().includes(needle) ||
-              (s.address?.toLowerCase().includes(needle) ?? false);
-            const deviceHits = s.devices.filter(
-              (d) =>
-                d.name.toLowerCase().includes(needle) ||
-                d.host.toLowerCase().includes(needle) ||
-                (d.model?.toLowerCase().includes(needle) ?? false),
-            );
-            if (siteMatch) return s;
-            if (deviceHits.length > 0) return { ...s, devices: deviceHits };
-            return null;
-          })
-          .filter((x): x is SiteNode => x !== null);
-        const tenantMatch = t.name.toLowerCase().includes(needle);
-        if (tenantMatch) return t;
-        if (sitesMatched.length > 0) return { ...t, sites: sitesMatched };
-        return null;
-      })
-      .filter((x): x is TenantNode => x !== null);
-  }, [tree, filter]);
+  const filtered = useMemo<Row[]>(() => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return rows;
+    const hits = rows.filter((r) => {
+      const haystack = [
+        r.tenant.name,
+        r.site?.name,
+        r.site?.address,
+        r.device?.name,
+        r.device?.host,
+        r.device?.model,
+        r.device?.firmware,
+        r.device?.vendor,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+    // Recompute tenant/site "first" flags within the filtered subset so
+    // group cells still de-dup correctly after rows fall away.
+    let lastTenant = "";
+    let lastSite = "";
+    return hits.map((r) => {
+      const tFirst = r.tenant.id !== lastTenant;
+      const sFirst = (r.site?.id ?? "") !== lastSite || tFirst;
+      lastTenant = r.tenant.id;
+      lastSite = r.site?.id ?? "";
+      return { ...r, tenantFirst: tFirst, siteFirst: sFirst };
+    });
+  }, [rows, filter]);
 
-  const totalDevices = filtered.reduce((a, t) => a + t.device_count, 0);
-  const totalSites = filtered.reduce((a, t) => a + t.sites.length, 0);
+  const totalTenants = useMemo(
+    () => new Set(filtered.map((r) => r.tenant.id)).size,
+    [filtered],
+  );
+  const totalSites = useMemo(
+    () =>
+      new Set(filtered.filter((r) => r.site).map((r) => r.site!.id)).size,
+    [filtered],
+  );
+  const totalDevices = useMemo(
+    () => filtered.filter((r) => r.device).length,
+    [filtered],
+  );
 
   return (
     <div>
@@ -134,13 +159,13 @@ export default function FleetPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Fleet</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every tenant, site and device on one page. Click any name to open
-            its detail.
+            Every tenant, site and device in one table. Click any name to open
+            its detail page.
           </p>
         </div>
         <div className="text-xs text-muted-foreground">
-          {filtered.length} tenant{filtered.length === 1 ? "" : "s"} ·{" "}
-          {totalSites} site{totalSites === 1 ? "" : "s"} · {totalDevices} device
+          {totalTenants} tenant{totalTenants === 1 ? "" : "s"} · {totalSites}{" "}
+          site{totalSites === 1 ? "" : "s"} · {totalDevices} device
           {totalDevices === 1 ? "" : "s"}
         </div>
       </div>
@@ -149,7 +174,7 @@ export default function FleetPage() {
         type="search"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="Search tenant / site / device / host…"
+        placeholder="Search tenant / site / device / host / model…"
         className="mt-4 block w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
 
@@ -158,170 +183,152 @@ export default function FleetPage() {
           {filter ? "Nothing matches that filter." : "No tenants yet."}
         </div>
       ) : (
-        <div className="mt-4 space-y-4 rounded-lg border border-border bg-card">
-          {filtered.map((t, i) => (
-            <TenantBlock
-              key={t.id}
-              tenant={t}
-              highlight={filter.toLowerCase()}
-              isFirst={i === 0}
-            />
-          ))}
+        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Tenant</th>
+                <th className="px-3 py-2 font-medium">Site</th>
+                <th className="px-3 py-2 font-medium">Device</th>
+                <th className="px-3 py-2 font-medium">IP / Host</th>
+                <th className="px-3 py-2 font-medium">Model</th>
+                <th className="px-3 py-2 font-medium">Firmware</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium text-right">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <FleetRow key={r.key} row={r} highlight={filter.toLowerCase()} />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-function TenantBlock({
-  tenant,
-  highlight,
-  isFirst,
-}: {
-  tenant: TenantNode;
-  highlight: string;
-  isFirst: boolean;
-}) {
+function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
+  const { tenant, site, device, tenantFirst, siteFirst } = row;
+  const fwUpgrade =
+    device?.firmware_available &&
+    device?.firmware &&
+    normFw(device.firmware_available) !== normFw(device.firmware);
+  // Subtle top border at tenant boundaries so the eye can find group
+  // breaks even when the tenant cell is blank on continuation rows.
+  const groupBorder = tenantFirst ? "border-t border-border" : "";
   return (
-    <section className={isFirst ? "" : "border-t border-border"}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 bg-muted/40 px-3 py-1.5">
-        <Link
-          href={`/dashboard/tenants/${tenant.id}`}
-          className="text-sm font-semibold hover:underline"
-        >
-          <Highlighted text={tenant.name} needle={highlight} />
-        </Link>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span>
-            {tenant.sites.length} site{tenant.sites.length === 1 ? "" : "s"} ·{" "}
-            {tenant.device_count} device{tenant.device_count === 1 ? "" : "s"}
-          </span>
-          <Counter color="emerald" value={tenant.online_count} title="online" />
-          <Counter color="red" value={tenant.offline_count} title="offline" />
-        </div>
-      </div>
-
-      {tenant.sites.length === 0 ? (
-        <p className="px-3 py-1.5 text-[11px] text-muted-foreground">
-          No sites yet.{" "}
+    <tr className={`${groupBorder} hover:bg-muted/30`}>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+        {tenantFirst ? (
           <Link
             href={`/dashboard/tenants/${tenant.id}`}
-            className="text-primary hover:underline"
+            className="font-medium hover:underline"
           >
-            Add one →
+            <Highlighted text={tenant.name} needle={highlight} />
           </Link>
-        </p>
-      ) : (
-        <ul className="divide-y divide-border/70">
-          {tenant.sites.map((s) => (
-            <SiteRow key={s.id} site={s} highlight={highlight} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function SiteRow({ site, highlight }: { site: SiteNode; highlight: string }) {
-  return (
-    <li>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-1.5">
-        <div className="min-w-0">
+        ) : (
+          <span className="text-muted-foreground/40">↳</span>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+        {site == null ? (
+          <span className="text-xs italic text-muted-foreground">
+            No sites
+          </span>
+        ) : siteFirst ? (
           <Link
             href={`/dashboard/sites/${site.id}`}
-            className="text-sm font-medium hover:underline"
+            className="hover:underline"
           >
             <Highlighted text={site.name} needle={highlight} />
           </Link>
-          {site.address && (
-            <span className="ml-2 text-[11px] text-muted-foreground">
-              · {site.address}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span>
-            {site.devices.length} device{site.devices.length === 1 ? "" : "s"}
-          </span>
-          <Counter color="emerald" value={site.online_count} title="online" />
-          <Counter color="red" value={site.offline_count} title="offline" />
-        </div>
-      </div>
-
-      {site.devices.length > 0 && (
-        <ul className="divide-y divide-border/40 border-t border-border/40 bg-muted/10 pl-6">
-          {site.devices.map((d) => (
-            <DeviceRow key={d.id} device={d} highlight={highlight} />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
-
-function DeviceRow({
-  device,
-  highlight,
-}: {
-  device: Device;
-  highlight: string;
-}) {
-  const fwUpgrade =
-    device.firmware_available &&
-    device.firmware &&
-    normFw(device.firmware_available) !== normFw(device.firmware);
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-1 text-xs">
-      <Link
-        href={`/dashboard/devices/${device.id}`}
-        className="flex min-w-0 flex-1 items-baseline gap-2 hover:underline"
-      >
-        <span className="truncate font-medium">
-          <Highlighted text={device.name} needle={highlight} />
-        </span>
-        <span className="truncate font-mono text-[10px] text-muted-foreground">
-          {device.vendor} · {device.host}:{device.port}
-        </span>
-        {fwUpgrade && (
-          <span
-            className="rounded-md bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-900"
-            title={`Update available: ${device.firmware_available}`}
-          >
-            fw ↑
-          </span>
+        ) : (
+          <span className="text-muted-foreground/40">↳</span>
         )}
-      </Link>
-      <StatusPill status={device.status} />
-    </li>
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+        {device == null ? (
+          site == null ? null : (
+            <span className="text-xs italic text-muted-foreground">
+              No devices
+            </span>
+          )
+        ) : (
+          <Link
+            href={`/dashboard/devices/${device.id}`}
+            className="font-medium hover:underline"
+          >
+            <Highlighted text={device.name} needle={highlight} />
+          </Link>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
+        {device ? (
+          <Highlighted
+            text={`${device.host}:${device.port}`}
+            needle={highlight}
+          />
+        ) : (
+          <span className="text-muted-foreground/40">—</span>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+        {device?.model ? (
+          <Highlighted text={device.model} needle={highlight} />
+        ) : (
+          <span className="text-muted-foreground/40">—</span>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+        {device?.firmware ? (
+          <span className="inline-flex items-baseline gap-1">
+            <Highlighted text={device.firmware} needle={highlight} />
+            {fwUpgrade && (
+              <span
+                className="rounded-md bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-900"
+                title={`Update available: ${device.firmware_available}`}
+              >
+                ↑
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/40">—</span>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+        {device ? <StatusPill status={device.status} /> : null}
+      </td>
+      <td className="whitespace-nowrap px-3 py-1.5 align-top text-right">
+        {device ? (
+          <Link
+            href={`/dashboard/devices/${device.id}`}
+            className="text-xs text-primary hover:underline"
+          >
+            Open →
+          </Link>
+        ) : site ? (
+          <Link
+            href={`/dashboard/sites/${site.id}`}
+            className="text-xs text-primary hover:underline"
+          >
+            Open site →
+          </Link>
+        ) : (
+          <Link
+            href={`/dashboard/tenants/${tenant.id}`}
+            className="text-xs text-primary hover:underline"
+          >
+            Open tenant →
+          </Link>
+        )}
+      </td>
+    </tr>
   );
 }
 
-function Counter({
-  color,
-  value,
-  title,
-}: {
-  color: "emerald" | "red";
-  value: number;
-  title: string;
-}) {
-  if (value === 0) return null;
-  const cls =
-    color === "emerald"
-      ? "bg-emerald-100 text-emerald-800"
-      : "bg-red-100 text-red-800";
-  return (
-    <span
-      className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
-      title={title}
-    >
-      {value} {title}
-    </span>
-  );
-}
-
-// Wraps any occurrence of `needle` inside `text` in a <mark> so the
-// matching characters stand out during a search.
 function Highlighted({ text, needle }: { text: string; needle: string }) {
   if (!needle) return <>{text}</>;
   const idx = text.toLowerCase().indexOf(needle);

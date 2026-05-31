@@ -1,6 +1,6 @@
 {
   "name": "netfleet-web",
-  "version": "0.19.19",
+  "version": "0.20.0",
   "private": true,
   "description": "NetFleet — multi-vendor network fleet management for MSPs (web UI)",
   "license": "Apache-2.0",
