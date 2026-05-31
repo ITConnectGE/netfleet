@@ -188,7 +188,7 @@ function SiteInfoCard({ site }: { site: Site }) {
           <h2 className="text-sm font-medium text-muted-foreground">Info</h2>
           <button
             onClick={() => setEditing(true)}
-            className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+            className="rounded-md border border-input bg-background px-3 py-1 text-xs font-medium transition hover:bg-accent"
           >
             Edit
           </button>

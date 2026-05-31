@@ -145,7 +145,14 @@ export default function TenantDetailPage() {
             )}
             {sites?.map((s) => (
               <tr key={s.id} className="hover:bg-accent/30">
-                <td className="px-4 py-3 font-medium">{s.name}</td>
+                <td className="px-4 py-3 font-medium">
+                  <Link
+                    href={`/dashboard/sites/${s.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {s.name}
+                  </Link>
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                   {s.slug}
                 </td>
@@ -157,6 +164,12 @@ export default function TenantDetailPage() {
                   {s.contact_email ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
+                  <Link
+                    href={`/dashboard/sites/${s.id}`}
+                    className="mr-3 text-xs text-primary hover:underline"
+                  >
+                    Edit
+                  </Link>
                   <button
                     onClick={() => {
                       if (

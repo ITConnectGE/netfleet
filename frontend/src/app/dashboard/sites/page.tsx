@@ -32,22 +32,23 @@ export default function SitesPage() {
             <tr className="text-left">
               <th className="px-4 py-2.5 font-medium">Tenant</th>
               <th className="px-4 py-2.5 font-medium">Site</th>
-              <th className="px-4 py-2.5 font-medium">Slug</th>
+              <th className="px-4 py-2.5 font-medium">Address</th>
               <th className="px-4 py-2.5 font-medium">Devices</th>
               <th className="px-4 py-2.5 font-medium">Contact</th>
+              <th className="px-4 py-2.5 font-medium text-right" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {isLoading && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             )}
             {!isLoading && (!sites || sites.length === 0) && (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
                   No sites yet.
                 </td>
               </tr>
@@ -62,11 +63,31 @@ export default function SitesPage() {
                     {s.tenant_name ?? "—"}
                   </Link>
                 </td>
-                <td className="px-4 py-3 font-medium">{s.name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.slug}</td>
+                <td className="px-4 py-3 font-medium">
+                  <Link
+                    href={`/dashboard/sites/${s.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {s.name}
+                  </Link>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    {s.slug}
+                  </div>
+                </td>
+                <td className="max-w-xs truncate px-4 py-3 text-xs text-muted-foreground">
+                  {s.address ?? "—"}
+                </td>
                 <td className="px-4 py-3">{s.device_count}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">
                   {s.contact_email ?? "—"}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <Link
+                    href={`/dashboard/sites/${s.id}`}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Edit →
+                  </Link>
                 </td>
               </tr>
             ))}
