@@ -23,6 +23,7 @@ import {
   type Neighbor,
   type Vlan,
 } from "@/lib/network";
+import { getDevice, type Device } from "@/lib/devices";
 
 type Tab = "interfaces" | "routes" | "vlans" | "arp" | "bridge" | "neighbors";
 
@@ -71,68 +72,441 @@ export default function NetworkPage() {
 // ---------------- Neighbours ----------------
 
 function NeighborsTab({ deviceId }: { deviceId: string }) {
+  const [view, setView] = useState<"table" | "graph">("graph");
   const { data, isLoading, error } = useQuery<Neighbor[]>({
     queryKey: ["neighbors", deviceId],
     queryFn: () => listNeighbors(deviceId),
+    // Light auto-refresh — the topology changes infrequently but it's
+    // nice to see "freshly plugged in" peers without manually reloading.
+    refetchInterval: 30_000,
   });
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+  });
+
   return (
     <Section
       title="Neighbors (CDP / LLDP / MNDP)"
       subtitle="Other devices the router has seen advertise themselves on its links. Useful for mapping the physical/L2 topology."
+      action={
+        <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+          {(["graph", "table"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setView(k)}
+              className={`rounded px-2.5 py-1 font-medium transition ${
+                view === k
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {k === "graph" ? "Graph" : "Table"}
+            </button>
+          ))}
+        </div>
+      }
     >
-      <ErrorOrTable error={error}>
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/50">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium">Local port</th>
-              <th className="px-3 py-2 font-medium">Identity</th>
-              <th className="px-3 py-2 font-medium">Address</th>
-              <th className="px-3 py-2 font-medium">MAC</th>
-              <th className="px-3 py-2 font-medium">Platform</th>
-              <th className="px-3 py-2 font-medium">Version</th>
-              <th className="px-3 py-2 font-medium">Board</th>
-              <th className="px-3 py-2 font-medium">Remote port</th>
-              <th className="px-3 py-2 font-medium">Proto</th>
-              <th className="px-3 py-2 font-medium">Age</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {isLoading && <EmptyRow colSpan={10} label="Loading…" />}
-            {!isLoading && (!data || data.length === 0) && (
-              <EmptyRow
-                colSpan={10}
-                label="No neighbours discovered. Enable LLDP/CDP under /ip neighbor discovery-settings on the device."
-              />
-            )}
-            {data?.map((n) => (
-              <tr key={n.id ?? `${n.mac_address}-${n.interface}`} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-mono text-xs">{n.interface ?? "—"}</td>
-                <td className="px-3 py-2 font-medium">{n.identity ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">
-                  {n.address ?? n.address6 ?? "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px]">{n.mac_address ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{n.platform ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-[11px]">{n.version ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{n.board ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{n.interface_name ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">
-                  {n.discovered_by ? (
-                    <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-900">
-                      {n.discovered_by}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{n.age ?? "—"}</td>
+      {error && (
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(error as Error).message}
+        </div>
+      )}
+
+      {view === "graph" ? (
+        <NeighborsGraph
+          centerName={device?.name ?? "this device"}
+          centerPlatform="MikroTik"
+          neighbors={data ?? []}
+          isLoading={isLoading}
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border bg-muted/50">
+              <tr className="text-left">
+                <th className="px-3 py-2 font-medium">Local port</th>
+                <th className="px-3 py-2 font-medium">Identity</th>
+                <th className="px-3 py-2 font-medium">Address</th>
+                <th className="px-3 py-2 font-medium">MAC</th>
+                <th className="px-3 py-2 font-medium">Platform</th>
+                <th className="px-3 py-2 font-medium">Version</th>
+                <th className="px-3 py-2 font-medium">Board</th>
+                <th className="px-3 py-2 font-medium">Remote port</th>
+                <th className="px-3 py-2 font-medium">Proto</th>
+                <th className="px-3 py-2 font-medium">Age</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </ErrorOrTable>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {isLoading && <EmptyRow colSpan={10} label="Loading…" />}
+              {!isLoading && (!data || data.length === 0) && (
+                <EmptyRow
+                  colSpan={10}
+                  label="No neighbours discovered. Enable LLDP/CDP under /ip neighbor discovery-settings on the device."
+                />
+              )}
+              {data?.map((n) => (
+                <tr key={n.id ?? `${n.mac_address}-${n.interface}`} className="hover:bg-accent/30">
+                  <td className="px-3 py-2 font-mono text-xs">{n.interface ?? "—"}</td>
+                  <td className="px-3 py-2 font-medium">{n.identity ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    {n.address ?? n.address6 ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11px]">{n.mac_address ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs">{n.platform ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-[11px]">{n.version ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{n.board ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{n.interface_name ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {n.discovered_by ? (
+                      <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-900">
+                        {n.discovered_by}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{n.age ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Section>
   );
+}
+
+// Radial SVG of the device and its discovered neighbours. No new deps;
+// pure SVG + simple polar layout. With >40 peers it gets crowded — at
+// that scale the table is still the right view, hence the toggle.
+function NeighborsGraph({
+  centerName,
+  centerPlatform,
+  neighbors,
+  isLoading,
+}: {
+  centerName: string;
+  centerPlatform: string;
+  neighbors: Neighbor[];
+  isLoading: boolean;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-80 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
+        Loading topology…
+      </div>
+    );
+  }
+  if (neighbors.length === 0) {
+    return (
+      <div className="flex h-80 flex-col items-center justify-center rounded-lg border border-border bg-card text-center text-sm text-muted-foreground">
+        <p>No neighbours discovered.</p>
+        <p className="mt-1 text-xs">
+          Enable LLDP/CDP under <code>/ip neighbor discovery-settings</code> on
+          this device.
+        </p>
+      </div>
+    );
+  }
+
+  // Canvas + layout — center fixed, peers on a circle. Wider canvas as the
+  // peer count grows so labels don't pile up.
+  const w = 760;
+  const h = Math.max(440, 220 + neighbors.length * 14);
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = Math.min(w, h) / 2 - 80;
+
+  const nodes = neighbors.map((n, i) => {
+    const angle = (i / neighbors.length) * 2 * Math.PI - Math.PI / 2;
+    return {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+      angle,
+      neighbor: n,
+    };
+  });
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-2">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="block h-auto w-full"
+        role="img"
+        aria-label="Network topology centered on this device"
+      >
+        {/* Edges first so nodes paint on top. */}
+        {nodes.map((node, i) => {
+          const hl = hovered === i;
+          return (
+            <g key={`edge-${i}`}>
+              <line
+                x1={cx}
+                y1={cy}
+                x2={node.x}
+                y2={node.y}
+                stroke={hl ? "#0ea5e9" : "#cbd5e1"}
+                strokeWidth={hl ? 2 : 1.3}
+              />
+              {node.neighbor.interface && (
+                <EdgeLabel
+                  x1={cx}
+                  y1={cy}
+                  x2={node.x}
+                  y2={node.y}
+                  text={node.neighbor.interface}
+                  highlighted={hl}
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Centre node */}
+        <NodeShape
+          x={cx}
+          y={cy}
+          label={centerName}
+          sublabel={centerPlatform}
+          color={platformColor(centerPlatform)}
+          isCenter
+        />
+
+        {/* Peers */}
+        {nodes.map((node, i) => {
+          const n = node.neighbor;
+          const labelMain = n.identity ?? n.address ?? n.mac_address ?? "?";
+          const sub = n.platform ?? n.board ?? n.discovered_by ?? "";
+          return (
+            <g
+              key={`peer-${i}`}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              style={{ cursor: "pointer" }}
+            >
+              <NodeShape
+                x={node.x}
+                y={node.y}
+                label={labelMain}
+                sublabel={sub}
+                color={platformColor(n.platform)}
+                isCenter={false}
+              />
+              {hovered === i && (
+                <NodeTooltip x={node.x} y={node.y} neighbor={n} canvasW={w} />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2 text-[11px] text-muted-foreground">
+        <span>
+          Showing {neighbors.length} neighbour{neighbors.length === 1 ? "" : "s"}.
+          Lines label the local port; hover a node for full details.
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <PlatformDot platform="MikroTik" />
+          MikroTik
+          <PlatformDot platform="Cisco" />
+          Cisco
+          <PlatformDot platform="Ubiquiti" />
+          Ubiquiti
+          <PlatformDot platform={null} />
+          other
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NodeShape({
+  x,
+  y,
+  label,
+  sublabel,
+  color,
+  isCenter,
+}: {
+  x: number;
+  y: number;
+  label: string;
+  sublabel: string;
+  color: string;
+  isCenter: boolean;
+}) {
+  const w = isCenter ? 150 : 130;
+  const h = isCenter ? 48 : 40;
+  return (
+    <g transform={`translate(${x - w / 2}, ${y - h / 2})`}>
+      <rect
+        width={w}
+        height={h}
+        rx={8}
+        ry={8}
+        fill="white"
+        stroke={color}
+        strokeWidth={isCenter ? 2.5 : 1.5}
+      />
+      <rect width={6} height={h} rx={3} ry={3} fill={color} />
+      <text
+        x={w / 2}
+        y={isCenter ? 20 : 17}
+        textAnchor="middle"
+        className="fill-zinc-900"
+        fontSize={isCenter ? 13 : 11}
+        fontWeight={600}
+      >
+        {truncate(label, isCenter ? 18 : 16)}
+      </text>
+      <text
+        x={w / 2}
+        y={isCenter ? 36 : 30}
+        textAnchor="middle"
+        className="fill-zinc-500"
+        fontSize={10}
+      >
+        {truncate(sublabel, 22)}
+      </text>
+    </g>
+  );
+}
+
+function EdgeLabel({
+  x1,
+  y1,
+  x2,
+  y2,
+  text,
+  highlighted,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  text: string;
+  highlighted: boolean;
+}) {
+  // Place the label ~40% along the line from centre so it sits clear of
+  // both the centre node and the peer node.
+  const t = 0.4;
+  const mx = x1 + (x2 - x1) * t;
+  const my = y1 + (y2 - y1) * t;
+  const padX = 6;
+  const labelWidth = text.length * 5.6 + padX * 2;
+  return (
+    <g transform={`translate(${mx - labelWidth / 2}, ${my - 8})`}>
+      <rect
+        width={labelWidth}
+        height={14}
+        rx={3}
+        ry={3}
+        fill={highlighted ? "#e0f2fe" : "#f1f5f9"}
+        stroke={highlighted ? "#0ea5e9" : "#cbd5e1"}
+      />
+      <text
+        x={labelWidth / 2}
+        y={10}
+        textAnchor="middle"
+        fontFamily="monospace"
+        fontSize={9}
+        className="fill-zinc-700"
+      >
+        {text}
+      </text>
+    </g>
+  );
+}
+
+function NodeTooltip({
+  x,
+  y,
+  neighbor: n,
+  canvasW,
+}: {
+  x: number;
+  y: number;
+  neighbor: Neighbor;
+  canvasW: number;
+}) {
+  const lines: [string, string | null][] = [
+    ["Identity", n.identity],
+    ["Address", n.address ?? n.address6],
+    ["MAC", n.mac_address],
+    ["Platform", n.platform],
+    ["Version", n.version],
+    ["Board", n.board],
+    ["Local port", n.interface],
+    ["Remote port", n.interface_name],
+    ["Proto", n.discovered_by],
+    ["Age", n.age],
+  ];
+  const visible = lines.filter(([, v]) => v && v.length > 0);
+  const lineHeight = 14;
+  const padX = 8;
+  const padY = 8;
+  const boxW = 230;
+  const boxH = padY * 2 + visible.length * lineHeight;
+  // Flip the tooltip to the left side of the node when it would overflow
+  // the right edge of the canvas.
+  const onLeft = x + 30 + boxW > canvasW;
+  const tx = onLeft ? x - 30 - boxW : x + 30;
+  const ty = y - boxH / 2;
+  return (
+    <g transform={`translate(${tx}, ${ty})`} pointerEvents="none">
+      <rect
+        width={boxW}
+        height={boxH}
+        rx={6}
+        ry={6}
+        fill="#0f172a"
+        opacity={0.95}
+      />
+      {visible.map(([k, v], i) => (
+        <g key={k} transform={`translate(${padX}, ${padY + i * lineHeight + 10})`}>
+          <text fontSize={10} className="fill-zinc-400" fontWeight={500}>
+            {k}
+          </text>
+          <text
+            x={70}
+            fontSize={10}
+            fontFamily="monospace"
+            className="fill-white"
+          >
+            {truncate(v ?? "", 24)}
+          </text>
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function PlatformDot({ platform }: { platform: string | null }) {
+  return (
+    <span
+      className="inline-block size-2 rounded-full"
+      style={{ background: platformColor(platform) }}
+    />
+  );
+}
+
+function platformColor(platform: string | null): string {
+  const p = (platform ?? "").toLowerCase();
+  if (p.includes("mikrotik")) return "#2563eb";
+  if (p.includes("cisco")) return "#0891b2";
+  if (p.includes("ubiquiti") || p.includes("uisp") || p.includes("unifi"))
+    return "#16a34a";
+  if (p.includes("aruba") || p.includes("hpe")) return "#ea580c";
+  if (p.includes("juniper")) return "#7c3aed";
+  if (p.includes("fortigate") || p.includes("fortinet")) return "#dc2626";
+  return "#64748b";
+}
+
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
 // ---------------- Interfaces ----------------
