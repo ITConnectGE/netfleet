@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { useToast } from "@/components/toast";
 import {
   changeReport,
   deviceActivityReport,
@@ -38,6 +39,7 @@ function fromDateInput(v: string): string {
 }
 
 export default function ReportsPage() {
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>("user");
   const [tsFrom, setTsFrom] = useState(isoStartOf(30));
   const [tsTo, setTsTo] = useState(isoNow());
@@ -133,9 +135,9 @@ export default function ReportsPage() {
                 : tab === "secret"
                   ? "secret-access"
                   : "changes";
-            void downloadReportCsv(endpoint, params, endpoint).catch((e: Error) =>
-              alert(`Download failed: ${e.message}`),
-            );
+            void downloadReportCsv(endpoint, params, endpoint)
+              .then(() => toast.success("CSV downloaded"))
+              .catch((e: Error) => toast.error("Download failed", e.message));
           }}
           className="self-end rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
         >
@@ -279,41 +281,80 @@ function UserActivityView({
         </Table>
       </Section>
 
-      <Section title={`Events (${data.rows.length}${data.truncated ? "+" : ""})`}>
-        <Table>
-          <thead className="border-b border-border bg-muted/50">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">User</th>
-              <th className="px-3 py-2 font-medium">Section</th>
-              <th className="px-3 py-2 font-medium">Action</th>
-              <th className="px-3 py-2 font-medium">Outcome</th>
-              <th className="px-3 py-2 font-medium">Device</th>
-              <th className="px-3 py-2 font-medium">Tenant / Site</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {data.rows.map((r, i) => (
-              <tr key={i} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
-                <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.section}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
-                <td className="px-3 py-2 text-xs">
-                  <OutcomePill outcome={r.outcome} />
-                </td>
-                <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {r.tenant_name && r.site_name
-                    ? `${r.tenant_name} · ${r.site_name}`
-                    : r.tenant_name ?? r.site_name ?? "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Section>
+      <UserActivityEventsTable data={data} />
     </>
+  );
+}
+
+function UserActivityEventsTable({ data }: { data: UserActivityReport }) {
+  const cols = [
+    { id: "when" },
+    { id: "user" },
+    { id: "section" },
+    { id: "action" },
+    { id: "outcome" },
+    { id: "device" },
+    { id: "site" },
+  ];
+  const { filters, onFilter, apply } = useColFilters<UserActivityReport["rows"][number]>({
+    when: (r) => toLocal(r.ts),
+    user: (r) => r.user_email ?? "",
+    section: (r) => r.section,
+    action: (r) => r.action,
+    outcome: (r) => r.outcome,
+    device: (r) => r.device_name ?? "",
+    site: (r) =>
+      [r.tenant_name, r.site_name].filter(Boolean).join(" "),
+  });
+  const visible = useMemo(() => apply(data.rows), [apply, data.rows]);
+
+  return (
+    <Section
+      title={`Events (${visible.length}${data.truncated ? "+" : ""}${
+        visible.length !== data.rows.length ? ` of ${data.rows.length}` : ""
+      })`}
+    >
+      <Table>
+        <thead className="border-b border-border bg-muted/50">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">When</th>
+            <th className="px-3 py-2 font-medium">User</th>
+            <th className="px-3 py-2 font-medium">Section</th>
+            <th className="px-3 py-2 font-medium">Action</th>
+            <th className="px-3 py-2 font-medium">Outcome</th>
+            <th className="px-3 py-2 font-medium">Device</th>
+            <th className="px-3 py-2 font-medium">Tenant / Site</th>
+          </tr>
+          <ColumnFilterRow columns={cols} filters={filters} onFilter={onFilter} />
+        </thead>
+        <tbody className="divide-y divide-border">
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={cols.length} className="px-3 py-6 text-center text-muted-foreground">
+                No rows match the current filters.
+              </td>
+            </tr>
+          )}
+          {visible.map((r, i) => (
+            <tr key={i} className="hover:bg-accent/30">
+              <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
+              <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
+              <td className="px-3 py-2 font-mono text-xs">{r.section}</td>
+              <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
+              <td className="px-3 py-2 text-xs">
+                <OutcomePill outcome={r.outcome} />
+              </td>
+              <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
+              <td className="px-3 py-2 text-xs text-muted-foreground">
+                {r.tenant_name && r.site_name
+                  ? `${r.tenant_name} · ${r.site_name}`
+                  : r.tenant_name ?? r.site_name ?? "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Section>
   );
 }
 
@@ -350,11 +391,33 @@ function DeviceActivityView({
     );
   if (!data) return null;
 
+  return <DeviceActivityTable data={data} />;
+}
+
+function DeviceActivityTable({ data }: { data: DeviceActivityReport }) {
+  const cols = [
+    { id: "when" },
+    { id: "user" },
+    { id: "section" },
+    { id: "action" },
+    { id: "outcome" },
+    { id: "error" },
+  ];
+  const { filters, onFilter, apply } = useColFilters<DeviceActivityReport["rows"][number]>({
+    when: (r) => toLocal(r.ts),
+    user: (r) => r.user_email ?? "",
+    section: (r) => r.section,
+    action: (r) => r.action,
+    outcome: (r) => r.outcome,
+    error: (r) => r.error_message ?? "",
+  });
+  const visible = useMemo(() => apply(data.rows), [apply, data.rows]);
+
   return (
     <Section
-      title={`${data.device_name ?? data.device_id} — ${data.rows.length}${
+      title={`${data.device_name ?? data.device_id} — ${visible.length}${
         data.truncated ? "+" : ""
-      } events`}
+      }${visible.length !== data.rows.length ? ` of ${data.rows.length}` : ""} events`}
     >
       <Table>
         <thead className="border-b border-border bg-muted/50">
@@ -366,9 +429,17 @@ function DeviceActivityView({
             <th className="px-3 py-2 font-medium">Outcome</th>
             <th className="px-3 py-2 font-medium">Error</th>
           </tr>
+          <ColumnFilterRow columns={cols} filters={filters} onFilter={onFilter} />
         </thead>
         <tbody className="divide-y divide-border">
-          {data.rows.map((r, i) => (
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={cols.length} className="px-3 py-6 text-center text-muted-foreground">
+                No rows match the current filters.
+              </td>
+            </tr>
+          )}
+          {visible.map((r, i) => (
             <tr key={i} className="hover:bg-accent/30">
               <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
               <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
@@ -421,48 +492,87 @@ function SecretAccessView({
           rotated since.
         </div>
       )}
-      <Section title={`Secret reveals (${data.rows.length})`}>
-        <Table>
-          <thead className="border-b border-border bg-muted/50">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">User</th>
-              <th className="px-3 py-2 font-medium">Device</th>
-              <th className="px-3 py-2 font-medium">Kind</th>
-              <th className="px-3 py-2 font-medium">Secret</th>
-              <th className="px-3 py-2 font-medium">Rotated since?</th>
-              <th className="px-3 py-2 font-medium">Justification</th>
+      <SecretAccessTable data={data} />
+    </>
+  );
+}
+
+function SecretAccessTable({ data }: { data: SecretAccessReport }) {
+  const cols = [
+    { id: "when" },
+    { id: "user" },
+    { id: "device" },
+    { id: "kind" },
+    { id: "secret" },
+    { id: "rotated" },
+    { id: "justification" },
+  ];
+  const { filters, onFilter, apply } = useColFilters<SecretAccessReport["rows"][number]>({
+    when: (r) => toLocal(r.ts),
+    user: (r) => r.user_email ?? "",
+    device: (r) => r.device_name ?? "",
+    kind: (r) => r.secret_kind,
+    secret: (r) => r.secret_label ?? r.secret_identifier,
+    rotated: (r) => (r.rotated_since_reveal ? "yes" : "no"),
+    justification: (r) => r.justification ?? "",
+  });
+  const visible = useMemo(() => apply(data.rows), [apply, data.rows]);
+
+  return (
+    <Section
+      title={`Secret reveals (${visible.length}${
+        visible.length !== data.rows.length ? ` of ${data.rows.length}` : ""
+      })`}
+    >
+      <Table>
+        <thead className="border-b border-border bg-muted/50">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">When</th>
+            <th className="px-3 py-2 font-medium">User</th>
+            <th className="px-3 py-2 font-medium">Device</th>
+            <th className="px-3 py-2 font-medium">Kind</th>
+            <th className="px-3 py-2 font-medium">Secret</th>
+            <th className="px-3 py-2 font-medium">Rotated since?</th>
+            <th className="px-3 py-2 font-medium">Justification</th>
+          </tr>
+          <ColumnFilterRow columns={cols} filters={filters} onFilter={onFilter} />
+        </thead>
+        <tbody className="divide-y divide-border">
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={cols.length} className="px-3 py-6 text-center text-muted-foreground">
+                No rows match the current filters.
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {data.rows.map((r, i) => (
-              <tr key={i} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
-                <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.secret_kind}</td>
-                <td className="px-3 py-2 font-mono text-xs">
-                  {r.secret_label ?? r.secret_identifier}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {r.rotated_since_reveal ? (
-                    <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800">
-                      yes — {r.last_rotation_ts ? toLocal(r.last_rotation_ts) : ""}
-                    </span>
-                  ) : (
-                    <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                      no — still leaked
-                    </span>
-                  )}
-                </td>
-                <td className="max-w-xs truncate px-3 py-2 text-[11px] text-muted-foreground">
-                  {r.justification ?? "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Section>
+          )}
+          {visible.map((r, i) => (
+            <tr key={i} className="hover:bg-accent/30">
+              <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
+              <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
+              <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
+              <td className="px-3 py-2 font-mono text-xs">{r.secret_kind}</td>
+              <td className="px-3 py-2 font-mono text-xs">
+                {r.secret_label ?? r.secret_identifier}
+              </td>
+              <td className="px-3 py-2 text-xs">
+                {r.rotated_since_reveal ? (
+                  <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800">
+                    yes — {r.last_rotation_ts ? toLocal(r.last_rotation_ts) : ""}
+                  </span>
+                ) : (
+                  <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+                    no — still leaked
+                  </span>
+                )}
+              </td>
+              <td className="max-w-xs truncate px-3 py-2 text-[11px] text-muted-foreground">
+                {r.justification ?? "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Section>
     </>
   );
 }
@@ -537,34 +647,71 @@ function ChangeView({
         </Section>
       </div>
 
-      <Section title={`Changes (${data.rows.length}${data.truncated ? "+" : ""})`}>
-        <Table>
-          <thead className="border-b border-border bg-muted/50">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">User</th>
-              <th className="px-3 py-2 font-medium">Section</th>
-              <th className="px-3 py-2 font-medium">Action</th>
-              <th className="px-3 py-2 font-medium">Device</th>
-              <th className="px-3 py-2 font-medium">Payload</th>
+      <ChangesTable data={data} />
+    </>
+  );
+}
+
+function ChangesTable({ data }: { data: ChangeReport }) {
+  const cols = [
+    { id: "when" },
+    { id: "user" },
+    { id: "section" },
+    { id: "action" },
+    { id: "device" },
+    { id: "payload" },
+  ];
+  const { filters, onFilter, apply } = useColFilters<ChangeReport["rows"][number]>({
+    when: (r) => toLocal(r.ts),
+    user: (r) => r.user_email ?? "",
+    section: (r) => r.section,
+    action: (r) => r.action,
+    device: (r) => r.device_name ?? "",
+    payload: (r) => (r.request_payload ? JSON.stringify(r.request_payload) : ""),
+  });
+  const visible = useMemo(() => apply(data.rows), [apply, data.rows]);
+
+  return (
+    <Section
+      title={`Changes (${visible.length}${data.truncated ? "+" : ""}${
+        visible.length !== data.rows.length ? ` of ${data.rows.length}` : ""
+      })`}
+    >
+      <Table>
+        <thead className="border-b border-border bg-muted/50">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">When</th>
+            <th className="px-3 py-2 font-medium">User</th>
+            <th className="px-3 py-2 font-medium">Section</th>
+            <th className="px-3 py-2 font-medium">Action</th>
+            <th className="px-3 py-2 font-medium">Device</th>
+            <th className="px-3 py-2 font-medium">Payload</th>
+          </tr>
+          <ColumnFilterRow columns={cols} filters={filters} onFilter={onFilter} />
+        </thead>
+        <tbody className="divide-y divide-border">
+          {visible.length === 0 && (
+            <tr>
+              <td colSpan={cols.length} className="px-3 py-6 text-center text-muted-foreground">
+                No rows match the current filters.
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {data.rows.map((r, i) => (
-              <tr key={i} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
-                <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.section}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
-                <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
-                <td className="max-w-md truncate px-3 py-2 font-mono text-[10px] text-muted-foreground">
-                  {r.request_payload ? JSON.stringify(r.request_payload) : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Section>
+          )}
+          {visible.map((r, i) => (
+            <tr key={i} className="hover:bg-accent/30">
+              <td className="px-3 py-2 font-mono text-xs">{toLocal(r.ts)}</td>
+              <td className="px-3 py-2 text-xs">{r.user_email ?? "—"}</td>
+              <td className="px-3 py-2 font-mono text-xs">{r.section}</td>
+              <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
+              <td className="px-3 py-2 text-xs">{r.device_name ?? "—"}</td>
+              <td className="max-w-md truncate px-3 py-2 font-mono text-[10px] text-muted-foreground">
+                {r.request_payload ? JSON.stringify(r.request_payload) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Section>
     </>
   );
 }
@@ -582,6 +729,55 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Table({ children }: { children: React.ReactNode }) {
   return <table className="w-full text-sm">{children}</table>;
+}
+
+// Per-column filter row. Sits directly under the <thead> labels so each
+// input lines up with the column it filters. Filter values are passed
+// back via `onFilter` keyed by the matching column id.
+function ColumnFilterRow({
+  columns,
+  filters,
+  onFilter,
+}: {
+  columns: { id: string; placeholder?: string }[];
+  filters: Record<string, string>;
+  onFilter: (id: string, value: string) => void;
+}) {
+  return (
+    <tr className="border-b border-border bg-muted/20">
+      {columns.map((c) => (
+        <th key={c.id} className="px-2 py-1 align-top">
+          <input
+            value={filters[c.id] ?? ""}
+            onChange={(e) => onFilter(c.id, e.target.value)}
+            placeholder={c.placeholder ?? "filter…"}
+            aria-label={`Filter ${c.id}`}
+            className="block w-full rounded border border-input bg-background px-2 py-0.5 text-[11px] font-normal text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </th>
+      ))}
+    </tr>
+  );
+}
+
+// Tiny hook that owns the column filter state for one table. `apply`
+// runs all current filters against a row; each filter is a substring
+// match against the value the accessor returns.
+function useColFilters<T>(accessors: Record<string, (row: T) => string>) {
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const onFilter = (id: string, value: string) =>
+    setFilters((prev) => ({ ...prev, [id]: value }));
+  const apply = (rows: T[]) =>
+    rows.filter((r) =>
+      Object.entries(filters).every(([id, q]) => {
+        const needle = q.trim().toLowerCase();
+        if (!needle) return true;
+        const acc = accessors[id];
+        if (!acc) return true;
+        return acc(r).toLowerCase().includes(needle);
+      }),
+    );
+  return { filters, onFilter, apply };
 }
 
 function OutcomePill({ outcome }: { outcome: "ok" | "denied" | "failed" }) {

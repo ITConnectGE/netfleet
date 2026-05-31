@@ -222,19 +222,30 @@ async def create_system_backup(
 
 
 def list_system_backups() -> list[dict[str, object]]:
-    SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
+    # Be tolerant of a misconfigured /backups mount — the alternative is
+    # a 500 on every settings page load. Returning an empty list lets
+    # the UI show "no bundles yet" until the operator fixes the mount or
+    # the directory permissions.
+    try:
+        SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as e:
+        log.warning("system_backup.system_dir_unavailable", error=str(e), path=str(SYSTEM_DIR))
+        return []
     rows: list[dict[str, object]] = []
-    for p in sorted(SYSTEM_DIR.iterdir(), reverse=True):
-        if not p.is_file() or not p.name.endswith(".tar.gz"):
-            continue
-        st = p.stat()
-        rows.append(
-            {
-                "filename": p.name,
-                "size_bytes": st.st_size,
-                "created_at": datetime.fromtimestamp(st.st_mtime, tz=UTC).isoformat(),
-            }
-        )
+    try:
+        for p in sorted(SYSTEM_DIR.iterdir(), reverse=True):
+            if not p.is_file() or not p.name.endswith(".tar.gz"):
+                continue
+            st = p.stat()
+            rows.append(
+                {
+                    "filename": p.name,
+                    "size_bytes": st.st_size,
+                    "created_at": datetime.fromtimestamp(st.st_mtime, tz=UTC).isoformat(),
+                }
+            )
+    except (PermissionError, OSError) as e:
+        log.warning("system_backup.iter_failed", error=str(e), path=str(SYSTEM_DIR))
     return rows
 
 
@@ -256,17 +267,17 @@ def delete_system_backup(filename: str) -> None:
 
 
 def used_disk_bytes() -> int:
-    total = 0
-    if not SYSTEM_DIR.exists():
+    try:
+        if not SYSTEM_DIR.exists():
+            return 0
+        return sum(p.stat().st_size for p in SYSTEM_DIR.iterdir() if p.is_file())
+    except (PermissionError, OSError):
         return 0
-    for p in SYSTEM_DIR.iterdir():
-        if p.is_file():
-            total += p.stat().st_size
-    return total
 
 
 def free_disk_bytes() -> int:
     try:
-        return shutil.disk_usage(SYSTEM_DIR).free
-    except FileNotFoundError:
+        target = SYSTEM_DIR if SYSTEM_DIR.exists() else SYSTEM_DIR.parent
+        return shutil.disk_usage(target).free
+    except (FileNotFoundError, PermissionError, OSError):
         return 0

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { StatusPill } from "@/components/status-pill";
+import { useToast } from "@/components/toast";
 import { downloadAuthed } from "@/lib/api";
 import {
   createDevice,
@@ -414,6 +415,7 @@ function OnboardingPanel({
   deviceName: string;
   onClose: () => void;
 }) {
+  const toast = useToast();
   const { data: script, isLoading, error } = useQuery<string>({
     queryKey: ["onboarding-script", deviceId],
     queryFn: () => getOnboardingScript(deviceId, { includePassword: true }),
@@ -470,7 +472,7 @@ function OnboardingPanel({
                 downloadAuthed(
                   `/api/v1/devices/${deviceId}/onboarding-script`,
                   `netfleet-onboarding-${deviceName}.rsc`,
-                ).catch((e: Error) => alert(`Download failed: ${e.message}`))
+                ).catch((e: Error) => toast.error("Download failed", e.message))
               }
               className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
             >

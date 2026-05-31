@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { LogoMark } from "@/components/logo";
+import { ToastProvider } from "@/components/toast";
 import { UpdateBanner } from "@/components/update-banner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -64,6 +65,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!me) return null;
 
   return (
+    <ToastProvider>
     <div className="min-h-screen bg-background">
       <UpdateBanner />
       <header className="border-b border-border bg-card">
@@ -121,5 +123,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </header>
       <main className="container py-8">{children}</main>
     </div>
+    </ToastProvider>
   );
 }

@@ -30,7 +30,13 @@ export const metadata: Metadata = {
   description: "Multi-vendor network fleet management for MSPs.",
   applicationName: "NetFleet",
   authors: [{ name: "ITConnect", url: "https://itconnect.ge" }],
-  icons: { icon: "/favicon.ico" },
+  // Explicit icon mapping: Next.js auto-picks /app/icon.svg, but some
+  // browsers still hit /favicon.ico first. Point them straight at the
+  // SVG so the 404 noise stops.
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

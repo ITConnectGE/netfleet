@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { useToast } from "@/components/toast";
 import { downloadAuthed } from "@/lib/api";
 import {
   createSystemBackup,
@@ -67,6 +68,7 @@ export default function SettingsPage() {
 
 function SystemBackupSection() {
   const qc = useQueryClient();
+  const toast = useToast();
   const { data, isLoading } = useQuery<SystemBackupListResponse>({
     queryKey: ["system-backups"],
     queryFn: listSystemBackups,
@@ -74,11 +76,19 @@ function SystemBackupSection() {
 
   const create = useMutation({
     mutationFn: () => createSystemBackup(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-backups"] }),
+    onSuccess: (b) => {
+      qc.invalidateQueries({ queryKey: ["system-backups"] });
+      toast.success("Backup ready", b.filename);
+    },
+    onError: (e: Error) => toast.error("Backup failed", e.message),
   });
   const del = useMutation({
     mutationFn: (filename: string) => deleteSystemBackup(filename),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-backups"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["system-backups"] });
+      toast.success("Backup deleted");
+    },
+    onError: (e: Error) => toast.error("Delete failed", e.message),
   });
 
   return (
@@ -157,7 +167,7 @@ function SystemBackupSection() {
                       downloadAuthed(
                         `/api/v1/settings/system-backup/${encodeURIComponent(b.filename)}`,
                         b.filename,
-                      ).catch((e: Error) => alert(`Download failed: ${e.message}`))
+                      ).catch((e: Error) => toast.error("Download failed", e.message))
                     }
                     className="mr-3 text-xs text-primary hover:underline"
                   >
