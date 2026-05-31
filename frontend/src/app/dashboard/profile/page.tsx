@@ -79,6 +79,13 @@ export default function ProfilePage() {
           />
         )}
 
+        {!lockedToPassword && (
+          <OtpLoginSection
+            me={me}
+            onChanged={(next) => qc.setQueryData(["me"], next)}
+          />
+        )}
+
         {!lockedToPassword && <AccountSection me={me} />}
       </div>
     </div>
@@ -470,6 +477,77 @@ function TotpSection({
           </div>
         </form>
       )}
+    </section>
+  );
+}
+
+// ---------------- OTP at login ----------------
+
+function OtpLoginSection({
+  me,
+  onChanged,
+}: {
+  me: UserPublic;
+  onChanged: (next: UserPublic) => void;
+}) {
+  const toast = useToast();
+  const [enabled, setEnabled] = useState(me.otp_login_enabled);
+  // TOTP takes priority — the backend short-circuits this branch when
+  // TOTP is enrolled. Surface that so the toggle doesn't look broken.
+  const supersededByTotp = me.totp_enrolled;
+
+  useEffect(() => {
+    setEnabled(me.otp_login_enabled);
+  }, [me.otp_login_enabled]);
+
+  const save = useMutation({
+    mutationFn: () => updateProfile({ otp_login_enabled: enabled }),
+    onSuccess: (next) => {
+      onChanged(next);
+      toast.success(
+        enabled ? "One-time login code enabled" : "One-time login code disabled",
+      );
+    },
+    onError: (e: Error) => toast.error("Save failed", e.message),
+  });
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-5">
+      <h2 className="text-sm font-medium text-muted-foreground">
+        One-time code at login
+      </h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        When you sign in, NetFleet will send a 6-digit code by SMS (if your
+        mobile is set and the org gateway is configured) or by email.
+      </p>
+
+      {supersededByTotp && (
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          You have TOTP enabled — it always takes precedence, so the one-time
+          code only kicks in if you remove TOTP.
+        </p>
+      )}
+
+      <label className="mt-4 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="size-4 rounded"
+        />
+        Require a one-time code at every login
+      </label>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || enabled === me.otp_login_enabled}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
     </section>
   );
 }

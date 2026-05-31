@@ -43,6 +43,16 @@ class TotpRequired(Exception):
         self.organization_id = organization_id
 
 
+class OtpRequired(Exception):
+    """Raised when login succeeds password check, TOTP is NOT enrolled,
+    but the user has opted into email/SMS OTP. Carries the same IDs as
+    TotpRequired so the API layer can mint an mfa_temp token."""
+
+    def __init__(self, user_id: str, organization_id: str) -> None:
+        self.user_id = user_id
+        self.organization_id = organization_id
+
+
 # ---------------- Login ----------------
 
 
@@ -70,6 +80,9 @@ async def authenticate_local(
 
     if user.totp_enrolled:
         raise TotpRequired(user_id=str(user.id), organization_id=str(user.organization_id))
+
+    if user.otp_login_enabled:
+        raise OtpRequired(user_id=str(user.id), organization_id=str(user.organization_id))
 
     return user
 
@@ -109,6 +122,35 @@ async def verify_totp_for_user(
     secret = decrypt_field(user.totp_secret_encrypted)
     if not verify_totp(secret, code):
         raise AuthError("invalid TOTP code")
+
+    return user
+
+
+async def verify_login_otp_for_user(
+    session: AsyncSession,
+    *,
+    mfa_temp_token: str,
+    code: str,
+) -> User:
+    # Imported lazily — the OTP service depends on email/sms services,
+    # and auth.py is the lowest layer in the dep graph.
+    from app.services import login_otp as login_otp_svc
+
+    try:
+        payload = decode_jwt(mfa_temp_token, expected_type="mfa_temp")
+    except ValueError as e:
+        raise AuthError(str(e)) from e
+
+    user_id = payload["sub"]
+    stmt = select(User).where(User.id == user_id, User.is_active.is_(True))
+    user = (await session.execute(stmt)).scalar_one_or_none()
+    if user is None or not user.otp_login_enabled:
+        raise AuthError("otp login not configured for this user")
+
+    try:
+        await login_otp_svc.verify_login_otp(session, user, code=code)
+    except login_otp_svc.OtpInvalid as e:
+        raise AuthError(str(e)) from e
 
     return user
 

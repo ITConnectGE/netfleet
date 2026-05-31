@@ -17,6 +17,8 @@ from app.schemas.auth import (
     LoginRequest,
     LoginResponseFinal,
     LoginResponseMfaRequired,
+    LoginResponseOtpRequired,
+    OtpVerifyRequest,
     ProfileUpdateRequest,
     RefreshRequest,
     TokenPair,
@@ -29,6 +31,7 @@ from app.schemas.auth import (
 from app.services import audit as audit_svc
 from app.services import auth as auth_svc
 from app.services import email as email_svc
+from app.services import login_otp as login_otp_svc
 
 log = structlog.get_logger(__name__)
 
@@ -55,7 +58,7 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 @router.post(
     "/login",
-    response_model=LoginResponseFinal | LoginResponseMfaRequired,
+    response_model=LoginResponseFinal | LoginResponseMfaRequired | LoginResponseOtpRequired,
     responses={401: {"description": "invalid credentials"}},
 )
 async def login(
@@ -70,10 +73,67 @@ async def login(
         # Issue a short-lived MFA temp token; client posts it back with the code.
         temp, exp = auth_svc.issue_mfa_temp_token_for_id(e.user_id, e.organization_id)
         return LoginResponseMfaRequired(mfa_temp_token=temp, mfa_temp_expires_at=exp)
+    except auth_svc.OtpRequired as e:
+        # Look the user back up to dispatch the OTP (auth_svc.OtpRequired
+        # carries only IDs, deliberately). We commit immediately so the
+        # code + expiry land on the row even if the dispatch fails — the
+        # client will still get a temp_token and the user can try again
+        # without a fresh password round-trip.
+        from uuid import UUID as _UUID
+        user = (
+            await session.execute(
+                select(User).where(User.id == _UUID(e.user_id))
+            )
+        ).scalar_one()
+        try:
+            _code, channel = await login_otp_svc.issue_login_otp(session, user)
+        except login_otp_svc.OtpDispatchError as err:
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
+            ) from err
+        await session.commit()
+        temp, exp = auth_svc.issue_mfa_temp_token_for_id(e.user_id, e.organization_id)
+        return LoginResponseOtpRequired(
+            mfa_temp_token=temp,
+            mfa_temp_expires_at=exp,
+            channel=channel,
+            destination_hint=_mask_destination(channel, user),
+        )
     except auth_svc.AuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
 
     return await _finalize_login(session, response, request, user)
+
+
+@router.post("/otp/verify", response_model=LoginResponseFinal)
+async def otp_verify(
+    body: OtpVerifyRequest,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(db_session),
+):
+    try:
+        user = await auth_svc.verify_login_otp_for_user(
+            session, mfa_temp_token=body.mfa_temp_token, code=body.code
+        )
+    except auth_svc.AuthError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
+    return await _finalize_login(session, response, request, user)
+
+
+def _mask_destination(channel: str, user: User) -> str:
+    """Return a short, non-leaky preview of where the code was sent."""
+    if channel == "sms" and user.mobile_phone:
+        n = user.mobile_phone
+        return f"{'*' * max(0, len(n) - 4)}{n[-4:]}" if len(n) >= 4 else "****"
+    if channel == "email":
+        local, _, domain = user.email.partition("@")
+        if not local or not domain:
+            return "****"
+        head = local[0] if local else ""
+        return f"{head}***@{domain}"
+    return "****"
 
 
 @router.post("/totp/verify", response_model=LoginResponseFinal)
@@ -153,6 +213,8 @@ async def update_me(
             user.mobile_phone = cleaned or None
         else:
             user.mobile_phone = None
+    if "otp_login_enabled" in data:
+        user.otp_login_enabled = bool(data["otp_login_enabled"])
     await session.commit()
     await session.refresh(user)
     return user

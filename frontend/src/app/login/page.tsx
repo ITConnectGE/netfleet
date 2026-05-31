@@ -5,9 +5,14 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/logo";
-import { fetchSetupStatus, login, verifyTotp } from "@/lib/auth";
+import { fetchSetupStatus, login, verifyLoginOtp, verifyTotp } from "@/lib/auth";
 
-type Phase = "password" | "totp";
+type Phase = "password" | "totp" | "otp";
+
+interface OtpInfo {
+  channel: "sms" | "email";
+  destinationHint: string;
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [mfaTempToken, setMfaTempToken] = useState<string | null>(null);
+  const [otpInfo, setOtpInfo] = useState<OtpInfo | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -39,6 +45,13 @@ export default function LoginPage() {
       if (result.status === "mfa_required") {
         setMfaTempToken(result.mfa_temp_token);
         setPhase("totp");
+      } else if (result.status === "otp_required") {
+        setMfaTempToken(result.mfa_temp_token);
+        setOtpInfo({
+          channel: result.channel,
+          destinationHint: result.destination_hint,
+        });
+        setPhase("otp");
       } else {
         router.replace("/dashboard");
       }
@@ -64,6 +77,28 @@ export default function LoginPage() {
     }
   }
 
+  async function onSubmitOtp(e: FormEvent) {
+    e.preventDefault();
+    if (!mfaTempToken) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await verifyLoginOtp(mfaTempToken, code);
+      router.replace("/dashboard");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function resetToPassword() {
+    setPhase("password");
+    setCode("");
+    setMfaTempToken(null);
+    setOtpInfo(null);
+  }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-emerald-50 p-6 dark:from-slate-950 dark:via-background dark:to-slate-900">
       <div className="w-full max-w-md">
@@ -77,12 +112,20 @@ export default function LoginPage() {
 
         <div className="rounded-2xl border border-border bg-card p-8 shadow-sm">
           <h2 className="text-xl font-semibold tracking-tight">
-            {phase === "password" ? "Sign in" : "Two-factor authentication"}
+            {phase === "password"
+              ? "Sign in"
+              : phase === "totp"
+                ? "Two-factor authentication"
+                : "One-time code"}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {phase === "password"
               ? "Local credentials or Microsoft single sign-on."
-              : "Enter the 6-digit code from your authenticator app."}
+              : phase === "totp"
+                ? "Enter the 6-digit code from your authenticator app."
+                : otpInfo
+                  ? `We sent a code via ${otpInfo.channel === "sms" ? "SMS" : "email"} to ${otpInfo.destinationHint}. It expires in 5 minutes.`
+                  : "Enter the code we just sent you."}
           </p>
 
           {error && (
@@ -91,7 +134,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          {phase === "password" ? (
+          {phase === "password" && (
             <form className="mt-6 space-y-4" onSubmit={onSubmitPassword}>
               <Field label="Email" htmlFor="email">
                 <input
@@ -120,7 +163,9 @@ export default function LoginPage() {
                 {submitting ? "Signing in…" : "Sign in"}
               </button>
             </form>
-          ) : (
+          )}
+
+          {phase === "totp" && (
             <form className="mt-6 space-y-4" onSubmit={onSubmitTotp}>
               <Field label="Authenticator code" htmlFor="totp">
                 <input
@@ -141,11 +186,37 @@ export default function LoginPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setPhase("password");
-                  setCode("");
-                  setMfaTempToken(null);
-                }}
+                onClick={resetToPassword}
+                className="block w-full text-center text-xs text-muted-foreground hover:underline"
+              >
+                ← Use a different account
+              </button>
+            </form>
+          )}
+
+          {phase === "otp" && (
+            <form className="mt-6 space-y-4" onSubmit={onSubmitOtp}>
+              <Field label="One-time code" htmlFor="otp">
+                <input
+                  id="otp"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  required
+                  autoFocus
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  className={`${inputClass} text-center text-lg tracking-[0.5em]`}
+                  placeholder="000000"
+                  autoComplete="one-time-code"
+                />
+              </Field>
+              <button type="submit" disabled={submitting} className={primaryBtnClass}>
+                {submitting ? "Verifying…" : "Verify"}
+              </button>
+              <button
+                type="button"
+                onClick={resetToPassword}
                 className="block w-full text-center text-xs text-muted-foreground hover:underline"
               >
                 ← Use a different account

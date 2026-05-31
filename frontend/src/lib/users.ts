@@ -9,6 +9,7 @@ export interface UserListItem {
   is_active: boolean;
   is_admin: boolean;
   totp_enrolled: boolean;
+  otp_login_enabled: boolean;
   must_change_password: boolean;
   auth_method: "local" | "oidc";
   last_login_at: string | null;

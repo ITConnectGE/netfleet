@@ -8,6 +8,7 @@ export interface UserPublic {
   mobile_phone: string | null;
   is_admin: boolean;
   totp_enrolled: boolean;
+  otp_login_enabled: boolean;
   must_change_password: boolean;
   auth_method: "local" | "oidc";
   organization_id: string;
@@ -16,6 +17,7 @@ export interface UserPublic {
 export interface ProfileUpdate {
   display_name?: string | null;
   mobile_phone?: string | null;
+  otp_login_enabled?: boolean;
 }
 
 export async function updateProfile(payload: ProfileUpdate): Promise<UserPublic> {
@@ -94,7 +96,15 @@ export interface LoginMfaRequired {
   mfa_temp_expires_at: string;
 }
 
-export type LoginResult = LoginFinal | LoginMfaRequired;
+export interface LoginOtpRequired {
+  status: "otp_required";
+  mfa_temp_token: string;
+  mfa_temp_expires_at: string;
+  channel: "sms" | "email";
+  destination_hint: string;
+}
+
+export type LoginResult = LoginFinal | LoginMfaRequired | LoginOtpRequired;
 
 export async function login(email: string, password: string): Promise<LoginResult> {
   try {
@@ -117,6 +127,21 @@ export async function verifyTotp(
   try {
     const json = await api
       .post("auth/totp/verify", { json: { mfa_temp_token, code } })
+      .json<LoginFinal>();
+    authStorage.setAccessToken(json.access_token, json.expires_at);
+    return json;
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function verifyLoginOtp(
+  mfa_temp_token: string,
+  code: string,
+): Promise<LoginFinal> {
+  try {
+    const json = await api
+      .post("auth/otp/verify", { json: { mfa_temp_token, code } })
       .json<LoginFinal>();
     authStorage.setAccessToken(json.access_token, json.expires_at);
     return json;

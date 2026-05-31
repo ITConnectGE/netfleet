@@ -46,6 +46,15 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512))
     totp_enrolled: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    # SMS / email one-time-code at login. Independent of TOTP; when both
+    # are configured TOTP wins (per the user's "ჯერ აგდებდეს two
+    # factor-ს" rule in P21 #17). Code is hashed; plaintext only
+    # appears in the dispatched SMS/email.
+    otp_login_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    otp_code_hash: Mapped[str | None] = mapped_column(String(255))
+    otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    otp_attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+
     # OIDC auth
     oidc_sub: Mapped[str | None] = mapped_column(String(255), index=True)
     oidc_provider: Mapped[str | None] = mapped_column(String(64))

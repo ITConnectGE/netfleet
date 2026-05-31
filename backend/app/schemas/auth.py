@@ -30,9 +30,26 @@ class LoginResponseMfaRequired(BaseModel):
     mfa_temp_expires_at: datetime
 
 
+class LoginResponseOtpRequired(BaseModel):
+    """Returned when the user must complete an SMS/email one-time-code.
+    The destination is a masked label so the UI can show "we sent a
+    code to ****56" without leaking the full mobile / email."""
+
+    status: Literal["otp_required"] = "otp_required"
+    mfa_temp_token: str
+    mfa_temp_expires_at: datetime
+    channel: Literal["sms", "email"]
+    destination_hint: str
+
+
 class TotpVerifyRequest(BaseModel):
     mfa_temp_token: str
     code: str = Field(min_length=6, max_length=8, pattern=r"^\d+$")
+
+
+class OtpVerifyRequest(BaseModel):
+    mfa_temp_token: str
+    code: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
 
 
 class TotpEnrollResponse(BaseModel):
@@ -75,6 +92,7 @@ class UserPublic(BaseModel):
     mobile_phone: str | None = None
     is_admin: bool
     totp_enrolled: bool
+    otp_login_enabled: bool = False
     must_change_password: bool = False
     auth_method: Literal["local", "oidc"]
     organization_id: UUID
@@ -93,6 +111,7 @@ class ProfileUpdateRequest(BaseModel):
     # E.164 with optional leading "+". Loose so callers can write
     # "+995 555 12 34 56"; we strip spaces server-side before saving.
     mobile_phone: str | None = Field(default=None, max_length=32)
+    otp_login_enabled: bool | None = None
 
 
 class SetupRequest(BaseModel):

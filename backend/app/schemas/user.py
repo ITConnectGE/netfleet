@@ -17,6 +17,7 @@ class UserListItem(BaseModel):
     is_active: bool
     is_admin: bool
     totp_enrolled: bool
+    otp_login_enabled: bool = False
     must_change_password: bool = False
     auth_method: Literal["local", "oidc"]
     last_login_at: datetime | None
