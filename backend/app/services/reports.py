@@ -14,8 +14,11 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import selectinload
+
 from app.models.audit_log import AuditLog, AuditOutcome
 from app.models.device import Device
+from app.models.role import AssignmentScope, Role, RoleAssignment
 from app.models.secret_audit import SecretReveal, SecretRotation
 from app.models.site import Site
 from app.models.tenant import Tenant
@@ -326,3 +329,145 @@ async def changes(
     by_section = dict(Counter(r["section"] for r in rows))
     by_user = dict(Counter(r["user_email"] or "(system)" for r in rows))
     return rows, by_section, by_user, truncated
+
+
+# ---------------- User & roles report ----------------
+
+
+async def user_roles_report(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+) -> tuple[list[dict], list[dict]]:
+    """For every user in the org, list their role assignments + scope
+    labels. Also returns the role catalogue with permission strings so
+    the UI can render side-by-side comparisons.
+
+    Returns (user_rows, role_rows) — both as plain dicts so the API
+    layer can flow them straight into the pydantic schemas."""
+    users = list(
+        (
+            await session.execute(
+                select(User).where(User.organization_id == organization_id)
+            )
+        ).scalars()
+    )
+
+    assignments = list(
+        (
+            await session.execute(
+                select(RoleAssignment)
+                .join(Role, RoleAssignment.role_id == Role.id)
+                .where(Role.organization_id == organization_id)
+                .options(selectinload(RoleAssignment.role))
+            )
+        ).scalars()
+    )
+
+    roles = list(
+        (
+            await session.execute(
+                select(Role)
+                .where(Role.organization_id == organization_id)
+                .options(selectinload(Role.permissions))
+            )
+        ).scalars()
+    )
+
+    # Label lookups — same approach as access service. Cheap one-pass.
+    tenant_labels = {
+        t[0]: t[1]
+        for t in (
+            await session.execute(
+                select(Tenant.id, Tenant.name).where(
+                    Tenant.organization_id == organization_id
+                )
+            )
+        ).all()
+    }
+    site_labels = {
+        s[0]: s[1]
+        for s in (
+            await session.execute(
+                select(Site.id, Site.name).where(
+                    Site.organization_id == organization_id
+                )
+            )
+        ).all()
+    }
+    device_labels = {
+        d[0]: d[1]
+        for d in (
+            await session.execute(
+                select(Device.id, Device.name).where(
+                    Device.organization_id == organization_id
+                )
+            )
+        ).all()
+    }
+
+    def _scope_label(stype: AssignmentScope, sid: UUID | None) -> str | None:
+        if stype == AssignmentScope.ORGANIZATION:
+            return "organization"
+        if sid is None:
+            return None
+        if stype == AssignmentScope.TENANT:
+            return tenant_labels.get(sid)
+        if stype == AssignmentScope.SITE:
+            return site_labels.get(sid)
+        if stype == AssignmentScope.DEVICE:
+            return device_labels.get(sid)
+        return None
+
+    by_user: dict[UUID, list[dict]] = {}
+    role_user_count: dict[UUID, set[UUID]] = {}
+    for a in assignments:
+        by_user.setdefault(a.user_id, []).append(
+            {
+                "role_id": a.role_id,
+                "role_name": a.role.name if a.role else "(deleted)",
+                "scope_type": a.scope_type.value,
+                "scope_id": a.scope_id,
+                "scope_label": _scope_label(a.scope_type, a.scope_id),
+            }
+        )
+        role_user_count.setdefault(a.role_id, set()).add(a.user_id)
+
+    user_rows = []
+    for u in users:
+        my_assignments = by_user.get(u.id, [])
+        permission_count = sum(
+            len({(p.section, p.action.value) for p in r.permissions})
+            for r in roles
+            if r.id in {a["role_id"] for a in my_assignments}
+        )
+        user_rows.append(
+            {
+                "user_id": u.id,
+                "email": u.email,
+                "display_name": u.display_name,
+                "is_admin": u.is_admin,
+                "is_active": u.is_active,
+                "totp_enrolled": u.totp_enrolled,
+                "otp_login_enabled": u.otp_login_enabled,
+                "assignments": my_assignments,
+                "permission_count": permission_count,
+            }
+        )
+    user_rows.sort(key=lambda r: (r["display_name"] or r["email"]).lower())
+
+    role_rows = []
+    for r in sorted(roles, key=lambda x: x.name.lower()):
+        role_rows.append(
+            {
+                "role_id": r.id,
+                "role_name": r.name,
+                "is_system": r.is_system,
+                "description": r.description,
+                "user_count": len(role_user_count.get(r.id, set())),
+                "permissions": sorted(
+                    f"{p.section}:{p.action.value}" for p in r.permissions
+                ),
+            }
+        )
+    return user_rows, role_rows

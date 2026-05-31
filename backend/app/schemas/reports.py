@@ -95,6 +95,43 @@ class ChangeRow(BaseModel):
     request_payload: dict[str, Any] | None
 
 
+# ---------------- User & roles report (P21 #15.7) ----------------
+
+
+class UserRoleAssignmentRow(BaseModel):
+    role_id: UUID
+    role_name: str
+    scope_type: str
+    scope_id: UUID | None
+    scope_label: str | None
+
+
+class UserRoleSummary(BaseModel):
+    user_id: UUID
+    email: str
+    display_name: str | None
+    is_admin: bool
+    is_active: bool
+    totp_enrolled: bool
+    otp_login_enabled: bool
+    assignments: list[UserRoleAssignmentRow]
+    permission_count: int
+
+
+class RoleSummary(BaseModel):
+    role_id: UUID
+    role_name: str
+    is_system: bool
+    description: str | None
+    user_count: int
+    permissions: list[str]  # "section:action" strings
+
+
+class UserRolesReport(BaseModel):
+    users: list[UserRoleSummary]
+    roles: list[RoleSummary]
+
+
 class ChangeReport(BaseModel):
     range_from: datetime
     range_to: datetime

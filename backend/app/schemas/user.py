@@ -68,6 +68,21 @@ class AssignmentCreate(BaseModel):
     scope_id: UUID | None = None
 
 
+class AssignmentBulkScope(BaseModel):
+    scope_type: AssignmentScope
+    scope_id: UUID | None = None
+
+
+class AssignmentBulkCreate(BaseModel):
+    """Grant one role across many scopes in a single API call. Used by
+    the multi-checkbox tree on the user detail page (P21 #18).
+    Existing (user, role, scope_type, scope_id) rows are silently
+    skipped — the operation is idempotent at the row level."""
+
+    role_id: UUID
+    scopes: list[AssignmentBulkScope] = Field(min_length=1)
+
+
 class AssignmentPublic(BaseModel):
     id: UUID
     user_id: UUID
@@ -79,3 +94,9 @@ class AssignmentPublic(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AssignmentBulkResult(BaseModel):
+    created: int
+    skipped_existing: int
+    assignments: list[AssignmentPublic]

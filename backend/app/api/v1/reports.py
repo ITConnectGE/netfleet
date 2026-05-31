@@ -24,6 +24,7 @@ from app.schemas.reports import (
     DeviceActivityReport,
     SecretAccessReport,
     UserActivityReport,
+    UserRolesReport,
 )
 from app.services import device as device_svc
 from app.services import reports as reports_svc
@@ -264,3 +265,17 @@ async def change_report(
         by_user=by_user,
         truncated=truncated,
     )
+
+
+# ---------------- User & roles (P21 #15.7) ----------------
+
+
+@router.get("/user-roles", response_model=UserRolesReport)
+async def user_roles_report(
+    actor: User = Depends(require_permission("users", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> UserRolesReport:
+    user_rows, role_rows = await reports_svc.user_roles_report(
+        session, organization_id=actor.organization_id
+    )
+    return UserRolesReport(users=user_rows, roles=role_rows)

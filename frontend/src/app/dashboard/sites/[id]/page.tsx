@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { AccessPanel } from "@/components/access-panel";
 import { StatusPill } from "@/components/status-pill";
 import { listDevices, type Device } from "@/lib/devices";
 import { deleteSite, getSite, updateSite, type Site, type SiteUpdate } from "@/lib/sites";
@@ -127,6 +128,8 @@ export default function SiteDetailPage() {
           </tbody>
         </table>
       </div>
+
+      <AccessPanel scope="site" id={params.id} />
     </div>
   );
 }

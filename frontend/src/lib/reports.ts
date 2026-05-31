@@ -165,6 +165,46 @@ function csvUrl(
   return `/api/v1/reports/${endpoint}?${sp.toString()}`;
 }
 
+// ---------------- User & roles (P21 #15.7) ----------------
+
+export interface UserRoleAssignmentRow {
+  role_id: string;
+  role_name: string;
+  scope_type: "organization" | "tenant" | "site" | "device";
+  scope_id: string | null;
+  scope_label: string | null;
+}
+
+export interface UserRoleSummary {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  is_admin: boolean;
+  is_active: boolean;
+  totp_enrolled: boolean;
+  otp_login_enabled: boolean;
+  assignments: UserRoleAssignmentRow[];
+  permission_count: number;
+}
+
+export interface RoleSummary {
+  role_id: string;
+  role_name: string;
+  is_system: boolean;
+  description: string | null;
+  user_count: number;
+  permissions: string[];
+}
+
+export interface UserRolesReport {
+  users: UserRoleSummary[];
+  roles: RoleSummary[];
+}
+
+export async function userRolesReport(): Promise<UserRolesReport> {
+  return api.get("reports/user-roles").json<UserRolesReport>();
+}
+
 export async function downloadReportCsv(
   endpoint: "user-activity" | "device-activity" | "secret-access" | "changes",
   params: DateRange & Record<string, string | undefined>,

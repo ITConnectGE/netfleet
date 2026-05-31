@@ -3,21 +3,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { RiskReportCard } from "@/components/risk-report-card";
+import { useToast } from "@/components/toast";
 import { listDevices, type Device } from "@/lib/devices";
 import { listRoles, type Role } from "@/lib/roles";
 import { listSites, type Site } from "@/lib/sites";
 import { listTenants, type Tenant } from "@/lib/tenants";
 import {
-  createAssignment,
+  bulkCreateAssignments,
   deleteAssignment,
   listAssignments,
   listUsers,
   resetUserPassword,
   updateUser,
   type Assignment,
+  type AssignmentBulkScope,
   type UserListItem,
 } from "@/lib/users";
 
@@ -269,43 +271,122 @@ function AssignForm({
   devices: Device[];
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
-  const [scopeType, setScopeType] = useState<
-    "organization" | "tenant" | "site" | "device"
-  >("organization");
-  const [scopeId, setScopeId] = useState<string>("");
+  const [mode, setMode] = useState<"organization" | "scoped">("organization");
+  const [tenantPicks, setTenantPicks] = useState<Set<string>>(new Set());
+  const [sitePicks, setSitePicks] = useState<Set<string>>(new Set());
+  const [devicePicks, setDevicePicks] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+
+  const tree = useMemo(() => {
+    const sitesByTenant = new Map<string, Site[]>();
+    for (const s of sites) {
+      const arr = sitesByTenant.get(s.tenant_id) ?? [];
+      arr.push(s);
+      sitesByTenant.set(s.tenant_id, arr);
+    }
+    const devicesBySite = new Map<string, Device[]>();
+    for (const d of devices) {
+      const arr = devicesBySite.get(d.site_id) ?? [];
+      arr.push(d);
+      devicesBySite.set(d.site_id, arr);
+    }
+    return [...tenants]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((t) => ({
+        tenant: t,
+        sites: (sitesByTenant.get(t.id) ?? [])
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((s) => ({
+            site: s,
+            devices: (devicesBySite.get(s.id) ?? []).sort((a, b) =>
+              a.name.localeCompare(b.name),
+            ),
+          })),
+      }));
+  }, [tenants, sites, devices]);
+
+  const { coalescedScopes, totalChildrenCovered } = useMemo(() => {
+    // Coalesce: when a tenant is ticked, don't bother sending its
+    // sites/devices as separate assignments — the inheritance walker
+    // covers them. Same logic one level down for sites vs their
+    // devices. Keeps the role_assignments row count proportional to
+    // intent rather than to fleet size.
+    const scopes: AssignmentBulkScope[] = [];
+    let covered = 0;
+    for (const tn of tree) {
+      if (tenantPicks.has(tn.tenant.id)) {
+        scopes.push({ scope_type: "tenant", scope_id: tn.tenant.id });
+        covered +=
+          tn.sites.length + tn.sites.reduce((a, s) => a + s.devices.length, 0);
+        continue;
+      }
+      for (const sn of tn.sites) {
+        if (sitePicks.has(sn.site.id)) {
+          scopes.push({ scope_type: "site", scope_id: sn.site.id });
+          covered += sn.devices.length;
+          continue;
+        }
+        for (const d of sn.devices) {
+          if (devicePicks.has(d.id)) {
+            scopes.push({ scope_type: "device", scope_id: d.id });
+          }
+        }
+      }
+    }
+    return { coalescedScopes: scopes, totalChildrenCovered: covered };
+  }, [tree, tenantPicks, sitePicks, devicePicks]);
+
+  function resetPicks() {
+    setTenantPicks(new Set());
+    setSitePicks(new Set());
+    setDevicePicks(new Set());
+  }
 
   const m = useMutation({
     mutationFn: () =>
-      createAssignment(userId, {
+      bulkCreateAssignments(userId, {
         role_id: roleId,
-        scope_type: scopeType,
-        scope_id: scopeType === "organization" ? null : scopeId || null,
+        scopes:
+          mode === "organization"
+            ? [{ scope_type: "organization", scope_id: null }]
+            : coalescedScopes,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["assignments", userId] });
+      qc.invalidateQueries({ queryKey: ["users"] });
       setError(null);
+      resetPicks();
+      const skipped =
+        res.skipped_existing > 0
+          ? ` · ${res.skipped_existing} already existed`
+          : "";
+      toast.success(
+        `Granted ${res.created} assignment${res.created === 1 ? "" : "s"}`,
+        skipped || undefined,
+      );
     },
     onError: (e: Error) => setError(e.message),
   });
 
-  const scopeOptions =
-    scopeType === "tenant"
-      ? tenants.map((t) => ({ value: t.id, label: t.name }))
-      : scopeType === "site"
-        ? sites.map((s) => ({
-            value: s.id,
-            label: `${s.tenant_name ? `${s.tenant_name} · ` : ""}${s.name}`,
-          }))
-        : scopeType === "device"
-          ? devices.map((d) => ({ value: d.id, label: d.name }))
-          : [];
+  function toggle<T>(set: Set<T>, val: T, on: boolean): Set<T> {
+    const next = new Set(set);
+    if (on) next.add(val);
+    else next.delete(val);
+    return next;
+  }
+
+  const canSubmit =
+    !!roleId &&
+    (mode === "organization" || coalescedScopes.length > 0) &&
+    !m.isPending;
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        if (!canSubmit) return;
         m.mutate();
       }}
       className="mt-6 rounded-lg border border-border bg-card p-5"
@@ -316,7 +397,8 @@ function AssignForm({
           {error}
         </div>
       )}
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
+
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
         <label className="space-y-1 text-xs font-medium text-muted-foreground">
           Role
           <select
@@ -331,53 +413,134 @@ function AssignForm({
             ))}
           </select>
         </label>
-        <label className="space-y-1 text-xs font-medium text-muted-foreground">
-          Scope
-          <select
-            value={scopeType}
-            onChange={(e) => {
-              const v = e.target.value as "organization" | "tenant" | "site" | "device";
-              setScopeType(v);
-              setScopeId("");
-            }}
-            className={selectClass}
-          >
-            <option value="organization">organization (all)</option>
-            <option value="tenant">tenant</option>
-            <option value="site">site</option>
-            <option value="device">device</option>
-          </select>
-        </label>
-        {scopeType !== "organization" && (
-          <label className="space-y-1 text-xs font-medium text-muted-foreground md:col-span-2">
-            {scopeType === "tenant"
-              ? "Tenant"
-              : scopeType === "site"
-                ? "Site"
-                : "Device"}
-            <select
-              required
-              value={scopeId}
-              onChange={(e) => setScopeId(e.target.value)}
-              className={selectClass}
-            >
-              <option value="">— pick one —</option>
-              {scopeOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+        <fieldset className="space-y-1 text-xs font-medium text-muted-foreground">
+          <legend>Scope</legend>
+          <div className="flex gap-3 text-sm font-normal text-foreground">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                checked={mode === "organization"}
+                onChange={() => setMode("organization")}
+              />
+              Organization-wide
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                checked={mode === "scoped"}
+                onChange={() => setMode("scoped")}
+              />
+              Specific tenants / sites / devices
+            </label>
+          </div>
+        </fieldset>
       </div>
+
+      {mode === "scoped" && (
+        <div className="mt-4">
+          <div className="mb-1 text-xs text-muted-foreground">
+            Tick anywhere in the tree. A tenant tick covers its sites and
+            devices automatically (inheritance) — children stay unchecked
+            unless you want a separate, narrower grant.
+          </div>
+          {tree.length === 0 ? (
+            <p className="rounded-md border border-dashed border-border bg-card p-4 text-center text-xs text-muted-foreground">
+              No tenants yet.
+            </p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-background p-2">
+              {tree.map((tn) => {
+                const tenantTicked = tenantPicks.has(tn.tenant.id);
+                return (
+                  <div key={tn.tenant.id} className="text-sm">
+                    <label className="flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/40">
+                      <input
+                        type="checkbox"
+                        checked={tenantTicked}
+                        onChange={(e) =>
+                          setTenantPicks((s) =>
+                            toggle(s, tn.tenant.id, e.target.checked),
+                          )
+                        }
+                        className="size-4"
+                      />
+                      <span className="font-medium">{tn.tenant.name}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        tenant
+                      </span>
+                    </label>
+                    {!tenantTicked &&
+                      tn.sites.map((sn) => {
+                        const siteTicked = sitePicks.has(sn.site.id);
+                        return (
+                          <div key={sn.site.id} className="ml-6">
+                            <label className="flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/40">
+                              <input
+                                type="checkbox"
+                                checked={siteTicked}
+                                onChange={(e) =>
+                                  setSitePicks((s) =>
+                                    toggle(s, sn.site.id, e.target.checked),
+                                  )
+                                }
+                                className="size-4"
+                              />
+                              <span>{sn.site.name}</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                site
+                              </span>
+                            </label>
+                            {!siteTicked &&
+                              sn.devices.map((d) => (
+                                <label
+                                  key={d.id}
+                                  className="ml-6 flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/40"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={devicePicks.has(d.id)}
+                                    onChange={(e) =>
+                                      setDevicePicks((s) =>
+                                        toggle(s, d.id, e.target.checked),
+                                      )
+                                    }
+                                    className="size-4"
+                                  />
+                                  <span className="font-mono text-xs">
+                                    {d.name}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    device
+                                  </span>
+                                </label>
+                              ))}
+                          </div>
+                        );
+                      })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {coalescedScopes.length} explicit grant
+            {coalescedScopes.length === 1 ? "" : "s"} · {totalChildrenCovered}{" "}
+            child scope{totalChildrenCovered === 1 ? "" : "s"} inherited
+          </p>
+        </div>
+      )}
+
       <div className="mt-4 flex justify-end">
         <button
           type="submit"
-          disabled={m.isPending || !roleId || (scopeType !== "organization" && !scopeId)}
+          disabled={!canSubmit}
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
-          {m.isPending ? "Adding…" : "Add assignment"}
+          {m.isPending
+            ? "Granting…"
+            : mode === "organization"
+              ? "Grant organization-wide"
+              : `Grant ${coalescedScopes.length} scope${coalescedScopes.length === 1 ? "" : "s"}`}
         </button>
       </div>
     </form>

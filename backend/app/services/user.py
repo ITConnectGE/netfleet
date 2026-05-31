@@ -16,7 +16,12 @@ from app.models.role import AssignmentScope, Role, RoleAssignment
 from app.models.site import Site
 from app.models.tenant import Tenant
 from app.models.user import AuthMethod, User
-from app.schemas.user import AssignmentCreate, UserCreate, UserUpdate
+from app.schemas.user import (
+    AssignmentBulkCreate,
+    AssignmentCreate,
+    UserCreate,
+    UserUpdate,
+)
 
 # Character set for auto-generated invite passwords. We deliberately
 # drop characters that are ambiguous in print (`0`, `O`, `1`, `l`, `I`,
@@ -281,6 +286,109 @@ async def create_assignment(
     session.add(assignment)
     await session.flush()
     return assignment
+
+
+async def bulk_create_assignments(
+    session: AsyncSession,
+    organization_id: UUID,
+    user_id: UUID,
+    payload: AssignmentBulkCreate,
+) -> tuple[list[RoleAssignment], int]:
+    """Grant one role across many scopes. Skips scopes the user already
+    has for this role. Returns (newly_created, skipped_existing_count)."""
+    user = await get_user(session, organization_id, user_id)
+
+    role = (
+        await session.execute(
+            select(Role).where(
+                Role.id == payload.role_id, Role.organization_id == organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    if role is None:
+        raise RoleNotInOrganization("role does not belong to this organization")
+
+    existing = {
+        (a.scope_type, a.scope_id)
+        for a in (
+            await session.execute(
+                select(RoleAssignment).where(
+                    RoleAssignment.user_id == user.id,
+                    RoleAssignment.role_id == role.id,
+                )
+            )
+        ).scalars()
+    }
+
+    created: list[RoleAssignment] = []
+    skipped = 0
+    for scope in payload.scopes:
+        scope_id = await _validate_scope(
+            session, organization_id, scope.scope_type, scope.scope_id
+        )
+        key = (scope.scope_type, scope_id)
+        if key in existing:
+            skipped += 1
+            continue
+        assignment = RoleAssignment(
+            user_id=user.id,
+            role_id=role.id,
+            scope_type=scope.scope_type,
+            scope_id=scope_id,
+        )
+        session.add(assignment)
+        existing.add(key)
+        created.append(assignment)
+    await session.flush()
+    return created, skipped
+
+
+async def _validate_scope(
+    session: AsyncSession,
+    organization_id: UUID,
+    scope_type: AssignmentScope,
+    scope_id: UUID | None,
+) -> UUID | None:
+    """Mirror the per-scope validation logic from create_assignment but
+    callable from the bulk path without re-creating the payload object."""
+    if scope_type == AssignmentScope.ORGANIZATION:
+        return None
+    if scope_id is None:
+        raise InvalidScope(f"scope_id is required for {scope_type} scope")
+    if scope_type == AssignmentScope.TENANT:
+        ok = (
+            await session.execute(
+                select(Tenant.id).where(
+                    Tenant.id == scope_id, Tenant.organization_id == organization_id
+                )
+            )
+        ).first()
+        if ok is None:
+            raise InvalidScope("tenant not found in this organization")
+        return scope_id
+    if scope_type == AssignmentScope.SITE:
+        ok = (
+            await session.execute(
+                select(Site.id).where(
+                    Site.id == scope_id, Site.organization_id == organization_id
+                )
+            )
+        ).first()
+        if ok is None:
+            raise InvalidScope("site not found in this organization")
+        return scope_id
+    if scope_type == AssignmentScope.DEVICE:
+        ok = (
+            await session.execute(
+                select(Device.id).where(
+                    Device.id == scope_id, Device.organization_id == organization_id
+                )
+            )
+        ).first()
+        if ok is None:
+            raise InvalidScope("device not found in this organization")
+        return scope_id
+    raise InvalidScope(f"unknown scope_type {scope_type}")
 
 
 async def delete_assignment(

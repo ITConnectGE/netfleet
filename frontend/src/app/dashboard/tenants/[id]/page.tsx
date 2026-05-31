@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { AccessPanel } from "@/components/access-panel";
 import {
   createSite,
   deleteSite,
@@ -182,6 +183,8 @@ export default function TenantDetailPage() {
           </tbody>
         </table>
       </div>
+
+      <AccessPanel scope="tenant" id={tenantId} />
     </div>
   );
 }

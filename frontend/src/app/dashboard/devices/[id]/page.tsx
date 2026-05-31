@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { AccessPanel } from "@/components/access-panel";
 import { FirmwareCard } from "@/components/firmware-card";
 import { StatusPill } from "@/components/status-pill";
 import { useToast } from "@/components/toast";
@@ -215,6 +216,8 @@ export default function DeviceDetailPage() {
           </p>
         </Section>
       )}
+
+      <AccessPanel scope="device" id={device.id} />
     </div>
   );
 }

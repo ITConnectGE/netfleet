@@ -66,6 +66,22 @@ export interface AssignmentCreate {
   scope_id?: string | null;
 }
 
+export interface AssignmentBulkScope {
+  scope_type: AssignmentScope;
+  scope_id?: string | null;
+}
+
+export interface AssignmentBulkCreate {
+  role_id: string;
+  scopes: AssignmentBulkScope[];
+}
+
+export interface AssignmentBulkResult {
+  created: number;
+  skipped_existing: number;
+  assignments: Assignment[];
+}
+
 export async function listUsers(): Promise<UserListItem[]> {
   return api.get("users").json<UserListItem[]>();
 }
@@ -114,6 +130,19 @@ export async function createAssignment(
 export async function deleteAssignment(userId: string, assignmentId: string): Promise<void> {
   try {
     await api.delete(`users/${userId}/assignments/${assignmentId}`);
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function bulkCreateAssignments(
+  userId: string,
+  payload: AssignmentBulkCreate,
+): Promise<AssignmentBulkResult> {
+  try {
+    return await api
+      .post(`users/${userId}/assignments/bulk`, { json: payload })
+      .json<AssignmentBulkResult>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

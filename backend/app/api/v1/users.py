@@ -13,6 +13,8 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.secret_audit import RiskReport, UnrotatedSecretPublic
 from app.schemas.user import (
+    AssignmentBulkCreate,
+    AssignmentBulkResult,
     AssignmentCreate,
     AssignmentPublic,
     PasswordResetRequest,
@@ -216,6 +218,72 @@ async def create_assignment(
                 created_at=a.created_at,
             )
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@router.post(
+    "/{user_id}/assignments/bulk",
+    response_model=AssignmentBulkResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def bulk_create_assignments(
+    user_id: UUID,
+    payload: AssignmentBulkCreate,
+    request: Request,
+    actor: User = Depends(require_permission("users", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> AssignmentBulkResult:
+    try:
+        created, skipped = await user_svc.bulk_create_assignments(
+            session, actor.organization_id, user_id, payload
+        )
+    except user_svc.UserNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except user_svc.RoleNotInOrganization as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except user_svc.InvalidScope as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=actor.id,
+        organization_id=actor.organization_id,
+        section="users",
+        action="assign_role_bulk",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={
+            "target_user_id": str(user_id),
+            "role_id": str(payload.role_id),
+            "created": len(created),
+            "skipped": skipped,
+            "scopes": [s.model_dump(mode="json") for s in payload.scopes],
+        },
+    )
+    await session.commit()
+
+    # Re-fetch with labels so the UI doesn't have to plumb three lookups.
+    all_rows = await user_svc.list_assignments(
+        session, actor.organization_id, user_id
+    )
+    created_ids = {a.id for a in created}
+    new_public = [
+        AssignmentPublic(
+            id=a.id,
+            user_id=a.user_id,
+            role_id=a.role_id,
+            role_name=role_name,
+            scope_type=a.scope_type,
+            scope_id=a.scope_id,
+            scope_label=scope_label,
+            created_at=a.created_at,
+        )
+        for a, role_name, scope_label in all_rows
+        if a.id in created_ids
+    ]
+    return AssignmentBulkResult(
+        created=len(created), skipped_existing=skipped, assignments=new_public
+    )
 
 
 @router.delete("/{user_id}/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
