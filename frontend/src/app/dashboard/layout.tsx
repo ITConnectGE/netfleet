@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import { LogoMark } from "@/components/logo";
 import { UpdateBanner } from "@/components/update-banner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -66,7 +67,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center gap-6">
             <Link href="/dashboard" className="flex items-center gap-2">
-              <span className="text-base font-semibold">NetFleet</span>
+              <LogoMark size={24} />
+              <span className="text-base font-semibold tracking-tight">NetFleet</span>
               <span
                 className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                 title={health ? `running ${health.version}` : ""}

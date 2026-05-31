@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Logo } from "@/components/logo";
 import { fetchSetupStatus, login, verifyTotp } from "@/lib/auth";
 
 type Phase = "password" | "totp";
@@ -64,105 +65,127 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {phase === "password" ? "Sign in" : "Two-factor"}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {phase === "password"
-            ? "Local credentials or Microsoft single sign-on."
-            : `Enter the 6-digit code from your authenticator app.`}
-        </p>
-
-        {error && (
-          <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {phase === "password" ? (
-          <form className="mt-6 space-y-4" onSubmit={onSubmitPassword}>
-            <Field label="Email" htmlFor="email">
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={inputClass}
-                placeholder="you@itconnect.ge"
-                autoComplete="email"
-              />
-            </Field>
-            <Field label="Password" htmlFor="password">
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={inputClass}
-                autoComplete="current-password"
-              />
-            </Field>
-            <button type="submit" disabled={submitting} className={primaryBtnClass}>
-              {submitting ? "Signing inâ€¦" : "Sign in"}
-            </button>
-          </form>
-        ) : (
-          <form className="mt-6 space-y-4" onSubmit={onSubmitTotp}>
-            <Field label="Authenticator code" htmlFor="totp">
-              <input
-                id="totp"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={8}
-                required
-                autoFocus
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                className={`${inputClass} tracking-[0.5em] text-center text-lg`}
-                placeholder="000000"
-              />
-            </Field>
-            <button type="submit" disabled={submitting} className={primaryBtnClass}>
-              {submitting ? "Verifyingâ€¦" : "Verify"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setPhase("password");
-                setCode("");
-                setMfaTempToken(null);
-              }}
-              className="block w-full text-center text-xs text-muted-foreground hover:underline"
-            >
-              â† Use a different account
-            </button>
-          </form>
-        )}
-
-        <div className="my-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">or</span>
-          <div className="h-px flex-1 bg-border" />
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-emerald-50 p-6 dark:from-slate-950 dark:via-background dark:to-slate-900">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Logo size={48} showWordmark={false} />
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight">NetFleet</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Multi-vendor network fleet management for MSPs
+          </p>
         </div>
 
-        <a
-          href="/api/v1/auth/oidc/start"
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition hover:bg-accent"
-        >
-          Continue with Microsoft
-        </a>
+        <div className="rounded-2xl border border-border bg-card p-8 shadow-sm">
+          <h2 className="text-xl font-semibold tracking-tight">
+            {phase === "password" ? "Sign in" : "Two-factor authentication"}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {phase === "password"
+              ? "Local credentials or Microsoft single sign-on."
+              : "Enter the 6-digit code from your authenticator app."}
+          </p>
+
+          {error && (
+            <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          {phase === "password" ? (
+            <form className="mt-6 space-y-4" onSubmit={onSubmitPassword}>
+              <Field label="Email" htmlFor="email">
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={inputClass}
+                  placeholder="you@itconnect.ge"
+                  autoComplete="email"
+                />
+              </Field>
+              <Field label="Password" htmlFor="password">
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClass}
+                  autoComplete="current-password"
+                />
+              </Field>
+              <button type="submit" disabled={submitting} className={primaryBtnClass}>
+                {submitting ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+          ) : (
+            <form className="mt-6 space-y-4" onSubmit={onSubmitTotp}>
+              <Field label="Authenticator code" htmlFor="totp">
+                <input
+                  id="totp"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={8}
+                  required
+                  autoFocus
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  className={`${inputClass} text-center text-lg tracking-[0.5em]`}
+                  placeholder="000000"
+                />
+              </Field>
+              <button type="submit" disabled={submitting} className={primaryBtnClass}>
+                {submitting ? "Verifying…" : "Verify"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhase("password");
+                  setCode("");
+                  setMfaTempToken(null);
+                }}
+                className="block w-full text-center text-xs text-muted-foreground hover:underline"
+              >
+                ← Use a different account
+              </button>
+            </form>
+          )}
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <a
+            href="/api/v1/auth/oidc/start"
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition hover:bg-accent"
+          >
+            <MicrosoftLogo className="size-4" />
+            Continue with Microsoft
+          </a>
+        </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
           <Link href="/" className="underline-offset-4 hover:underline">
-            â† Back to landing
+            ← Back to landing
           </Link>
         </p>
       </div>
     </main>
+  );
+}
+
+function MicrosoftLogo(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 23 23" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect x="1" y="1" width="10" height="10" fill="#f25022" />
+      <rect x="12" y="1" width="10" height="10" fill="#7fba00" />
+      <rect x="1" y="12" width="10" height="10" fill="#00a4ef" />
+      <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
+    </svg>
   );
 }
 

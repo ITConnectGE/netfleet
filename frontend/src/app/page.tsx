@@ -1,12 +1,13 @@
 import Link from "next/link";
 
+import { LogoMark } from "@/components/logo";
+
 export default function LandingPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-white to-emerald-50 p-8 dark:from-slate-950 dark:via-background dark:to-slate-900">
       <div className="mx-auto max-w-2xl text-center">
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground">
-          <span className="inline-block size-2 rounded-full bg-emerald-500" />
-          v0.1.0 · Phase 2 · Authentication
+        <div className="mb-6 flex justify-center">
+          <LogoMark size={72} />
         </div>
 
         <h1 className="text-balance text-5xl font-semibold tracking-tight md:text-6xl">

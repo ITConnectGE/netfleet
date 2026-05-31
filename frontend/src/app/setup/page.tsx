@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Logo } from "@/components/logo";
 import { fetchSetupStatus, performSetup } from "@/lib/auth";
 
 export default function SetupPage() {
@@ -60,11 +61,15 @@ export default function SetupPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm">
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-          First-run setup
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-emerald-50 p-6 dark:from-slate-950 dark:via-background dark:to-slate-900">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex justify-center">
+          <Logo size={40} />
         </div>
+        <div className="rounded-2xl border border-border bg-card p-8 shadow-sm">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+            First-run setup
+          </div>
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to NetFleet</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Let&apos;s create your organization and the first admin user.
@@ -155,6 +160,7 @@ export default function SetupPage() {
             {submitting ? "Creating…" : "Create organization"}
           </button>
         </form>
+        </div>
       </div>
     </main>
   );
