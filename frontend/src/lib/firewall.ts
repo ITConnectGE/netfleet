@@ -88,6 +88,23 @@ export async function deleteFilterRule(deviceId: string, ruleId: string): Promis
   }
 }
 
+/** Reorder a filter rule. `beforeId` is the id of the rule the moved
+ *  rule should land in front of — pass null to push it to the bottom. */
+export async function moveFilterRule(
+  deviceId: string,
+  ruleId: string,
+  beforeId: string | null,
+): Promise<void> {
+  try {
+    await api.post(
+      `devices/${deviceId}/firewall/filter/${encodeURIComponent(ruleId)}/move`,
+      { json: { before_id: beforeId } },
+    );
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function listLogs(
   deviceId: string,
   options: { topics?: string; limit?: number } = {},

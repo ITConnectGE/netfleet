@@ -76,6 +76,23 @@ async def remove_filter(
         raise OperationError(str(e)) from e
 
 
+async def move_filter(
+    session: AsyncSession,
+    organization_id: UUID,
+    device_id: UUID,
+    rule_id: str,
+    *,
+    before_id: str | None,
+) -> None:
+    device = await get_device(session, organization_id, device_id)
+    try:
+        await get_driver(device.vendor).firewall_filter_move(
+            _to_driver_creds(device), rule_id, before_id=before_id
+        )
+    except Exception as e:
+        raise OperationError(str(e)) from e
+
+
 # ---------------- Logs ----------------
 
 

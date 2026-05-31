@@ -433,6 +433,21 @@ class MikrotikDriver:
     ) -> None:
         await self._call(creds, "/ip/firewall/filter/remove", **{".id": rule_id})
 
+    async def firewall_filter_move(
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        before_id: str | None = None,
+    ) -> None:
+        # RouterOS' /move takes numbers=<src> destination=<dst>; the
+        # source ends up immediately before destination. Omitting
+        # destination pushes the rule to the bottom of the chain.
+        params: dict[str, Any] = {"numbers": rule_id}
+        if before_id is not None:
+            params["destination"] = before_id
+        await self._call(creds, "/ip/firewall/filter/move", **params)
+
     async def firewall_address_list_add(
         self,
         creds: DeviceCredentials,

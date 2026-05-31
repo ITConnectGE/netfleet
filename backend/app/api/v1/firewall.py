@@ -19,12 +19,22 @@ from app.api.dependencies import (
 from app.drivers.base import FilterRule as DriverFilterRule
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
+from pydantic import BaseModel
+
 from app.schemas.firewall import (
     FilterRuleCreate,
     FilterRulePublic,
     FilterRuleUpdate,
     LogEntryPublic,
 )
+
+
+class FilterRuleMoveRequest(BaseModel):
+    """Reorder a filter rule. ``before_id`` is the .id of the rule the
+    moved one should land in front of. Pass ``null`` (or omit) to move
+    the rule to the bottom of the chain."""
+
+    before_id: str | None = None
 from app.services import audit as audit_svc
 from app.services import device as device_svc
 from app.services import firewall as fw_svc
@@ -208,6 +218,46 @@ async def delete_filter(
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
         request_payload={"rule_id": rule_id},
+    )
+    await session.commit()
+
+
+@router.post(
+    "/{device_id}/firewall/filter/{rule_id}/move",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def move_filter(
+    device_id: UUID,
+    rule_id: str,
+    payload: FilterRuleMoveRequest,
+    request: Request,
+    user: User = Depends(require_permission("firewall.filter", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await fw_svc.move_filter(
+            session,
+            user.organization_id,
+            device_id,
+            rule_id,
+            before_id=payload.before_id,
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.filter",
+        action="move",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"rule_id": rule_id, "before_id": payload.before_id},
     )
     await session.commit()
 

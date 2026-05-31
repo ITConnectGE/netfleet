@@ -7,6 +7,11 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { useToast } from "@/components/toast";
 import {
+  createFilterRule,
+  listFilterRules,
+  moveFilterRule,
+} from "@/lib/firewall";
+import {
   createIpAddress,
   createWgInterface,
   createWgPeer,
@@ -132,22 +137,64 @@ function InterfaceStep({
   const [name, setName] = useState("wg-net");
   const [port, setPort] = useState(51820);
   const [mtu, setMtu] = useState(1420);
+  const [openFirewall, setOpenFirewall] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: () =>
-      createWgInterface(deviceId, {
+    mutationFn: async () => {
+      await createWgInterface(deviceId, {
         name,
         listen_port: port,
         mtu,
-      }),
+      });
+
+      // Optionally punch a hole in the input chain so peers outside the
+      // router can actually reach the listen port. Without this step the
+      // tunnel handshakes never start on most "secure by default"
+      // RouterOS configs.
+      if (openFirewall) {
+        try {
+          const created = await createFilterRule(deviceId, {
+            chain: "input",
+            action: "accept",
+            protocol: "udp",
+            dst_port: String(port),
+            comment: `netfleet wg ${name} listen`,
+          });
+          // Push the new rule to the very top of the input chain so it
+          // wins over any catch-all drop the operator already has below.
+          try {
+            const rules = await listFilterRules(deviceId);
+            const firstInput = rules.find(
+              (r) => r.chain === "input" && r.id && r.id !== created.id,
+            );
+            if (firstInput?.id) {
+              await moveFilterRule(deviceId, created.id, firstInput.id);
+            }
+          } catch (e) {
+            // Reorder failure is non-fatal — the rule still exists,
+            // just at the wrong priority. Surface it as a warning so
+            // the operator can fix it from /firewall.
+            toast.error(
+              "Rule created but not moved to top",
+              (e as Error).message,
+            );
+          }
+        } catch (e) {
+          toast.error("Firewall hole-punch failed", (e as Error).message);
+        }
+      }
+    },
     onSuccess: async () => {
       // The driver doesn't echo the new interface, so refetch + match by name.
       const fresh = await listWgInterfaces(deviceId);
       qc.setQueryData(["wg-interfaces", deviceId], fresh);
       const picked = fresh.find((i) => i.name === name);
       if (picked) {
-        toast.success("Interface created", picked.name);
+        toast.success(
+          "Interface created",
+          openFirewall ? `UDP/${port} opened in input chain` : picked.name,
+        );
         onPicked(picked);
       } else {
         setError("Interface created but couldn't be looked up.");
@@ -233,6 +280,25 @@ function InterfaceStep({
                 onChange={(e) => setMtu(Number(e.target.value))}
                 className={input}
               />
+            </label>
+            <label className="md:col-span-3 flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={openFirewall}
+                onChange={(e) => setOpenFirewall(e.target.checked)}
+                className="mt-0.5 size-4 rounded"
+              />
+              <span className="text-sm">
+                <span className="font-medium">
+                  Open UDP /{port} in the input firewall
+                </span>
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  Adds an <span className="font-mono">accept</span> rule at the
+                  top of the input chain so external peers can complete the
+                  handshake. Comment tag:{" "}
+                  <span className="font-mono">netfleet wg {name} listen</span>.
+                </span>
+              </span>
             </label>
             <div className="md:col-span-3 flex justify-end gap-2">
               <button

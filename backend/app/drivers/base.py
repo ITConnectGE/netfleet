@@ -535,6 +535,17 @@ class VendorDriver(Protocol):
     async def firewall_filter_remove(
         self, creds: DeviceCredentials, rule_id: str
     ) -> None: ...
+    async def firewall_filter_move(
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        before_id: str | None = None,
+    ) -> None:
+        """Reorder a /ip/firewall/filter rule. ``before_id`` is the id
+        of the rule the moved one should land *in front of* — pass
+        ``None`` to move to the end of the chain."""
+        ...
     async def firewall_address_list_add(
         self,
         creds: DeviceCredentials,

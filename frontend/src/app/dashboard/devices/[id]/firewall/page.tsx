@@ -4,10 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { useToast } from "@/components/toast";
 import {
   createFilterRule,
   deleteFilterRule,
   listFilterRules,
+  moveFilterRule,
   setFilterRuleDisabled,
   type FilterRule,
 } from "@/lib/firewall";
@@ -26,6 +28,7 @@ export default function FirewallPage() {
   const params = useParams<{ id: string }>();
   const deviceId = params.id;
   const qc = useQueryClient();
+  const toast = useToast();
 
   const [chainFilter, setChainFilter] = useState<"all" | "input" | "forward" | "output">("all");
   const [showForm, setShowForm] = useState(false);
@@ -44,10 +47,67 @@ export default function FirewallPage() {
     mutationFn: (id: string) => deleteFilterRule(deviceId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-filter", deviceId] }),
   });
+  const move = useMutation({
+    mutationFn: ({ id, beforeId }: { id: string; beforeId: string | null }) =>
+      moveFilterRule(deviceId, id, beforeId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-filter", deviceId] }),
+    onError: (e: Error) => toast.error("Move failed", e.message),
+  });
 
   const filtered = (rules ?? []).filter((r) =>
     chainFilter === "all" ? true : r.chain === chainFilter,
   );
+
+  // Reordering happens within a chain: each rule's "previous" and "next"
+  // are the nearest same-chain rules in the full list. That keeps the
+  // semantics intuitive even when the chain filter is on.
+  function neighborsOf(rule: FilterRule) {
+    const sameChain = (rules ?? []).filter((r) => r.chain === rule.chain);
+    const i = sameChain.findIndex((r) => r.id === rule.id);
+    return {
+      isFirst: i <= 0,
+      isLast: i < 0 || i === sameChain.length - 1,
+      prev: i > 0 ? sameChain[i - 1] : null,
+      next: i >= 0 && i < sameChain.length - 1 ? sameChain[i + 1] : null,
+      afterNext: i >= 0 && i < sameChain.length - 2 ? sameChain[i + 2] : null,
+      first: sameChain[0] ?? null,
+      last: sameChain[sameChain.length - 1] ?? null,
+    };
+  }
+
+  function onMoveUp(r: FilterRule) {
+    if (!r.id) return;
+    const n = neighborsOf(r);
+    if (n.isFirst || !n.prev?.id) return;
+    move.mutate({ id: r.id, beforeId: n.prev.id });
+  }
+
+  function onMoveDown(r: FilterRule) {
+    if (!r.id) return;
+    const n = neighborsOf(r);
+    if (n.isLast) return;
+    // "Down by one" = land in front of the rule after the next, i.e.
+    // swap with the next. When there's no rule-after-next, the moved
+    // rule should land below the current next — same chain or not,
+    // RouterOS' move with destination=null pushes it to the global
+    // bottom which still works because there's nothing after it in
+    // this chain.
+    move.mutate({ id: r.id, beforeId: n.afterNext?.id ?? null });
+  }
+
+  function onMoveTop(r: FilterRule) {
+    if (!r.id) return;
+    const n = neighborsOf(r);
+    if (n.isFirst || !n.first?.id || n.first.id === r.id) return;
+    move.mutate({ id: r.id, beforeId: n.first.id });
+  }
+
+  function onMoveBottom(r: FilterRule) {
+    if (!r.id) return;
+    const n = neighborsOf(r);
+    if (n.isLast) return;
+    move.mutate({ id: r.id, beforeId: null });
+  }
 
   return (
     <div>
@@ -103,6 +163,7 @@ export default function FirewallPage() {
         <table className="w-full text-sm">
           <thead className="border-b border-border bg-muted/50">
             <tr className="text-left">
+              <th className="w-20 px-3 py-2.5 font-medium">Order</th>
               <th className="px-3 py-2.5 font-medium">Chain</th>
               <th className="px-3 py-2.5 font-medium">Action</th>
               <th className="px-3 py-2.5 font-medium">Src</th>
@@ -119,70 +180,129 @@ export default function FirewallPage() {
           <tbody className="divide-y divide-border">
             {isLoading && (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={12} className="px-3 py-6 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             )}
             {!isLoading && filtered.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">
                   No rules.
                 </td>
               </tr>
             )}
-            {filtered.map((r) => (
-              <tr key={r.id} className={`hover:bg-accent/30 ${r.disabled ? "opacity-50" : ""}`}>
-                <td className="px-3 py-2 font-mono text-xs">{r.chain}</td>
-                <td className="px-3 py-2">
-                  <ActionPill action={r.action} />
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px]">
-                  {r.src_address ?? r.src_address_list ?? "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-[11px]">
-                  {r.dst_address ?? r.dst_address_list ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-xs">{r.protocol ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-[11px]">{r.dst_port ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{r.in_interface ?? "—"}</td>
-                <td className="px-3 py-2 text-[11px] text-muted-foreground">
-                  {r.connection_state ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {r.log ? (
-                    <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                      log
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">
-                  {r.comment ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    onClick={() => r.id && toggle.mutate({ id: r.id, disabled: !r.disabled })}
-                    className="text-xs text-muted-foreground hover:underline"
-                  >
-                    {r.disabled ? "Enable" : "Disable"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (r.id && confirm("Delete this rule?")) del.mutate(r.id);
-                    }}
-                    className="ml-3 text-xs text-destructive hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map((r) => {
+              const n = neighborsOf(r);
+              return (
+                <tr key={r.id} className={`hover:bg-accent/30 ${r.disabled ? "opacity-50" : ""}`}>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-0.5">
+                      <OrderButton
+                        title="Move to top of chain"
+                        disabled={n.isFirst || move.isPending}
+                        onClick={() => onMoveTop(r)}
+                      >
+                        ⏶
+                      </OrderButton>
+                      <OrderButton
+                        title="Move up one"
+                        disabled={n.isFirst || move.isPending}
+                        onClick={() => onMoveUp(r)}
+                      >
+                        ▲
+                      </OrderButton>
+                      <OrderButton
+                        title="Move down one"
+                        disabled={n.isLast || move.isPending}
+                        onClick={() => onMoveDown(r)}
+                      >
+                        ▼
+                      </OrderButton>
+                      <OrderButton
+                        title="Move to bottom of chain"
+                        disabled={n.isLast || move.isPending}
+                        onClick={() => onMoveBottom(r)}
+                      >
+                        ⏷
+                      </OrderButton>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs">{r.chain}</td>
+                  <td className="px-3 py-2">
+                    <ActionPill action={r.action} />
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11px]">
+                    {r.src_address ?? r.src_address_list ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11px]">
+                    {r.dst_address ?? r.dst_address_list ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-xs">{r.protocol ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-[11px]">{r.dst_port ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs">{r.in_interface ?? "—"}</td>
+                  <td className="px-3 py-2 text-[11px] text-muted-foreground">
+                    {r.connection_state ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {r.log ? (
+                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+                        log
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">
+                    {r.comment ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => r.id && toggle.mutate({ id: r.id, disabled: !r.disabled })}
+                      className="text-xs text-muted-foreground hover:underline"
+                    >
+                      {r.disabled ? "Enable" : "Disable"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (r.id && confirm("Delete this rule?")) del.mutate(r.id);
+                      }}
+                      className="ml-3 text-xs text-destructive hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function OrderButton({
+  children,
+  disabled,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="inline-flex size-6 items-center justify-center rounded border border-transparent text-[10px] text-muted-foreground transition hover:border-border hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
   );
 }
 
