@@ -163,10 +163,18 @@ export default function FleetPage() {
             its detail page.
           </p>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {totalTenants} tenant{totalTenants === 1 ? "" : "s"} · {totalSites}{" "}
-          site{totalSites === 1 ? "" : "s"} · {totalDevices} device
-          {totalDevices === 1 ? "" : "s"}
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-muted-foreground">
+            {totalTenants} tenant{totalTenants === 1 ? "" : "s"} · {totalSites}{" "}
+            site{totalSites === 1 ? "" : "s"} · {totalDevices} device
+            {totalDevices === 1 ? "" : "s"}
+          </div>
+          <Link
+            href="/dashboard/fleet/new"
+            className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+          >
+            + Add
+          </Link>
         </div>
       </div>
 
