@@ -89,7 +89,7 @@ export function NotificationBell() {
               {unread > 0 ? `${unread} new` : "all caught up"}
             </span>
           </div>
-          <ul className="max-h-96 overflow-y-auto">
+          <ul className="max-h-96 overflow-y-auto bg-white">
             {items.length === 0 && (
               <li className="px-3 py-6 text-center text-xs text-muted-foreground">
                 Nothing yet.
