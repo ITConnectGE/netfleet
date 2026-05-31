@@ -54,29 +54,25 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
   const fw = data;
 
   const needsUpgrade = fw.needs_upgrade;
-  const rbUpgrade = Boolean(
+  // We still surface the RouterBOARD bootloader version as informational
+  // (operators want to see whether it lags), but we no longer offer to
+  // upgrade it from NetFleet — the bootloader upgrade is too fragile to
+  // remote-trigger reliably and is better left to the device's own
+  // post-RouterOS-upgrade prompt.
+  const rbAvailableInfo = Boolean(
     fw.routerboard_available &&
       fw.routerboard_current &&
       fw.routerboard_available !== fw.routerboard_current,
   );
-  const anyUpgrade = needsUpgrade || rbUpgrade;
 
-  function dialog(target: FirmwareUpgradeTarget): boolean {
+  function dialog(_target: FirmwareUpgradeTarget): boolean {
     const lines: string[] = [];
     lines.push("What this will do:");
     lines.push("");
-    if (target === "routeros" || target === "both") {
-      lines.push(
-        `  • Install RouterOS ${fw.available_version} (currently ${fw.current_version ?? "?"}).`,
-      );
-      lines.push("  • Reboot the device to apply it (~3–5 min downtime).");
-    }
-    if (target === "routerboard" || target === "both") {
-      lines.push(
-        `  • Upgrade RouterBOARD bootloader ${fw.routerboard_current} → ${fw.routerboard_available}.`,
-      );
-      lines.push("  • Reboot to apply the bootloader (~3–5 min downtime).");
-    }
+    lines.push(
+      `  • Install RouterOS ${fw.available_version} (currently ${fw.current_version ?? "?"}).`,
+    );
+    lines.push("  • Reboot the device to apply it (~3–5 min downtime).");
     lines.push("");
     lines.push(`Channel: ${fw.channel ?? "stable"}`);
     lines.push("");
@@ -101,7 +97,7 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium text-muted-foreground">Firmware</h3>
-            {anyUpgrade ? (
+            {needsUpgrade ? (
               <span className="rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
                 update available
               </span>
@@ -125,25 +121,15 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
             {fw.routerboard_current && (
               <FirmwareRow
                 label="RouterBOARD"
-                hint="Bootloader firmware (separate from RouterOS — usually only updates after a major RouterOS jump)."
+                hint="Bootloader firmware. Read-only here — apply from the device after the next RouterOS upgrade reboot."
                 installed={fw.routerboard_current}
                 available={fw.routerboard_available}
-                hasUpgrade={rbUpgrade}
-                onUpgrade={rbUpgrade ? () => onUpgrade("routerboard") : undefined}
-                upgrading={upgrade.isPending}
+                hasUpgrade={rbAvailableInfo}
+                /* No onUpgrade — display only. */
+                upgrading={false}
               />
             )}
           </div>
-
-          {needsUpgrade && rbUpgrade && (
-            <button
-              onClick={() => onUpgrade("both")}
-              disabled={upgrade.isPending}
-              className="mt-2 rounded-md border border-amber-400 bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
-            >
-              {upgrade.isPending ? "Upgrading…" : "Upgrade both (RouterOS → reboot → RouterBOARD → reboot)…"}
-            </button>
-          )}
 
           <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
             <span className="text-muted-foreground">Channel</span>
