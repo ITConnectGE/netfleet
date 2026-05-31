@@ -24,10 +24,13 @@ def _token() -> str:
     return os.getenv("NETFLEET_UPDATER_TOKEN", "changeme")
 
 
-async def get_status() -> dict:
+async def get_status(*, force: bool = False) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(f"{UPDATER_URL}/status")
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"{UPDATER_URL}/status",
+                params={"force": "true"} if force else None,
+            )
             r.raise_for_status()
             return r.json()
     except Exception as e:

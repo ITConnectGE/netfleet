@@ -32,6 +32,14 @@ export default function UpdatesPage() {
     },
   });
 
+  const force = useMutation({
+    mutationFn: async () => {
+      const fresh = await getUpdateStatus(true);
+      qc.setQueryData(["update-status"], fresh);
+      return fresh;
+    },
+  });
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (error || !data) {
     return (
@@ -85,6 +93,20 @@ export default function UpdatesPage() {
           {dataUpdatedAt > 0 && (
             <p className="text-xs text-muted-foreground">
               this page: {new Date(dataUpdatedAt).toLocaleTimeString()}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => force.mutate()}
+            disabled={force.isPending}
+            title="Bypass cache and walk all GitHub releases — useful when a freshly-published tag isn't appearing"
+            className="mt-3 rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+          >
+            {force.isPending ? "Checking…" : "Force check now"}
+          </button>
+          {force.error && (
+            <p className="mt-1 text-[11px] text-destructive">
+              {(force.error as Error).message}
             </p>
           )}
         </Card>

@@ -35,8 +35,15 @@ export function isInProgress(s: UpdateState): boolean {
   return IN_PROGRESS_STATES.includes(s);
 }
 
-export async function getUpdateStatus(): Promise<UpdateStatus> {
-  return api.get("system/update/status").json<UpdateStatus>();
+export async function getUpdateStatus(force = false): Promise<UpdateStatus> {
+  return api
+    .get("system/update/status", {
+      searchParams: force ? { force: "true" } : undefined,
+      // Force checks go through the list-mode path on GitHub and so can
+      // take a few seconds; widen the timeout vs the default poll.
+      timeout: force ? 30_000 : 15_000,
+    })
+    .json<UpdateStatus>();
 }
 
 export async function triggerUpdate(

@@ -22,10 +22,11 @@ router = APIRouter()
 
 @router.get("/status", response_model=UpdateStatusPublic)
 async def update_status(
+    force: bool = False,
     _: User = Depends(get_current_user),
 ) -> UpdateStatusPublic:
     try:
-        return UpdateStatusPublic(**await updater_svc.get_status())
+        return UpdateStatusPublic(**await updater_svc.get_status(force=force))
     except updater_svc.UpdaterUnreachable as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

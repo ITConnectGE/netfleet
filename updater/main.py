@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import shlex
 from collections import deque
 from datetime import UTC, datetime
@@ -150,18 +151,69 @@ class UpdateRequest(BaseModel):
 # ---------------- GitHub poll ----------------
 
 
-async def _check_latest_release() -> str | None:
-    url = f"https://api.github.com/repos/{settings.GITHUB_REPO}/releases/latest"
+async def _check_latest_release(*, force: bool = False) -> str | None:
+    """Ask GitHub for the latest release tag.
+
+    When `force` is True we sidestep two layers of staleness that bit users:
+      1. GitHub's own `/releases/latest` pointer can lag the actual newest
+         non-draft tag by a few minutes after a release lands. With force=True
+         we fetch the recent release LIST and pick the highest, draft- and
+         prerelease-filtered.
+      2. Edge caches (and httpx connection reuse) sometimes return a cached
+         body. Add a `Cache-Control: no-cache` header and a random query
+         string so we cut both.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if force:
+        headers["Cache-Control"] = "no-cache"
+
+    if not force:
+        url = f"https://api.github.com/repos/{settings.GITHUB_REPO}/releases/latest"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(url, headers=headers)
+                if r.status_code == 404:
+                    return None
+                r.raise_for_status()
+                return r.json().get("tag_name")
+        except Exception as e:
+            _state.last_error = f"github poll: {e}"
+            return None
+
+    # Forced path: list mode + cache buster.
+    bust = secrets.token_hex(4)
+    url = f"https://api.github.com/repos/{settings.GITHUB_REPO}/releases?per_page=30&_={bust}"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(url, headers={"Accept": "application/vnd.github+json"})
+            r = await client.get(url, headers=headers)
             if r.status_code == 404:
                 return None
             r.raise_for_status()
-            return r.json().get("tag_name")
+            releases = r.json()
     except Exception as e:
-        _state.last_error = f"github poll: {e}"
+        _state.last_error = f"github force poll: {e}"
         return None
+
+    def _key(rel: dict) -> tuple[int, ...]:
+        tag = (rel.get("tag_name") or "").lstrip("v")
+        parts: list[int] = []
+        for p in tag.split("."):
+            try:
+                parts.append(int(p))
+            except ValueError:
+                # Anything non-numeric (rc1, beta, …) sorts below numeric.
+                return (-1,)
+        return tuple(parts)
+
+    candidates = [
+        rel
+        for rel in releases
+        if not rel.get("draft") and not rel.get("prerelease") and rel.get("tag_name")
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=_key, reverse=True)
+    return candidates[0].get("tag_name")
 
 
 # ---------------- Shell helpers ----------------
@@ -325,8 +377,8 @@ app = FastAPI(title="NetFleet Updater", version=_current_version())
 
 
 @app.get("/status", response_model=StatusResponse)
-async def status() -> StatusResponse:
-    available = await _check_latest_release()
+async def status(force: bool = False) -> StatusResponse:
+    available = await _check_latest_release(force=force)
     _state.available = available
     _state.last_checked_iso = datetime.now(UTC).isoformat()
     current = _current_version()
