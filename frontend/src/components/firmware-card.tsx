@@ -54,15 +54,15 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
   const fw = data;
 
   const needsUpgrade = fw.needs_upgrade;
-  // We still surface the RouterBOARD bootloader version as informational
-  // (operators want to see whether it lags), but we no longer offer to
-  // upgrade it from NetFleet — the bootloader upgrade is too fragile to
-  // remote-trigger reliably and is better left to the device's own
-  // post-RouterOS-upgrade prompt.
+  // RouterOS' /system/package/update formats `latest-version` with a
+  // "(stable)" suffix while `installed-version` is bare, so a strict
+  // string compare flagged "7.23" vs "7.23 (stable)" as an upgrade.
+  // Strip parentheticals + whitespace before comparing so the badge
+  // only lights up when the actual semver differs.
   const rbAvailableInfo = Boolean(
     fw.routerboard_available &&
       fw.routerboard_current &&
-      fw.routerboard_available !== fw.routerboard_current,
+      normFw(fw.routerboard_available) !== normFw(fw.routerboard_current),
   );
 
   function dialog(_target: FirmwareUpgradeTarget): boolean {
@@ -201,6 +201,11 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
       <PolicyForm deviceId={deviceId} initial={policy} />
     </div>
   );
+}
+
+function normFw(v: string | null | undefined): string {
+  if (!v) return "";
+  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
 function FirmwareRow({

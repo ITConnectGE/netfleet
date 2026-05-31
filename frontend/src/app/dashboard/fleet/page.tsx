@@ -326,11 +326,16 @@ function SiteRow({
   );
 }
 
+function normFw(v: string | null | undefined): string {
+  if (!v) return "";
+  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
 function DeviceRow({ device }: { device: Device }) {
   const fwUpgrade =
     device.firmware_available &&
     device.firmware &&
-    device.firmware_available !== device.firmware;
+    normFw(device.firmware_available) !== normFw(device.firmware);
   return (
     <li className="grid grid-cols-[1fr_auto] items-center gap-2 py-1 text-sm">
       <Link

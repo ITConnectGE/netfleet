@@ -67,18 +67,33 @@ async def check_fleet_firmware(
     return ok, failed
 
 
+import re as _re
+
+_VERSION_PARENS_RE = _re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def _norm_version(v: str | None) -> str | None:
+    """Strip RouterOS' channel-in-parentheses suffix and surrounding
+    whitespace so "7.23" and "7.23 (stable)" compare equal. Without this
+    the firmware card was painting "available" amber when the device was
+    already on the latest build, because RouterOS' /system/package/update
+    formats `latest-version` with the channel suffix while
+    `installed-version` is bare."""
+    if not v:
+        return None
+    cleaned = _VERSION_PARENS_RE.sub("", v).strip()
+    return cleaned or None
+
+
 def needs_upgrade(device: Device) -> bool:
     """True iff RouterOS or routerboard reports a newer version available."""
-    if (
-        device.firmware_available
-        and device.firmware
-        and device.firmware_available != device.firmware
+    if device.firmware_available and device.firmware and (
+        _norm_version(device.firmware_available) != _norm_version(device.firmware)
     ):
         return True
-    if (
-        device.routerboard_available
-        and device.routerboard_current
-        and device.routerboard_available != device.routerboard_current
+    if device.routerboard_available and device.routerboard_current and (
+        _norm_version(device.routerboard_available)
+        != _norm_version(device.routerboard_current)
     ):
         return True
     return False

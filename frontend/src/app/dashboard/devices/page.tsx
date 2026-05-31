@@ -44,11 +44,11 @@ export default function DevicesPage() {
         const osUp =
           d.firmware_available &&
           d.firmware &&
-          d.firmware_available !== d.firmware;
+          normFw(d.firmware_available) !== normFw(d.firmware);
         const rbUp =
           d.routerboard_available &&
           d.routerboard_current &&
-          d.routerboard_available !== d.routerboard_current;
+          normFw(d.routerboard_available) !== normFw(d.routerboard_current);
         if (!osUp && !rbUp) return false;
       }
       return true;
@@ -169,11 +169,11 @@ function DeviceRow({
   const osUpgrade =
     device.firmware_available &&
     device.firmware &&
-    device.firmware_available !== device.firmware;
+    normFw(device.firmware_available) !== normFw(device.firmware);
   const rbUpgrade =
     device.routerboard_available &&
     device.routerboard_current &&
-    device.routerboard_available !== device.routerboard_current;
+    normFw(device.routerboard_available) !== normFw(device.routerboard_current);
 
   return (
     <tr className="hover:bg-accent/30">
@@ -533,6 +533,13 @@ function OnboardingPanel({
       )}
     </div>
   );
+}
+
+// Strip RouterOS' "(stable)" / "(testing)" channel suffix on `latest-version`
+// so it compares equal against the bare `installed-version`.
+function normFw(v: string | null | undefined): string {
+  if (!v) return "";
+  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
 const inputClass =
