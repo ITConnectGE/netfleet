@@ -104,6 +104,22 @@ export async function getDeviceClock(deviceId: string): Promise<DeviceClock> {
   return api.get(`devices/${deviceId}/clock`).json<DeviceClock>();
 }
 
+export interface DeviceClockUpdate {
+  time_zone_name?: string | null;
+  time_zone_autodetect?: boolean | null;
+}
+
+export async function updateDeviceClock(
+  deviceId: string,
+  payload: DeviceClockUpdate,
+): Promise<void> {
+  try {
+    await api.patch(`devices/${deviceId}/clock`, { json: payload });
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function getSnmp(deviceId: string): Promise<SnmpSettings> {
   return api.get(`devices/${deviceId}/snmp`).json<SnmpSettings>();
 }

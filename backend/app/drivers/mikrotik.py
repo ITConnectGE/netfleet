@@ -695,6 +695,29 @@ class MikrotikDriver:
             raw=r,
         )
 
+    async def clock_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        time_zone_name: str | None = None,
+        time_zone_autodetect: bool | None = None,
+    ) -> None:
+        """/system/clock/set time-zone-name=... time-zone-autodetect=...
+
+        RouterOS accepts the IANA tz database name verbatim
+        (e.g. "Asia/Tbilisi", "Europe/London", "manual"). When the
+        operator picks "manual" they're expected to also disable
+        autodetect; we pass through whatever the caller hands us.
+        """
+        params: dict[str, Any] = {}
+        if time_zone_name is not None:
+            params["time-zone-name"] = time_zone_name
+        if time_zone_autodetect is not None:
+            params["time-zone-autodetect"] = "yes" if time_zone_autodetect else "no"
+        if not params:
+            return
+        await self._call(creds, "/system/clock/set", **params)
+
     # ============== SNMP ==============
 
     async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings:

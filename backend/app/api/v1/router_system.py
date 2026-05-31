@@ -19,6 +19,7 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.router_system import (
     DeviceClockPublic,
+    DeviceClockUpdate,
     NtpClientPublic,
     NtpClientUpdate,
     NtpServerPublic,
@@ -166,7 +167,7 @@ async def update_ntp_server(
     await session.commit()
 
 
-# ---------------- Device clock (read-only) ----------------
+# ---------------- Device clock ----------------
 
 
 @router.get("/{device_id}/clock", response_model=DeviceClockPublic)
@@ -188,6 +189,39 @@ async def get_device_clock(
         gmt_offset=c.gmt_offset,
         dst_active=c.dst_active,
     )
+
+
+@router.patch("/{device_id}/clock", status_code=status.HTTP_204_NO_CONTENT)
+async def update_device_clock(
+    device_id: UUID,
+    payload: DeviceClockUpdate,
+    request: Request,
+    user: User = Depends(require_permission("system.info", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).clock_set(
+            _to_driver_creds(device),
+            time_zone_name=payload.time_zone_name,
+            time_zone_autodetect=payload.time_zone_autodetect,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.clock",
+        action="update",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(exclude_unset=True),
+    )
+    await session.commit()
 
 
 # ---------------- SNMP ----------------

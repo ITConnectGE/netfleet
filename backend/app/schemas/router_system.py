@@ -48,6 +48,15 @@ class DeviceClockPublic(BaseModel):
     dst_active: bool | None
 
 
+class DeviceClockUpdate(BaseModel):
+    """RouterOS accepts the IANA tz database name verbatim
+    (Asia/Tbilisi, Europe/London, …) or the literal "manual" for an
+    offset-only configuration."""
+
+    time_zone_name: str | None = Field(default=None, max_length=64)
+    time_zone_autodetect: bool | None = None
+
+
 # ---------------- SNMP ----------------
 
 

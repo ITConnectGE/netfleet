@@ -8,6 +8,7 @@ import {
   createSnmpCommunity,
   deleteSnmpCommunity,
   getDeviceClock,
+  updateDeviceClock,
   getNtp,
   getNtpServer,
   getSnmp,
@@ -30,6 +31,7 @@ export default function SystemPage() {
     <div className="space-y-10">
       <ClockCard deviceId={deviceId} />
       <NtpSection deviceId={deviceId} />
+      <TimeZoneSection deviceId={deviceId} />
       <NtpServerSection deviceId={deviceId} />
       <SnmpSection deviceId={deviceId} />
       <SnmpCommunitiesSection deviceId={deviceId} />
@@ -538,6 +540,149 @@ function Field({
 
 const input =
   "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+
+// ---------------- Time zone ----------------
+
+// Curated short-list of common IANA tz names; the field accepts any string,
+// but giving operators a one-click dropdown for the usual suspects cuts the
+// "what was the exact spelling?" friction. RouterOS accepts the literal
+// "manual" for offset-only configuration.
+const TIMEZONE_PRESETS: string[] = [
+  "Asia/Tbilisi",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Moscow",
+  "Europe/Istanbul",
+  "Asia/Baku",
+  "Asia/Yerevan",
+  "Asia/Dubai",
+  "Asia/Tehran",
+  "Asia/Tashkent",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+  "Australia/Sydney",
+  "UTC",
+  "manual",
+];
+
+function TimeZoneSection({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading, error } = useQuery<DeviceClock>({
+    queryKey: ["clock", deviceId],
+    queryFn: () => getDeviceClock(deviceId),
+  });
+
+  const [tz, setTz] = useState<string>("");
+  const [autodetect, setAutodetect] = useState<boolean>(false);
+  const [touched, setTouched] = useState(false);
+  const [done, setDone] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!data || touched) return;
+    setTz(data.time_zone_name ?? "");
+    setAutodetect(data.time_zone_autodetect ?? false);
+  }, [data, touched]);
+
+  const m = useMutation({
+    mutationFn: () =>
+      updateDeviceClock(deviceId, {
+        time_zone_name: tz || null,
+        time_zone_autodetect: autodetect,
+      }),
+    onSuccess: () => {
+      setDone(true);
+      setTouched(false);
+      qc.invalidateQueries({ queryKey: ["clock", deviceId] });
+      window.setTimeout(() => setDone(false), 2500);
+    },
+    onError: (e: Error) => setErrMsg(e.message),
+  });
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold">Time zone</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        IANA tz database name (the same strings the OS uses). Disable
+        autodetect when you want a fixed zone regardless of the device&apos;s
+        WAN-derived location.
+      </p>
+
+      {error && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(error as Error).message}
+        </div>
+      )}
+      {errMsg && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errMsg}
+        </div>
+      )}
+      {done && (
+        <div className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Time zone updated.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-4 rounded-lg border border-border bg-card p-5 md:grid-cols-[1fr_1fr_auto]">
+        <label className="block space-y-1 text-xs">
+          <span className="font-medium text-muted-foreground">Time zone</span>
+          <div className="flex items-center gap-2">
+            <input
+              list="tz-presets"
+              value={tz}
+              onChange={(e) => {
+                setTz(e.target.value);
+                setTouched(true);
+                setErrMsg(null);
+              }}
+              placeholder="Asia/Tbilisi"
+              disabled={isLoading}
+              className={input}
+            />
+            <datalist id="tz-presets">
+              {TIMEZONE_PRESETS.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          </div>
+          <span className="block text-[10px] text-muted-foreground">
+            Type any IANA name or pick one from the dropdown.
+          </span>
+        </label>
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={autodetect}
+            onChange={(e) => {
+              setAutodetect(e.target.checked);
+              setTouched(true);
+              setErrMsg(null);
+            }}
+            className="size-4 rounded"
+          />
+          Autodetect from WAN location
+        </label>
+
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={() => {
+              setErrMsg(null);
+              m.mutate();
+            }}
+            disabled={!touched || m.isPending}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+          >
+            {m.isPending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 // ---------------- Device clock ----------------
 

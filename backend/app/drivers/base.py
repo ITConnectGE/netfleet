@@ -555,6 +555,13 @@ class VendorDriver(Protocol):
 
     # Clock
     async def clock_get(self, creds: DeviceCredentials) -> DeviceClock: ...
+    async def clock_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        time_zone_name: str | None = None,
+        time_zone_autodetect: bool | None = None,
+    ) -> None: ...
 
     # SNMP
     async def snmp_get(self, creds: DeviceCredentials) -> SnmpSettings: ...
