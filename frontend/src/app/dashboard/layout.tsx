@@ -19,9 +19,11 @@ interface HealthResponse {
 
 const NAV = [
   { href: "/dashboard", label: "Overview" },
-  { href: "/dashboard/tenants", label: "Tenants" },
-  { href: "/dashboard/fleet", label: "Fleet tree" },
-  { href: "/dashboard/devices", label: "Devices" },
+  // Tenants + Sites + Devices used to be three top-level links; the
+  // Fleet page now shows the full hierarchy on one screen, so we keep
+  // only that. The per-resource detail pages remain reachable from
+  // Fleet links and via direct URL.
+  { href: "/dashboard/fleet", label: "Fleet" },
   { href: "/dashboard/bulk", label: "Bulk" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/roles", label: "Roles" },

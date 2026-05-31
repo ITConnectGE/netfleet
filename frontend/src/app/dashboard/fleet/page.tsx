@@ -22,7 +22,12 @@ type SiteNode = Site & {
   offline_count: number;
 };
 
-export default function FleetTreePage() {
+function normFw(v: string | null | undefined): string {
+  if (!v) return "";
+  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+export default function FleetPage() {
   const { data: tenants } = useQuery<Tenant[]>({
     queryKey: ["tenants"],
     queryFn: listTenants,
@@ -46,7 +51,9 @@ export default function FleetTreePage() {
     }
     const sitesByTenant = new Map<string, SiteNode[]>();
     for (const s of sites) {
-      const siteDevices = devicesBySite.get(s.id) ?? [];
+      const siteDevices = (devicesBySite.get(s.id) ?? []).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
       const node: SiteNode = {
         ...s,
         devices: siteDevices,
@@ -61,7 +68,9 @@ export default function FleetTreePage() {
     }
     return tenants
       .map<TenantNode>((t) => {
-        const tenantSites = sitesByTenant.get(t.id) ?? [];
+        const tenantSites = (sitesByTenant.get(t.id) ?? []).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
         const device_count = tenantSites.reduce(
           (a, s) => a + s.devices.length,
           0,
@@ -76,7 +85,7 @@ export default function FleetTreePage() {
         );
         return {
           ...t,
-          sites: tenantSites.sort((a, b) => a.name.localeCompare(b.name)),
+          sites: tenantSites,
           device_count,
           online_count,
           offline_count,
@@ -86,10 +95,7 @@ export default function FleetTreePage() {
   }, [tenants, sites, devices]);
 
   const [filter, setFilter] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // When a filter is active, auto-expand everything matching so the
-  // operator sees the hits without manually toggling each node.
   const filtered = useMemo(() => {
     if (!filter.trim()) return tree;
     const needle = filter.toLowerCase();
@@ -106,7 +112,7 @@ export default function FleetTreePage() {
                 d.host.toLowerCase().includes(needle) ||
                 (d.model?.toLowerCase().includes(needle) ?? false),
             );
-            if (siteMatch) return s; // keep full device list
+            if (siteMatch) return s;
             if (deviceHits.length > 0) return { ...s, devices: deviceHits };
             return null;
           })
@@ -119,51 +125,23 @@ export default function FleetTreePage() {
       .filter((x): x is TenantNode => x !== null);
   }, [tree, filter]);
 
-  const allExpanded =
-    expanded.size === filtered.reduce((a, t) => a + 1 + t.sites.length, 0) &&
-    filtered.length > 0;
-  function expandAll() {
-    const ids = new Set<string>();
-    for (const t of filtered) {
-      ids.add(`t:${t.id}`);
-      for (const s of t.sites) ids.add(`s:${s.id}`);
-    }
-    setExpanded(ids);
-  }
-  function collapseAll() {
-    setExpanded(new Set());
-  }
-
-  const isOpen = (key: string) => expanded.has(key) || filter.trim().length > 0;
-  const toggle = (key: string) => {
-    if (filter.trim()) return; // ignore individual toggles while filtering
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const totalDevices = filtered.reduce((a, t) => a + t.device_count, 0);
+  const totalSites = filtered.reduce((a, t) => a + t.sites.length, 0);
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Fleet tree</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Fleet</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            One page, everything: each tenant, the sites under them, and the
-            devices at each site. Click a node to expand. Use the filter to
-            jump to a name, host or address anywhere in the tree.
+            Every tenant, site and device on one page. Click any name to open
+            its detail.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={allExpanded ? collapseAll : expandAll}
-            disabled={filtered.length === 0}
-            className="rounded-md border border-input bg-background px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            {allExpanded ? "Collapse all" : "Expand all"}
-          </button>
+        <div className="text-xs text-muted-foreground">
+          {filtered.length} tenant{filtered.length === 1 ? "" : "s"} ·{" "}
+          {totalSites} site{totalSites === 1 ? "" : "s"} · {totalDevices} device
+          {totalDevices === 1 ? "" : "s"}
         </div>
       </div>
 
@@ -171,7 +149,7 @@ export default function FleetTreePage() {
         type="search"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="filter tenants, sites, devices by name / host / address…"
+        placeholder="Search tenant / site / device / host…"
         className="mt-4 block w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
 
@@ -180,16 +158,95 @@ export default function FleetTreePage() {
           {filter ? "Nothing matches that filter." : "No tenants yet."}
         </div>
       ) : (
-        <ul className="mt-6 space-y-1.5">
+        <div className="mt-6 space-y-10">
           {filtered.map((t) => (
-            <TenantRow
-              key={t.id}
-              tenant={t}
-              isOpen={isOpen(`t:${t.id}`)}
-              onToggle={() => toggle(`t:${t.id}`)}
-              isOpenSite={(sid) => isOpen(`s:${sid}`)}
-              onToggleSite={(sid) => toggle(`s:${sid}`)}
-            />
+            <TenantBlock key={t.id} tenant={t} highlight={filter.toLowerCase()} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TenantBlock({
+  tenant,
+  highlight,
+}: {
+  tenant: TenantNode;
+  highlight: string;
+}) {
+  return (
+    <section>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2">
+        <Link
+          href={`/dashboard/tenants/${tenant.id}`}
+          className="text-lg font-semibold tracking-tight hover:underline"
+        >
+          <Highlighted text={tenant.name} needle={highlight} />
+        </Link>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {tenant.sites.length} site{tenant.sites.length === 1 ? "" : "s"} ·{" "}
+            {tenant.device_count} device{tenant.device_count === 1 ? "" : "s"}
+          </span>
+          <Counter color="emerald" value={tenant.online_count} title="online" />
+          <Counter color="red" value={tenant.offline_count} title="offline" />
+        </div>
+      </div>
+
+      {tenant.sites.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          No sites yet.{" "}
+          <Link
+            href={`/dashboard/tenants/${tenant.id}`}
+            className="text-primary hover:underline"
+          >
+            Add one →
+          </Link>
+        </p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {tenant.sites.map((s) => (
+            <SiteBlock key={s.id} site={s} highlight={highlight} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SiteBlock({ site, highlight }: { site: SiteNode; highlight: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <Link
+            href={`/dashboard/sites/${site.id}`}
+            className="font-medium hover:underline"
+          >
+            <Highlighted text={site.name} needle={highlight} />
+          </Link>
+          {site.address && (
+            <span className="ml-2 text-[11px] text-muted-foreground">
+              · {site.address}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>
+            {site.devices.length} device{site.devices.length === 1 ? "" : "s"}
+          </span>
+          <Counter color="emerald" value={site.online_count} title="online" />
+          <Counter color="red" value={site.offline_count} title="offline" />
+        </div>
+      </div>
+
+      {site.devices.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">No devices.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border/60">
+          {site.devices.map((d) => (
+            <DeviceRow key={d.id} device={d} highlight={highlight} />
           ))}
         </ul>
       )}
@@ -197,153 +254,27 @@ export default function FleetTreePage() {
   );
 }
 
-function TenantRow({
-  tenant,
-  isOpen,
-  onToggle,
-  isOpenSite,
-  onToggleSite,
+function DeviceRow({
+  device,
+  highlight,
 }: {
-  tenant: TenantNode;
-  isOpen: boolean;
-  onToggle: () => void;
-  isOpenSite: (siteId: string) => boolean;
-  onToggleSite: (siteId: string) => void;
+  device: Device;
+  highlight: string;
 }) {
-  return (
-    <li className="rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 items-center gap-2 text-left"
-        >
-          <Chevron open={isOpen} />
-          <span className="font-semibold">{tenant.name}</span>
-          <span className="text-xs text-muted-foreground">
-            {tenant.sites.length} site{tenant.sites.length === 1 ? "" : "s"} ·{" "}
-            {tenant.device_count} device{tenant.device_count === 1 ? "" : "s"}
-          </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Counter color="emerald" value={tenant.online_count} title="online" />
-          <Counter color="red" value={tenant.offline_count} title="offline" />
-          <Link
-            href={`/dashboard/tenants/${tenant.id}`}
-            className="ml-2 text-[11px] text-primary hover:underline"
-          >
-            open →
-          </Link>
-        </div>
-      </div>
-
-      {isOpen && (
-        <ul className="border-t border-border bg-background/40 p-2 pl-6">
-          {tenant.sites.length === 0 && (
-            <li className="px-3 py-2 text-xs text-muted-foreground">
-              No sites yet.{" "}
-              <Link
-                href={`/dashboard/tenants/${tenant.id}`}
-                className="text-primary hover:underline"
-              >
-                Add one →
-              </Link>
-            </li>
-          )}
-          {tenant.sites.map((s) => (
-            <SiteRow
-              key={s.id}
-              site={s}
-              isOpen={isOpenSite(s.id)}
-              onToggle={() => onToggleSite(s.id)}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
-
-function SiteRow({
-  site,
-  isOpen,
-  onToggle,
-}: {
-  site: SiteNode;
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <li className="rounded-md">
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-accent/30">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 items-center gap-2 text-left"
-        >
-          <Chevron open={isOpen} />
-          <span className="font-medium">{site.name}</span>
-          {site.address && (
-            <span className="truncate text-[11px] text-muted-foreground">
-              · {site.address}
-            </span>
-          )}
-          <span className="text-[11px] text-muted-foreground">
-            · {site.devices.length} device{site.devices.length === 1 ? "" : "s"}
-          </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Counter color="emerald" value={site.online_count} title="online" />
-          <Counter color="red" value={site.offline_count} title="offline" />
-          <Link
-            href={`/dashboard/sites/${site.id}`}
-            className="ml-2 text-[11px] text-primary hover:underline"
-          >
-            open →
-          </Link>
-        </div>
-      </div>
-
-      {isOpen && (
-        <ul className="ml-6 border-l border-border pl-3">
-          {site.devices.length === 0 && (
-            <li className="py-1.5 text-xs text-muted-foreground">
-              No devices.{" "}
-              <Link
-                href="/dashboard/devices"
-                className="text-primary hover:underline"
-              >
-                Add one →
-              </Link>
-            </li>
-          )}
-          {site.devices.map((d) => (
-            <DeviceRow key={d.id} device={d} />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
-
-function normFw(v: string | null | undefined): string {
-  if (!v) return "";
-  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
-
-function DeviceRow({ device }: { device: Device }) {
   const fwUpgrade =
     device.firmware_available &&
     device.firmware &&
     normFw(device.firmware_available) !== normFw(device.firmware);
   return (
-    <li className="grid grid-cols-[1fr_auto] items-center gap-2 py-1 text-sm">
+    <li className="flex flex-wrap items-center justify-between gap-3 py-1.5 text-sm">
       <Link
         href={`/dashboard/devices/${device.id}`}
-        className="flex min-w-0 items-center gap-2 hover:underline"
+        className="flex min-w-0 flex-1 items-baseline gap-2 hover:underline"
       >
-        <span className="truncate font-medium">{device.name}</span>
-        <span className="truncate font-mono text-[10px] text-muted-foreground">
+        <span className="truncate font-medium">
+          <Highlighted text={device.name} needle={highlight} />
+        </span>
+        <span className="truncate font-mono text-[11px] text-muted-foreground">
           {device.vendor} · {device.host}:{device.port}
         </span>
         {fwUpgrade && (
@@ -357,25 +288,6 @@ function DeviceRow({ device }: { device: Device }) {
       </Link>
       <StatusPill status={device.status} />
     </li>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
-        open ? "rotate-90" : ""
-      }`}
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path
-        fillRule="evenodd"
-        d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
-        clipRule="evenodd"
-      />
-    </svg>
   );
 }
 
@@ -400,5 +312,25 @@ function Counter({
     >
       {value} {title}
     </span>
+  );
+}
+
+// Wraps any occurrence of `needle` inside `text` in a <mark> so the
+// matching characters stand out during a search.
+function Highlighted({ text, needle }: { text: string; needle: string }) {
+  if (!needle) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(needle);
+  if (idx < 0) return <>{text}</>;
+  const before = text.slice(0, idx);
+  const hit = text.slice(idx, idx + needle.length);
+  const after = text.slice(idx + needle.length);
+  return (
+    <>
+      {before}
+      <mark className="rounded bg-amber-200/70 px-0.5 text-foreground">
+        {hit}
+      </mark>
+      {after}
+    </>
   );
 }
