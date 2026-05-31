@@ -124,7 +124,23 @@ function SystemBackupSection() {
 
       {create.error && (
         <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {(create.error as Error).message}
+          <p>{(create.error as Error).message}</p>
+          {/Permission denied|Errno 13/.test((create.error as Error).message) && (
+            <div className="mt-2 text-xs text-destructive/90">
+              <p>
+                The api container can&apos;t write to <code>/opt/netfleet/data/backups</code> on
+                the host. Run this once on the host (as root):
+              </p>
+              <pre className="mt-1 overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-[11px] text-zinc-100">
+{`mkdir -p /opt/netfleet/data/backups/system
+chown -R 1000:1000 /opt/netfleet/data/backups
+chmod -R u+rwX /opt/netfleet/data/backups`}
+              </pre>
+              <p className="mt-1">
+                Then click <strong>Create backup now</strong> again.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
