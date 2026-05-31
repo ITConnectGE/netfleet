@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   acknowledgeEvents,
@@ -192,8 +192,8 @@ export default function EventsPage() {
             {!isLoading && rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
-                  No matching events. Either nothing's gone wrong (nice!), or you
-                  haven't pulled v0.16+ to prod yet so the scanner isn't running.
+                  No matching events. Either nothing has gone wrong (nice!), or
+                  the scanner has not run a tick yet (default cadence is 5 min).
                 </td>
               </tr>
             )}
