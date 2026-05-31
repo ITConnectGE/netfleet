@@ -24,6 +24,9 @@ from app.drivers.base import (
     DeviceCredentials,
     DeviceUser,
     DhcpLease,
+    DhcpNetwork,
+    DhcpPool,
+    DhcpServer,
     FilterRule,
     FirmwareInfo,
     Interface,
@@ -130,6 +133,7 @@ class MikrotikDriver:
         rows = await self._call(creds, "/ip/dhcp-server/lease/print")
         return [
             DhcpLease(
+                id=r.get(".id"),
                 address=str(r.get("address", "")),
                 mac_address=str(r.get("mac-address", "")),
                 host_name=r.get("host-name"),
@@ -137,11 +141,205 @@ class MikrotikDriver:
                 status=r.get("status"),
                 server=r.get("server"),
                 expires_at_iso=r.get("expires-after"),
+                dynamic=_to_bool(r.get("dynamic")),
+                blocked=_to_bool(r.get("blocked")),
                 comment=r.get("comment"),
                 raw=r,
             )
             for r in rows
         ]
+
+    async def dhcp_lease_make_static(
+        self, creds: DeviceCredentials, lease_id: str
+    ) -> None:
+        await self._call(
+            creds, "/ip/dhcp-server/lease/make-static", **{".id": lease_id}
+        )
+
+    async def dhcp_lease_set_comment(
+        self, creds: DeviceCredentials, lease_id: str, *, comment: str | None
+    ) -> None:
+        await self._call(
+            creds,
+            "/ip/dhcp-server/lease/set",
+            **{".id": lease_id, "comment": comment if comment is not None else ""},
+        )
+
+    async def dhcp_lease_remove(
+        self, creds: DeviceCredentials, lease_id: str
+    ) -> None:
+        await self._call(
+            creds, "/ip/dhcp-server/lease/remove", **{".id": lease_id}
+        )
+
+    # ---------------- DHCP pools ----------------
+
+    async def dhcp_pools_list(self, creds: DeviceCredentials) -> list[DhcpPool]:
+        rows = await self._call(creds, "/ip/pool/print")
+        return [
+            DhcpPool(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                ranges=str(r.get("ranges", "")),
+                next_pool=r.get("next-pool"),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def dhcp_pool_add(self, creds: DeviceCredentials, pool: DhcpPool) -> str:
+        params: dict[str, Any] = {"name": pool.name, "ranges": pool.ranges}
+        if pool.next_pool:
+            params["next-pool"] = pool.next_pool
+        if pool.comment is not None:
+            params["comment"] = pool.comment
+        rows = await self._call(creds, "/ip/pool/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def dhcp_pool_update(
+        self, creds: DeviceCredentials, pool_id: str, pool: DhcpPool
+    ) -> None:
+        params: dict[str, Any] = {".id": pool_id}
+        if pool.name:
+            params["name"] = pool.name
+        if pool.ranges:
+            params["ranges"] = pool.ranges
+        if pool.next_pool is not None:
+            params["next-pool"] = pool.next_pool
+        if pool.comment is not None:
+            params["comment"] = pool.comment
+        await self._call(creds, "/ip/pool/set", **params)
+
+    async def dhcp_pool_remove(
+        self, creds: DeviceCredentials, pool_id: str
+    ) -> None:
+        await self._call(creds, "/ip/pool/remove", **{".id": pool_id})
+
+    # ---------------- DHCP servers ----------------
+
+    async def dhcp_servers_list(self, creds: DeviceCredentials) -> list[DhcpServer]:
+        rows = await self._call(creds, "/ip/dhcp-server/print")
+        return [
+            DhcpServer(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                interface=str(r.get("interface", "")),
+                address_pool=r.get("address-pool"),
+                lease_time=r.get("lease-time"),
+                authoritative=r.get("authoritative"),
+                disabled=_to_bool(r.get("disabled")),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def dhcp_server_add(
+        self, creds: DeviceCredentials, server: DhcpServer
+    ) -> str:
+        params: dict[str, Any] = {
+            "name": server.name,
+            "interface": server.interface,
+        }
+        if server.address_pool:
+            params["address-pool"] = server.address_pool
+        if server.lease_time:
+            params["lease-time"] = server.lease_time
+        if server.authoritative:
+            params["authoritative"] = server.authoritative
+        if server.disabled:
+            params["disabled"] = "yes"
+        if server.comment is not None:
+            params["comment"] = server.comment
+        rows = await self._call(creds, "/ip/dhcp-server/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def dhcp_server_update(
+        self, creds: DeviceCredentials, server_id: str, server: DhcpServer
+    ) -> None:
+        params: dict[str, Any] = {".id": server_id}
+        if server.name:
+            params["name"] = server.name
+        if server.interface:
+            params["interface"] = server.interface
+        if server.address_pool is not None:
+            params["address-pool"] = server.address_pool
+        if server.lease_time is not None:
+            params["lease-time"] = server.lease_time
+        if server.authoritative is not None:
+            params["authoritative"] = server.authoritative
+        params["disabled"] = "yes" if server.disabled else "no"
+        if server.comment is not None:
+            params["comment"] = server.comment
+        await self._call(creds, "/ip/dhcp-server/set", **params)
+
+    async def dhcp_server_remove(
+        self, creds: DeviceCredentials, server_id: str
+    ) -> None:
+        await self._call(creds, "/ip/dhcp-server/remove", **{".id": server_id})
+
+    # ---------------- DHCP networks ----------------
+
+    async def dhcp_networks_list(
+        self, creds: DeviceCredentials
+    ) -> list[DhcpNetwork]:
+        rows = await self._call(creds, "/ip/dhcp-server/network/print")
+        return [
+            DhcpNetwork(
+                id=r.get(".id"),
+                address=str(r.get("address", "")),
+                gateway=r.get("gateway"),
+                netmask=r.get("netmask"),
+                dns_servers=r.get("dns-server"),
+                ntp_servers=r.get("ntp-server"),
+                domain=r.get("domain"),
+                comment=r.get("comment"),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def dhcp_network_add(
+        self, creds: DeviceCredentials, network: DhcpNetwork
+    ) -> str:
+        params: dict[str, Any] = {"address": network.address}
+        for k, v in {
+            "gateway": network.gateway,
+            "netmask": network.netmask,
+            "dns-server": network.dns_servers,
+            "ntp-server": network.ntp_servers,
+            "domain": network.domain,
+            "comment": network.comment,
+        }.items():
+            if v is not None:
+                params[k] = v
+        rows = await self._call(creds, "/ip/dhcp-server/network/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def dhcp_network_update(
+        self, creds: DeviceCredentials, network_id: str, network: DhcpNetwork
+    ) -> None:
+        params: dict[str, Any] = {".id": network_id}
+        for k, v in {
+            "address": network.address,
+            "gateway": network.gateway,
+            "netmask": network.netmask,
+            "dns-server": network.dns_servers,
+            "ntp-server": network.ntp_servers,
+            "domain": network.domain,
+            "comment": network.comment,
+        }.items():
+            if v is not None:
+                params[k] = v
+        await self._call(creds, "/ip/dhcp-server/network/set", **params)
+
+    async def dhcp_network_remove(
+        self, creds: DeviceCredentials, network_id: str
+    ) -> None:
+        await self._call(
+            creds, "/ip/dhcp-server/network/remove", **{".id": network_id}
+        )
 
     # ============== Firewall / NAT ==============
 

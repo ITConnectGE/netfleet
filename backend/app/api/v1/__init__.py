@@ -9,6 +9,7 @@ from app.api.v1 import (
     bulk,
     device_ops,
     devices,
+    dhcp,
     drivers,
     events,
     firewall,
@@ -58,6 +59,7 @@ router.include_router(settings_api.router, prefix="/settings", tags=["settings"]
 router.include_router(updates.router, prefix="/system/update", tags=["updates"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(access.router, prefix="/access", tags=["access"])
+router.include_router(dhcp.router, prefix="/devices", tags=["dhcp"])
 router.include_router(
     access_requests.router, prefix="/access-requests", tags=["access-requests"]
 )

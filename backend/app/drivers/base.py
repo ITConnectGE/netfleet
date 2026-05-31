@@ -72,11 +72,50 @@ class SystemInfo:
 class DhcpLease:
     address: str
     mac_address: str
+    id: str | None = None
     host_name: str | None = None
     client_id: str | None = None
     status: str | None = None
     server: str | None = None
     expires_at_iso: str | None = None
+    dynamic: bool = False
+    blocked: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DhcpPool:
+    id: str | None
+    name: str
+    ranges: str                              # "10.0.0.10-10.0.0.250"
+    next_pool: str | None = None
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DhcpServer:
+    id: str | None
+    name: str
+    interface: str
+    address_pool: str | None = None
+    lease_time: str | None = None            # "1d", "10m", etc.
+    authoritative: str | None = None         # yes | no | after-2sec-delay (RouterOS)
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DhcpNetwork:
+    id: str | None
+    address: str                             # CIDR "10.0.0.0/24"
+    gateway: str | None = None
+    netmask: str | None = None
+    dns_servers: str | None = None
+    ntp_servers: str | None = None
+    domain: str | None = None
     comment: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -449,6 +488,40 @@ class VendorDriver(Protocol):
 
     # DHCP / firewall
     async def dhcp_leases(self, creds: DeviceCredentials) -> list[DhcpLease]: ...
+    async def dhcp_lease_make_static(
+        self, creds: DeviceCredentials, lease_id: str
+    ) -> None: ...
+    async def dhcp_lease_set_comment(
+        self, creds: DeviceCredentials, lease_id: str, *, comment: str | None
+    ) -> None: ...
+    async def dhcp_lease_remove(
+        self, creds: DeviceCredentials, lease_id: str
+    ) -> None: ...
+
+    async def dhcp_pools_list(self, creds: DeviceCredentials) -> list[DhcpPool]: ...
+    async def dhcp_pool_add(self, creds: DeviceCredentials, pool: DhcpPool) -> str: ...
+    async def dhcp_pool_update(
+        self, creds: DeviceCredentials, pool_id: str, pool: DhcpPool
+    ) -> None: ...
+    async def dhcp_pool_remove(self, creds: DeviceCredentials, pool_id: str) -> None: ...
+
+    async def dhcp_servers_list(self, creds: DeviceCredentials) -> list[DhcpServer]: ...
+    async def dhcp_server_add(self, creds: DeviceCredentials, server: DhcpServer) -> str: ...
+    async def dhcp_server_update(
+        self, creds: DeviceCredentials, server_id: str, server: DhcpServer
+    ) -> None: ...
+    async def dhcp_server_remove(self, creds: DeviceCredentials, server_id: str) -> None: ...
+
+    async def dhcp_networks_list(self, creds: DeviceCredentials) -> list[DhcpNetwork]: ...
+    async def dhcp_network_add(
+        self, creds: DeviceCredentials, network: DhcpNetwork
+    ) -> str: ...
+    async def dhcp_network_update(
+        self, creds: DeviceCredentials, network_id: str, network: DhcpNetwork
+    ) -> None: ...
+    async def dhcp_network_remove(
+        self, creds: DeviceCredentials, network_id: str
+    ) -> None: ...
     async def firewall_nat_list(self, creds: DeviceCredentials) -> list[NatRule]: ...
     async def firewall_nat_add(self, creds: DeviceCredentials, rule: NatRule) -> str: ...
     async def firewall_nat_remove(self, creds: DeviceCredentials, rule_id: str) -> None: ...
