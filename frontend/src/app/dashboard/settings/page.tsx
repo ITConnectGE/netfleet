@@ -23,10 +23,8 @@ import {
   type SmsProviderPreset,
   type SmsSettings,
   type SmsSettingsUpdate,
-  type SmsTestResult,
   type SmtpSettings,
   type SmtpSettingsUpdate,
-  type SmtpTestResult,
   type SystemBackupListResponse,
 } from "@/lib/settings";
 
@@ -261,6 +259,7 @@ function formatSize(bytes: number): string {
 
 function OrgInfoSection() {
   const qc = useQueryClient();
+  const toast = useToast();
   const { data, isLoading } = useQuery<OrgInfo>({
     queryKey: ["org-info"],
     queryFn: getOrgInfo,
@@ -268,8 +267,6 @@ function OrgInfoSection() {
   // One IP per row. Storage on the wire stays comma-separated so no
   // backend / migration change — we just split / join here.
   const [rows, setRows] = useState<string[]>([""]);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!data) return;
@@ -287,10 +284,9 @@ function OrgInfoSection() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["org-info"] });
-      setSavedAt(Date.now());
-      setError(null);
+      toast.success("Saved");
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => toast.error("Save failed", e.message),
   });
 
   if (isLoading || !data) {
@@ -301,7 +297,6 @@ function OrgInfoSection() {
     <form
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        setError(null);
         save.mutate();
       }}
       className="rounded-lg border border-border bg-card p-6"
@@ -313,17 +308,6 @@ function OrgInfoSection() {
         CIDR per row (e.g. <code>203.0.113.10</code> or{" "}
         <code>198.51.100.0/29</code>).
       </p>
-
-      {error && (
-        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-      {savedAt && !error && (
-        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Saved.
-        </div>
-      )}
 
       <div className="mt-4 space-y-2">
         {rows.map((value, idx) => (
@@ -381,6 +365,7 @@ function OrgInfoSection() {
 
 function SmsSection() {
   const qc = useQueryClient();
+  const toast = useToast();
   const { data, isLoading } = useQuery<SmsSettings>({
     queryKey: ["sms-settings"],
     queryFn: getSmsSettings,
@@ -392,11 +377,8 @@ function SmsSection() {
 
   const [draft, setDraft] = useState<SmsSettingsUpdate>({});
   const [keyTouched, setKeyTouched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [testTo, setTestTo] = useState("");
   const [testText, setTestText] = useState("NetFleet SMS test");
-  const [testResult, setTestResult] = useState<SmsTestResult | null>(null);
 
   useEffect(() => {
     if (data) {
@@ -456,23 +438,19 @@ function SmsSection() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sms-settings"] });
-      setSavedAt(Date.now());
-      setError(null);
+      toast.success("SMS settings saved");
       setKeyTouched(false);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => toast.error("Save failed", e.message),
   });
 
   const test = useMutation({
     mutationFn: () => testSms(testTo, testText),
-    onSuccess: (r) => setTestResult(r),
-    onError: (e: Error) =>
-      setTestResult({
-        ok: false,
-        http_status: null,
-        response_body: null,
-        error: e.message,
-      }),
+    onSuccess: (r) => {
+      if (r.ok) toast.success("Test SMS sent", `HTTP ${r.http_status ?? "?"}`);
+      else toast.error("Test SMS failed", r.error ?? `HTTP ${r.http_status ?? "?"}`);
+    },
+    onError: (e: Error) => toast.error("Test SMS failed", e.message),
   });
 
   if (isLoading || !data) {
@@ -485,7 +463,6 @@ function SmsSection() {
     <form
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        setError(null);
         save.mutate();
       }}
       className="rounded-lg border border-border bg-card p-6"
@@ -509,17 +486,6 @@ function SmsSection() {
           Enabled
         </label>
       </div>
-
-      {error && (
-        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-      {savedAt && !error && (
-        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Saved.
-        </div>
-      )}
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Field label="Provider preset">
@@ -735,10 +701,7 @@ function SmsSection() {
           />
           <button
             type="button"
-            onClick={() => {
-              setTestResult(null);
-              test.mutate();
-            }}
+            onClick={() => test.mutate()}
             disabled={test.isPending || !testTo}
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
           >
@@ -747,32 +710,7 @@ function SmsSection() {
         </div>
       </div>
 
-      {testResult && (
-        <div
-          className={`mt-4 rounded-md border px-3 py-2 text-sm ${
-            testResult.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-              : "border-red-300 bg-red-50 text-red-900"
-          }`}
-        >
-          {testResult.ok ? (
-            <>
-              Sent. Gateway returned HTTP {testResult.http_status}.{" "}
-              {testResult.response_body && (
-                <code className="break-all text-xs">{testResult.response_body}</code>
-              )}
-            </>
-          ) : (
-            <>
-              Failed: {testResult.error}
-              {testResult.http_status !== null && (
-                <> (HTTP {testResult.http_status})</>
-              )}
-            </>
-          )}
-        </div>
-      )}
-      {data.sms_last_test_at && !testResult && (
+      {data.sms_last_test_at && (
         <p className="mt-3 text-xs text-muted-foreground">
           Last test: {new Date(data.sms_last_test_at).toLocaleString()} —{" "}
           {data.sms_last_test_ok ? "ok" : "failed"}
@@ -790,12 +728,10 @@ function SmtpSection() {
     queryFn: getSmtpSettings,
   });
 
+  const toast = useToast();
   const [draft, setDraft] = useState<SmtpSettingsUpdate>({});
   const [passwordTouched, setPasswordTouched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [testTo, setTestTo] = useState("");
-  const [testResult, setTestResult] = useState<SmtpTestResult | null>(null);
 
   // Hydrate draft once data arrives.
   useEffect(() => {
@@ -833,17 +769,19 @@ function SmtpSection() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["smtp-settings"] });
-      setSavedAt(Date.now());
-      setError(null);
+      toast.success("SMTP settings saved");
       setPasswordTouched(false);
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => toast.error("Save failed", e.message),
   });
 
   const test = useMutation({
     mutationFn: () => testSmtp(testTo),
-    onSuccess: (r) => setTestResult(r),
-    onError: (e: Error) => setTestResult({ ok: false, error: e.message }),
+    onSuccess: (r) => {
+      if (r.ok) toast.success("Test email sent", `Check ${testTo}`);
+      else toast.error("Test failed", r.error ?? "unknown error");
+    },
+    onError: (e: Error) => toast.error("Test failed", e.message),
   });
 
   if (isLoading || !data) {
@@ -854,7 +792,6 @@ function SmtpSection() {
     <form
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
-        setError(null);
         save.mutate();
       }}
       className="rounded-lg border border-border bg-card p-6"
@@ -876,17 +813,6 @@ function SmtpSection() {
           Enabled
         </label>
       </div>
-
-      {error && (
-        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-      {savedAt && !error && (
-        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Saved.
-        </div>
-      )}
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Field label="SMTP host">
@@ -1004,10 +930,7 @@ function SmtpSection() {
           />
           <button
             type="button"
-            onClick={() => {
-              setTestResult(null);
-              test.mutate();
-            }}
+            onClick={() => test.mutate()}
             disabled={test.isPending || !testTo}
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
           >
@@ -1015,20 +938,6 @@ function SmtpSection() {
           </button>
         </div>
       </div>
-
-      {testResult && (
-        <div
-          className={`mt-4 rounded-md border px-3 py-2 text-sm ${
-            testResult.ok
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-              : "border-red-300 bg-red-50 text-red-900"
-          }`}
-        >
-          {testResult.ok
-            ? `Test email sent to ${testTo}. Check the inbox.`
-            : `Failed: ${testResult.error ?? "unknown error"}`}
-        </div>
-      )}
     </form>
   );
 }
