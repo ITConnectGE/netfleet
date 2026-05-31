@@ -1,0 +1,297 @@
+"""Central log-event service — scrape device /log lines into a queryable table.
+
+This is the "all my devices' criticals + errors in one place" inbox. The
+scheduler calls `scan_org_devices_for_events` on a cadence; each device's
+log buffer is pulled with topic=critical,error,warning (configurable), and
+new lines are upserted by a content hash so re-polls don't duplicate.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID
+
+import structlog
+from sqlalchemy import and_, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.drivers import get_driver
+from app.models.device import Device
+from app.models.device_log_event import (
+    DeviceLogEvent,
+    EventSeverity,
+    EventSource,
+)
+from app.models.site import Site
+from app.models.user import User
+from app.services.device import _to_driver_creds
+
+log = structlog.get_logger(__name__)
+
+
+# Topics RouterOS exposes that mark the line's severity. Order matters —
+# critical wins if both `critical` and `warning` appear.
+_SEVERITY_TOPICS: list[tuple[str, EventSeverity]] = [
+    ("critical", EventSeverity.CRITICAL),
+    ("error", EventSeverity.ERROR),
+    ("warning", EventSeverity.WARNING),
+]
+
+# What we ask the device for. info is intentionally excluded — info lines are
+# noisy and not what an MSP wants to wake up to. If we ever need info we'll
+# add it as an org setting.
+DEFAULT_POLL_TOPICS = "critical,error,warning"
+
+
+def _classify(topics: str) -> EventSeverity | None:
+    """Map a comma-separated topics string from RouterOS to our severity enum.
+    Returns None for lines that aren't critical/error/warning (we don't persist
+    those — they're not what the central inbox is for)."""
+    parts = {t.strip().lower() for t in topics.split(",")}
+    for keyword, severity in _SEVERITY_TOPICS:
+        if keyword in parts:
+            return severity
+    return None
+
+
+def _dedup_key(device_time: str, topics: str, message: str) -> str:
+    raw = f"{device_time}\x1f{topics}\x1f{message}".encode("utf-8", errors="replace")
+    return hashlib.sha256(raw).hexdigest()[:32]
+
+
+async def scan_device_for_events(
+    session: AsyncSession,
+    device: Device,
+    *,
+    tenant_id: UUID | None,
+    topics: str = DEFAULT_POLL_TOPICS,
+    limit: int = 500,
+) -> int:
+    """Pull the device's recent severity-tagged log lines and upsert any new
+    ones. Returns the count of NEW rows persisted. Returns 0 if the device
+    doesn't support log_list or if the call fails (which is logged but not
+    raised — one device's flakiness shouldn't blow up the whole scan tick).
+    """
+    driver = get_driver(device.vendor)
+    if not hasattr(driver, "log_list"):
+        return 0
+    try:
+        lines = await driver.log_list(_to_driver_creds(device), topics=topics, limit=limit)
+    except Exception as e:
+        log.warning("events.device_scan_failed", device_id=str(device.id), error=str(e))
+        return 0
+
+    if not lines:
+        return 0
+
+    # Pre-build the rows so we can pass them to PostgreSQL's INSERT ... ON
+    # CONFLICT DO NOTHING in a single statement.
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        severity = _classify(line.topics)
+        if severity is None:
+            continue
+        rows.append(
+            {
+                "organization_id": device.organization_id,
+                "device_id": device.id,
+                "tenant_id": tenant_id,
+                "site_id": device.site_id,
+                "device_time": line.time[:64],
+                "severity": severity,
+                "topics": line.topics[:255],
+                "message": line.message,
+                "source": EventSource.POLLED,
+                "dedup_key": _dedup_key(line.time, line.topics, line.message),
+            }
+        )
+
+    if not rows:
+        return 0
+
+    stmt = (
+        pg_insert(DeviceLogEvent.__table__)
+        .values(rows)
+        .on_conflict_do_nothing(constraint="uq_device_log_events_dedup")
+    )
+    result = await session.execute(stmt)
+    # rowcount reflects rows actually inserted (not skipped by ON CONFLICT).
+    return int(result.rowcount or 0)
+
+
+async def scan_org_devices_for_events(
+    session: AsyncSession, organization_id: UUID, *, topics: str = DEFAULT_POLL_TOPICS
+) -> tuple[int, int]:
+    """Walk every enabled device and scan its logs. Returns (devices_scanned,
+    new_events). Per-device failures are logged and skipped, not raised."""
+    rows = list(
+        (
+            await session.execute(
+                select(Device)
+                .options(selectinload(Device.site))
+                .where(
+                    Device.organization_id == organization_id,
+                    Device.is_enabled.is_(True),
+                )
+            )
+        ).scalars().unique()
+    )
+
+    scanned = 0
+    new_events = 0
+    for d in rows:
+        tenant_id = d.site.tenant_id if d.site is not None else None
+        try:
+            inserted = await scan_device_for_events(
+                session, d, tenant_id=tenant_id, topics=topics
+            )
+            new_events += inserted
+            scanned += 1
+        except Exception as e:
+            log.warning("events.org_scan_iteration_failed", device_id=str(d.id), error=str(e))
+    return scanned, new_events
+
+
+# ---------------- Query / acknowledge ----------------
+
+
+async def list_events(
+    session: AsyncSession,
+    organization_id: UUID,
+    *,
+    severities: Iterable[EventSeverity] | None = None,
+    device_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    site_id: UUID | None = None,
+    acknowledged: bool | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    search: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], int, int, dict[str, int]]:
+    """Returns (rows, total_matching, total_unacknowledged_in_org, by_severity_counts)."""
+
+    # Build a SELECT with the device / tenant / site / user joins flattened
+    # into a single rowset so the API doesn't have to round-trip per row.
+    from app.models.tenant import Tenant
+    base = (
+        select(
+            DeviceLogEvent,
+            Device.name.label("device_name"),
+            Tenant.name.label("tenant_name"),
+            Site.name.label("site_name"),
+            User.email.label("acknowledged_by_email"),
+        )
+        .join(Device, Device.id == DeviceLogEvent.device_id)
+        .outerjoin(Tenant, Tenant.id == DeviceLogEvent.tenant_id)
+        .outerjoin(Site, Site.id == DeviceLogEvent.site_id)
+        .outerjoin(User, User.id == DeviceLogEvent.acknowledged_by_user_id)
+        .where(DeviceLogEvent.organization_id == organization_id)
+    )
+
+    if severities:
+        sev_list = [s for s in severities]
+        base = base.where(DeviceLogEvent.severity.in_(sev_list))
+    if device_id is not None:
+        base = base.where(DeviceLogEvent.device_id == device_id)
+    if tenant_id is not None:
+        base = base.where(DeviceLogEvent.tenant_id == tenant_id)
+    if site_id is not None:
+        base = base.where(DeviceLogEvent.site_id == site_id)
+    if acknowledged is True:
+        base = base.where(DeviceLogEvent.acknowledged_at.is_not(None))
+    elif acknowledged is False:
+        base = base.where(DeviceLogEvent.acknowledged_at.is_(None))
+    if since is not None:
+        base = base.where(DeviceLogEvent.observed_at >= since)
+    if until is not None:
+        base = base.where(DeviceLogEvent.observed_at <= until)
+    if search:
+        like = f"%{search}%"
+        base = base.where(DeviceLogEvent.message.ilike(like))
+
+    # Total count for paging
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total = int((await session.execute(count_stmt)).scalar_one())
+
+    # Rows
+    rows_stmt = base.order_by(DeviceLogEvent.observed_at.desc()).limit(limit).offset(offset)
+    rows = []
+    for ev, device_name, tenant_name, site_name, ack_by_email in (
+        await session.execute(rows_stmt)
+    ).all():
+        rows.append(
+            {
+                "id": ev.id,
+                "organization_id": ev.organization_id,
+                "device_id": ev.device_id,
+                "device_name": device_name,
+                "tenant_id": ev.tenant_id,
+                "tenant_name": tenant_name,
+                "site_id": ev.site_id,
+                "site_name": site_name,
+                "observed_at": ev.observed_at,
+                "device_time": ev.device_time,
+                "severity": ev.severity,
+                "topics": ev.topics,
+                "message": ev.message,
+                "source": ev.source,
+                "acknowledged_at": ev.acknowledged_at,
+                "acknowledged_by_user_id": ev.acknowledged_by_user_id,
+                "acknowledged_by_email": ack_by_email,
+            }
+        )
+
+    # Org-wide unack + by_severity tallies (useful for header badge counters).
+    unack_stmt = select(func.count()).where(
+        DeviceLogEvent.organization_id == organization_id,
+        DeviceLogEvent.acknowledged_at.is_(None),
+    )
+    unack_total = int((await session.execute(unack_stmt)).scalar_one())
+
+    severity_counts_stmt = (
+        select(DeviceLogEvent.severity, func.count())
+        .where(
+            DeviceLogEvent.organization_id == organization_id,
+            DeviceLogEvent.acknowledged_at.is_(None),
+        )
+        .group_by(DeviceLogEvent.severity)
+    )
+    by_severity = {s.value: 0 for s in EventSeverity}
+    for severity, count in (await session.execute(severity_counts_stmt)).all():
+        by_severity[severity.value] = int(count)
+
+    return rows, total, unack_total, by_severity
+
+
+async def acknowledge_events(
+    session: AsyncSession,
+    organization_id: UUID,
+    *,
+    event_ids: list[UUID],
+    user_id: UUID,
+) -> int:
+    if not event_ids:
+        return 0
+    stmt = (
+        update(DeviceLogEvent)
+        .where(
+            and_(
+                DeviceLogEvent.organization_id == organization_id,
+                DeviceLogEvent.id.in_(event_ids),
+                DeviceLogEvent.acknowledged_at.is_(None),
+            )
+        )
+        .values(
+            acknowledged_at=datetime.now(UTC),
+            acknowledged_by_user_id=user_id,
+        )
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)

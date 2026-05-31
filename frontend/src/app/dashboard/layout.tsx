@@ -23,6 +23,7 @@ const NAV = [
   { href: "/dashboard/bulk", label: "Bulk" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/roles", label: "Roles" },
+  { href: "/dashboard/events", label: "Events" },
   { href: "/dashboard/audit", label: "Audit log" },
   { href: "/dashboard/reports", label: "Reports" },
   { href: "/dashboard/settings", label: "Settings" },

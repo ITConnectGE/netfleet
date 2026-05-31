@@ -22,6 +22,7 @@ from app.core.database import get_session, init_db
 from app.core.logging import configure_logging
 from app.models.organization import Organization
 from app.services import backups as backup_svc
+from app.services import events as events_svc
 from app.services import firmware as firmware_svc
 
 log = structlog.get_logger("netfleet.scheduler")
@@ -70,6 +71,23 @@ async def job_firmware_check(session: AsyncSession) -> None:
             ok=ok,
             failed=failed,
         )
+
+
+async def job_scan_log_events(session: AsyncSession) -> None:
+    """Pull severity-tagged log lines from every device into the central
+    event inbox. Runs every NETFLEET_EVENT_SCAN_INTERVAL_SECONDS (default
+    5 min). Per-device failures are absorbed by the service."""
+    orgs = list((await session.execute(select(Organization))).scalars())
+    for org in orgs:
+        scanned, new = await events_svc.scan_org_devices_for_events(session, org.id)
+        await session.commit()
+        if new:
+            log.info(
+                "scheduler.events_scan.done",
+                organization_id=str(org.id),
+                devices_scanned=scanned,
+                new_events=new,
+            )
 
 
 async def job_firmware_auto_upgrade(session: AsyncSession) -> None:
@@ -129,6 +147,13 @@ JOBS: list[ScheduledJob] = [
         # it opens. Devices outside the window are skipped cheaply.
         interval_seconds=int(os.environ.get("NETFLEET_AUTO_UPGRADE_INTERVAL_SECONDS", str(3600))),
         handler=job_firmware_auto_upgrade,
+    ),
+    ScheduledJob(
+        name="event-scan",
+        # 5 min by default — short enough that critical events surface
+        # quickly, long enough that 100 devices is a manageable rate.
+        interval_seconds=int(os.environ.get("NETFLEET_EVENT_SCAN_INTERVAL_SECONDS", str(300))),
+        handler=job_scan_log_events,
     ),
 ]
 

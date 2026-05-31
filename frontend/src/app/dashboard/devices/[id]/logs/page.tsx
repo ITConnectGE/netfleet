@@ -19,6 +19,21 @@ export default function DeviceLogsPage() {
   const [paused, setPaused] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [clientFilter, setClientFilter] = useState<string>("");
+  // Client-side severity gates — applied to whatever data is already in
+  // hand, so they work the same paused and live. An empty set means
+  // "show everything" rather than "hide everything" — easier to reason
+  // about for a viewer.
+  const SEVERITIES = ["critical", "error", "warning", "info", "debug"] as const;
+  type Sev = (typeof SEVERITIES)[number];
+  const [hiddenSeverities, setHiddenSeverities] = useState<Set<Sev>>(new Set());
+
+  const toggleSeverity = (s: Sev) =>
+    setHiddenSeverities((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
 
   const { data, isFetching, error, dataUpdatedAt } = useQuery<LogEntry[]>({
     queryKey: ["device-logs", deviceId, topics, limit],
@@ -32,19 +47,23 @@ export default function DeviceLogsPage() {
     placeholderData: (prev) => prev,
   });
 
-  // Client-side substring filter — separate from `topics`, which drives the
-  // device-side filter and triggers a refetch.
+  // Client-side filters — substring search + severity gates. These apply
+  // to whatever data is already in hand, so they keep working after Pause.
   const visible = useMemo(() => {
     if (!data) return [];
-    if (!clientFilter.trim()) return data;
-    const needle = clientFilter.toLowerCase();
-    return data.filter(
-      (r) =>
-        r.message.toLowerCase().includes(needle) ||
-        r.topics.toLowerCase().includes(needle) ||
-        r.time.toLowerCase().includes(needle),
-    );
-  }, [data, clientFilter]);
+    const needle = clientFilter.trim().toLowerCase();
+    return data.filter((r) => {
+      if (needle) {
+        const haystack = `${r.time}\x1f${r.topics}\x1f${r.message}`.toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      if (hiddenSeverities.size > 0) {
+        const rowTopics = r.topics.split(",").map((t) => t.trim().toLowerCase());
+        if (rowTopics.some((t) => hiddenSeverities.has(t as Sev))) return false;
+      }
+      return true;
+    });
+  }, [data, clientFilter, hiddenSeverities]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -147,6 +166,41 @@ export default function DeviceLogsPage() {
         </div>
       </div>
 
+      {/* Client-side severity gates — work even while paused */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-muted-foreground">Hide:</span>
+        {SEVERITIES.map((s) => {
+          const hidden = hiddenSeverities.has(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => toggleSeverity(s)}
+              className={`rounded-md px-2 py-0.5 font-medium transition ${
+                hidden
+                  ? "bg-zinc-200 text-zinc-500 line-through"
+                  : severityChipClass(s)
+              }`}
+              title={hidden ? `Click to show ${s} lines` : `Click to hide ${s} lines`}
+            >
+              {s}
+            </button>
+          );
+        })}
+        {(hiddenSeverities.size > 0 || clientFilter) && (
+          <button
+            type="button"
+            onClick={() => {
+              setHiddenSeverities(new Set());
+              setClientFilter("");
+            }}
+            className="ml-2 text-muted-foreground underline-offset-4 hover:underline"
+          >
+            clear filters
+          </button>
+        )}
+      </div>
+
       {error && (
         <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {(error as Error).message}
@@ -204,6 +258,14 @@ function TopicPill({ topic }: { topic: string }) {
       {topic}
     </span>
   );
+}
+
+function severityChipClass(s: string): string {
+  if (s === "critical") return "bg-red-200 text-red-900";
+  if (s === "error") return "bg-red-100 text-red-800";
+  if (s === "warning") return "bg-amber-100 text-amber-900";
+  if (s === "info") return "bg-zinc-100 text-zinc-700";
+  return "bg-zinc-100 text-zinc-500";
 }
 
 function topicColor(topic: string): string {

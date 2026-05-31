@@ -4,6 +4,7 @@ from app.core.database import Base
 from app.models.audit_log import AuditLog, AuditOutcome
 from app.models.device import Device, DeviceStatus, DeviceTransport
 from app.models.device_backup import BackupSource, BackupStatus, DeviceBackup
+from app.models.device_log_event import DeviceLogEvent, EventSeverity, EventSource
 from app.models.organization import Organization
 from app.models.refresh_token import RefreshToken
 from app.models.role import AssignmentScope, Permission, PermissionAction, Role, RoleAssignment
@@ -22,8 +23,11 @@ __all__ = [
     "BackupStatus",
     "Device",
     "DeviceBackup",
+    "DeviceLogEvent",
     "DeviceStatus",
     "DeviceTransport",
+    "EventSeverity",
+    "EventSource",
     "Organization",
     "Permission",
     "PermissionAction",

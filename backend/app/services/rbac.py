@@ -40,6 +40,7 @@ APP_SECTIONS: dict[str, list[str]] = {
     "users": ["read", "write"],
     "roles": ["read", "write"],
     "audit": ["read"],
+    "events": ["read", "write"],
     "settings": ["read", "write"],
 }
 
