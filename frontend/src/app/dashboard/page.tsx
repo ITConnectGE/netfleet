@@ -4,8 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { listDevices, type Device } from "@/lib/devices";
+import { eventsSummary, type Severity } from "@/lib/events";
 import { getFleetFirmwareSummary, type FleetFirmwareSummary } from "@/lib/firmware";
 import { listSites, type Site } from "@/lib/sites";
+
+interface EventsSummary {
+  unacknowledged_total: number;
+  by_severity: Record<Severity, number>;
+}
 
 export default function DashboardPage() {
   const { data: sites } = useQuery<Site[]>({ queryKey: ["sites"], queryFn: () => listSites() });
@@ -17,11 +23,22 @@ export default function DashboardPage() {
     queryKey: ["firmware-summary"],
     queryFn: getFleetFirmwareSummary,
   });
+  const { data: events } = useQuery<EventsSummary>({
+    queryKey: ["events-summary"],
+    queryFn: eventsSummary,
+    refetchInterval: 30_000,
+  });
 
   const total = devices?.length ?? 0;
   const online = devices?.filter((d) => d.status === "online").length ?? 0;
   const errors = devices?.filter((d) => d.status === "error").length ?? 0;
   const offline = devices?.filter((d) => d.status === "offline").length ?? 0;
+
+  const allUpToDate =
+    fw !== undefined &&
+    fw.total > 0 &&
+    fw.updates_available === 0 &&
+    fw.never_checked === 0;
 
   return (
     <div>
@@ -45,17 +62,39 @@ export default function DashboardPage() {
         />
         <Card
           title="Firmware updates"
-          value={fw?.updates_available ?? "—"}
+          value={
+            allUpToDate ? (
+              <span className="inline-flex items-baseline gap-2">
+                <span>0</span>
+                <CheckBadge />
+              </span>
+            ) : (
+              fw?.updates_available ?? "—"
+            )
+          }
           href="/dashboard/devices"
           hint={
             fw
-              ? `${fw.checked_ever} of ${fw.total} checked${
-                  fw.never_checked > 0 ? ` · ${fw.never_checked} never checked` : ""
-                }`
+              ? allUpToDate
+                ? "all devices up to date"
+                : `${fw.checked_ever} of ${fw.total} checked${
+                    fw.never_checked > 0 ? ` · ${fw.never_checked} never checked` : ""
+                  }`
               : "checked nightly"
           }
         />
-        <Card title="Audit events (24h)" value="—" hint="Coming in Phase 8" />
+        <Card
+          title="Unack events"
+          value={events?.unacknowledged_total ?? "—"}
+          href="/dashboard/events"
+          hint={
+            events
+              ? `${events.by_severity.critical ?? 0} critical · ${
+                  events.by_severity.error ?? 0
+                } error · ${events.by_severity.warning ?? 0} warning`
+              : "scanned every 5 min"
+          }
+        />
       </div>
 
       {total === 0 && (
@@ -89,7 +128,7 @@ function Card({
   href,
 }: {
   title: string;
-  value: string | number;
+  value: string | number | React.ReactNode;
   hint?: string;
   href?: string;
 }) {
@@ -101,4 +140,27 @@ function Card({
     </div>
   );
   return href ? <Link href={href}>{inner}</Link> : inner;
+}
+
+function CheckBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800"
+      title="All devices up to date"
+    >
+      <svg
+        viewBox="0 0 20 20"
+        className="size-3"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          fillRule="evenodd"
+          d="M16.704 5.296a1 1 0 010 1.414l-7.95 7.95a1 1 0 01-1.415 0L3.296 10.61a1 1 0 011.414-1.414l3.336 3.336 7.243-7.236a1 1 0 011.415 0z"
+          clipRule="evenodd"
+        />
+      </svg>
+      up to date
+    </span>
+  );
 }

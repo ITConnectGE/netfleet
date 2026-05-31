@@ -99,14 +99,29 @@ class MikrotikDriver:
         resource_rows = await self._call(creds, "/system/resource/print")
         identity = (identity_rows[0] if identity_rows else {}).get("name", "")
         r = resource_rows[0] if resource_rows else {}
+
+        # The serial number lives on /system/routerboard/print, not /resource.
+        # CHR / x86 builds don't have a routerboard, so we tolerate the call
+        # failing and just leave serial=None for those.
+        serial = None
+        rb_raw: dict[str, Any] = {}
+        try:
+            rb_rows = await self._call(creds, "/system/routerboard/print")
+            if rb_rows:
+                rb_raw = rb_rows[0]
+                serial = rb_raw.get("serial-number")
+        except Exception:
+            pass
+
         return SystemInfo(
             identity=str(identity),
-            model=r.get("board-name"),
+            model=r.get("board-name") or rb_raw.get("model"),
+            serial=serial,
             firmware=r.get("version"),
             uptime_seconds=_parse_uptime(r.get("uptime", "")),
             cpu_load_pct=float(r.get("cpu-load", 0)) if r.get("cpu-load") else None,
             memory_used_pct=_pct_used(r.get("free-memory"), r.get("total-memory")),
-            raw={**r, **(identity_rows[0] if identity_rows else {})},
+            raw={**r, **(identity_rows[0] if identity_rows else {}), **rb_raw},
         )
 
     # ============== DHCP ==============

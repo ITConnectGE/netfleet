@@ -203,6 +203,7 @@ async def test_connection(
             pass  # identity != notes; leave notes alone
         device.model = info.model or device.model
         device.firmware = info.firmware or device.firmware
+        device.serial = info.serial or device.serial
         await session.flush()
         return TestConnectionResult(
             ok=True,
