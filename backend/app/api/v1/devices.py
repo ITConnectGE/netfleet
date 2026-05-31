@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, get_current_user, require_permission
@@ -13,6 +14,7 @@ from app.models.user import User
 from app.schemas.device import DeviceCreate, DevicePublic, DeviceUpdate, TestConnectionResult
 from app.services import audit as audit_svc
 from app.services import device as device_svc
+from app.services import device_onboarding as onboarding_svc
 
 router = APIRouter()
 
@@ -164,3 +166,51 @@ async def test_device_connection(
     )
     await session.commit()
     return result
+
+
+@router.get(
+    "/{device_id}/onboarding-script",
+    response_class=PlainTextResponse,
+)
+async def get_onboarding_script(
+    device_id: UUID,
+    request: Request,
+    include_password: bool = Query(default=True),
+    user: User = Depends(require_permission("devices", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> PlainTextResponse:
+    """Return a copy-paste RouterOS script that prepares the device for
+    NetFleet to manage it: user group + user, IP services + whitelist,
+    firewall rules. By default the stored password is embedded; pass
+    ?include_password=false to leave a placeholder instead (audited
+    either way as a credential reveal)."""
+    try:
+        text = await onboarding_svc.generate_routeros_script(
+            session,
+            organization_id=user.organization_id,
+            device_id=device_id,
+            include_password=include_password,
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="devices",
+        action="onboarding_script",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"include_password": include_password},
+    )
+    await session.commit()
+    return PlainTextResponse(
+        text,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="netfleet-onboarding-{device_id}.rsc"',
+        },
+    )

@@ -102,3 +102,19 @@ export async function deleteDevice(id: string): Promise<void> {
 export async function testDeviceConnection(id: string): Promise<TestConnectionResult> {
   return api.post(`devices/${id}/test-connection`).json<TestConnectionResult>();
 }
+
+export async function getOnboardingScript(
+  id: string,
+  options: { includePassword?: boolean } = {},
+): Promise<string> {
+  const includePassword = options.includePassword ?? true;
+  try {
+    return await api
+      .get(`devices/${id}/onboarding-script`, {
+        searchParams: { include_password: String(includePassword) },
+      })
+      .text();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}

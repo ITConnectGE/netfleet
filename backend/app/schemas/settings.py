@@ -96,6 +96,18 @@ class SmsTestResult(BaseModel):
     error: str | None = None
 
 
+class OrgInfoPublic(BaseModel):
+    """Org-wide miscellaneous settings — currently just NetFleet's external IPs."""
+
+    netfleet_external_ips: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class OrgInfoUpdate(BaseModel):
+    netfleet_external_ips: str | None = Field(default=None, max_length=512)
+
+
 class SmsProviderPreset(BaseModel):
     key: str
     label: str

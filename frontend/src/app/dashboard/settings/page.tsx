@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
+  getOrgInfo,
   getSmsPresets,
   getSmsSettings,
   getSmtpSettings,
   testSms,
   testSmtp,
+  updateOrgInfo,
   updateSmsSettings,
   updateSmtpSettings,
+  type OrgInfo,
   type SmsProviderPreset,
   type SmsSettings,
   type SmsSettingsUpdate,
@@ -48,10 +51,86 @@ export default function SettingsPage() {
           </div>
         </Link>
 
+        <OrgInfoSection />
         <SmtpSection />
         <SmsSection />
       </div>
     </div>
+  );
+}
+
+function OrgInfoSection() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<OrgInfo>({
+    queryKey: ["org-info"],
+    queryFn: getOrgInfo,
+  });
+  const [value, setValue] = useState("");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (data) setValue(data.netfleet_external_ips ?? "");
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => updateOrgInfo({ netfleet_external_ips: value || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org-info"] });
+      setSavedAt(Date.now());
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  if (isLoading || !data) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  return (
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        save.mutate();
+      }}
+      className="rounded-lg border border-border bg-card p-6"
+    >
+      <h2 className="text-lg font-semibold">NetFleet external IP(s)</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        The egress IP(s) managed devices see when NetFleet connects to them.
+        Used to whitelist NetFleet in the device-onboarding script. Comma-
+        separated IPs or CIDRs (e.g. <code>203.0.113.10,198.51.100.0/29</code>).
+      </p>
+
+      {error && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+      {savedAt && !error && (
+        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Saved.
+        </div>
+      )}
+
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="203.0.113.10,198.51.100.0/29"
+        className={`${inputClass} mt-4 font-mono text-sm`}
+      />
+      <div className="mt-4 flex justify-end">
+        <button
+          type="submit"
+          disabled={save.isPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
   );
 }
 

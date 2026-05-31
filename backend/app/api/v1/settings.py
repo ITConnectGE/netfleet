@@ -10,6 +10,8 @@ from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.settings import (
+    OrgInfoPublic,
+    OrgInfoUpdate,
     SmsProviderPreset,
     SmsSettingsPublic,
     SmsSettingsUpdate,
@@ -26,6 +28,45 @@ from app.services import settings as settings_svc
 from app.services import sms as sms_svc
 
 router = APIRouter()
+
+
+# ---------------- Org info (NetFleet's own external IP(s)) ----------------
+
+
+@router.get("/org-info", response_model=OrgInfoPublic)
+async def get_org_info(
+    user: User = Depends(require_permission("settings", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> OrgInfoPublic:
+    org = await settings_svc.get_organization(session, user.organization_id)
+    return OrgInfoPublic(netfleet_external_ips=org.netfleet_external_ips)
+
+
+@router.patch("/org-info", response_model=OrgInfoPublic)
+async def patch_org_info(
+    payload: OrgInfoUpdate,
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> OrgInfoPublic:
+    org = await settings_svc.update_org_info(
+        session,
+        user.organization_id,
+        netfleet_external_ips=payload.netfleet_external_ips,
+    )
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="update_org_info",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(exclude_unset=True),
+    )
+    await session.commit()
+    return OrgInfoPublic(netfleet_external_ips=org.netfleet_external_ips)
 
 
 def _to_public(org: Organization) -> SmtpSettingsPublic:

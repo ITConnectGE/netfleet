@@ -126,6 +126,24 @@ export async function updateSmsSettings(payload: SmsSettingsUpdate): Promise<Sms
   }
 }
 
+// ---------------- Org info ----------------
+
+export interface OrgInfo {
+  netfleet_external_ips: string | null;
+}
+
+export async function getOrgInfo(): Promise<OrgInfo> {
+  return api.get("settings/org-info").json<OrgInfo>();
+}
+
+export async function updateOrgInfo(payload: OrgInfo): Promise<OrgInfo> {
+  try {
+    return await api.patch("settings/org-info", { json: payload }).json<OrgInfo>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function testSms(to: string, content: string): Promise<SmsTestResult> {
   try {
     return await api

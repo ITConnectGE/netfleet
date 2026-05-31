@@ -7,6 +7,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { StatusPill } from "@/components/status-pill";
 import {
   createDevice,
+  getOnboardingScript,
   listDevices,
   testDeviceConnection,
   type Device,
@@ -171,6 +172,8 @@ function DeviceForm({
     if (vendor === "mikrotik") setPort(8728);
   }, [vendor]);
 
+  const [created, setCreated] = useState<Device | null>(null);
+
   const m = useMutation({
     mutationFn: () =>
       createDevice({
@@ -183,7 +186,11 @@ function DeviceForm({
         password: password || null,
         verify_tls: verifyTls,
       }),
-    onSuccess: () => onCreated(),
+    onSuccess: (d) => {
+      // Don't dismiss the form yet — show the onboarding script first so
+      // the operator can paste it into WinBox while still on this page.
+      setCreated(d);
+    },
     onError: (e: Error) => setError(e.message),
   });
 
@@ -191,6 +198,19 @@ function DeviceForm({
     e.preventDefault();
     setError(null);
     m.mutate();
+  }
+
+  if (created) {
+    return (
+      <OnboardingPanel
+        deviceId={created.id}
+        deviceName={created.name}
+        onClose={() => {
+          setCreated(null);
+          onCreated();
+        }}
+      />
+    );
   }
 
   return (
@@ -314,6 +334,93 @@ function DeviceForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function OnboardingPanel({
+  deviceId,
+  deviceName,
+  onClose,
+}: {
+  deviceId: string;
+  deviceName: string;
+  onClose: () => void;
+}) {
+  const { data: script, isLoading, error } = useQuery<string>({
+    queryKey: ["onboarding-script", deviceId],
+    queryFn: () => getOnboardingScript(deviceId, { includePassword: true }),
+  });
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="mt-6 rounded-lg border border-emerald-300 bg-emerald-50/40 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-emerald-900">
+            Device added — paste this into the router
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Open WinBox on <span className="font-medium">{deviceName}</span> → New
+            Terminal → paste the whole script. It creates the management user,
+            enables API + SSH, and adds the NetFleet IP to the whitelist. Safe
+            to re-run.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
+        >
+          Done
+        </button>
+      </div>
+
+      {isLoading && <p className="mt-4 text-sm text-muted-foreground">Generating…</p>}
+      {error && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(error as Error).message}
+        </div>
+      )}
+
+      {script && (
+        <>
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(script);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              }}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </button>
+            <a
+              href={`/api/v1/devices/${deviceId}/onboarding-script`}
+              download={`netfleet-onboarding-${deviceName}.rsc`}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+            >
+              Download .rsc
+            </a>
+          </div>
+          <pre className="mt-3 max-h-[40vh] overflow-auto rounded-md border border-border bg-zinc-950 p-3 font-mono text-[11px] text-zinc-100">
+{script}
+          </pre>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            The script needs your NetFleet external IP set in{" "}
+            <Link
+              href="/dashboard/settings"
+              className="text-primary hover:underline"
+            >
+              Settings
+            </Link>
+            ; otherwise the whitelist line shows a placeholder you have to
+            edit manually.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

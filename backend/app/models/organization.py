@@ -55,6 +55,11 @@ class Organization(IdMixin, TimestampsMixin, TableNameMixin, Base):
     sms_last_test_ok: Mapped[bool | None] = mapped_column(Boolean)
     sms_last_test_message: Mapped[str | None] = mapped_column(Text)
 
+    # NetFleet's own egress IP(s), as seen by managed devices. Used to fill
+    # the whitelist in the device-onboarding script (also persists across
+    # support staff onboarding new clients). Comma-separated, IPs or CIDRs.
+    netfleet_external_ips: Mapped[str | None] = mapped_column(Text)
+
     users: Mapped[list[User]] = relationship(
         "User",
         back_populates="organization",

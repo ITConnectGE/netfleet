@@ -25,6 +25,20 @@ async def get_organization(session: AsyncSession, organization_id: UUID) -> Orga
     return org
 
 
+async def update_org_info(
+    session: AsyncSession,
+    organization_id: UUID,
+    *,
+    netfleet_external_ips: str | None = None,
+) -> Organization:
+    org = await get_organization(session, organization_id)
+    # Treat empty string as "clear" so the UI can unset it.
+    if netfleet_external_ips is not None:
+        org.netfleet_external_ips = netfleet_external_ips or None
+    await session.flush()
+    return org
+
+
 async def update_smtp(
     session: AsyncSession,
     organization_id: UUID,
