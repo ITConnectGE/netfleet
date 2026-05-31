@@ -20,6 +20,7 @@ interface HealthResponse {
 const NAV = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/tenants", label: "Tenants" },
+  { href: "/dashboard/fleet", label: "Fleet tree" },
   { href: "/dashboard/devices", label: "Devices" },
   { href: "/dashboard/bulk", label: "Bulk" },
   { href: "/dashboard/users", label: "Users" },
