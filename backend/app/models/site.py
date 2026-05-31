@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +38,10 @@ class Site(IdMixin, TimestampsMixin, TableNameMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     address: Mapped[str | None] = mapped_column(String(512))
+    # WGS84 decimal degrees; populated when the operator picks a pin on
+    # the site form. Used to render the fleet map on /dashboard.
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
     contact_email: Mapped[str | None] = mapped_column(String(254))
     contact_phone: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(String(2048))

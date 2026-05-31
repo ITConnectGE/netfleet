@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -8,6 +9,11 @@ import { useEffect, useState } from "react";
 import { StatusPill } from "@/components/status-pill";
 import { listDevices, type Device } from "@/lib/devices";
 import { deleteSite, getSite, updateSite, type Site, type SiteUpdate } from "@/lib/sites";
+
+const SiteLocationPicker = dynamic(
+  () => import("@/components/site-location-picker"),
+  { ssr: false, loading: () => <div className="h-72 animate-pulse rounded-md bg-muted" /> },
+);
 
 export default function SiteDetailPage() {
   const params = useParams<{ id: string }>();
@@ -132,6 +138,8 @@ function SiteInfoCard({ site }: { site: Site }) {
   const [draft, setDraft] = useState<SiteUpdate>({
     name: site.name,
     address: site.address,
+    latitude: site.latitude,
+    longitude: site.longitude,
     contact_email: site.contact_email,
     contact_phone: site.contact_phone,
     notes: site.notes,
@@ -144,6 +152,8 @@ function SiteInfoCard({ site }: { site: Site }) {
       setDraft({
         name: site.name,
         address: site.address,
+        latitude: site.latitude,
+        longitude: site.longitude,
         contact_email: site.contact_email,
         contact_phone: site.contact_phone,
         notes: site.notes,
@@ -156,6 +166,8 @@ function SiteInfoCard({ site }: { site: Site }) {
       updateSite(site.id, {
         name: draft.name,
         address: draft.address || null,
+        latitude: draft.latitude ?? null,
+        longitude: draft.longitude ?? null,
         contact_email: draft.contact_email || null,
         contact_phone: draft.contact_phone || null,
         notes: draft.notes || null,
@@ -183,6 +195,15 @@ function SiteInfoCard({ site }: { site: Site }) {
         </div>
         <dl className="mt-3 space-y-2 text-sm">
           <Row label="Address">{site.address ?? "—"}</Row>
+          <Row label="Coordinates">
+            {site.latitude !== null && site.longitude !== null ? (
+              <span className="font-mono text-xs">
+                {site.latitude.toFixed(5)}, {site.longitude.toFixed(5)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">not set</span>
+            )}
+          </Row>
           <Row label="Contact email">{site.contact_email ?? "—"}</Row>
           <Row label="Contact phone">{site.contact_phone ?? "—"}</Row>
           <Row label="Notes">
@@ -217,7 +238,18 @@ function SiteInfoCard({ site }: { site: Site }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Address">
+        <Field label="Location">
+          <SiteLocationPicker
+            latitude={draft.latitude ?? null}
+            longitude={draft.longitude ?? null}
+            onChange={(lat, lng) =>
+              setDraft((d) => ({ ...d, latitude: lat, longitude: lng }))
+            }
+            address={draft.address}
+            onAddressChange={(a) => setDraft((d) => ({ ...d, address: a }))}
+          />
+        </Field>
+        <Field label="Address (free text)">
           <input
             value={draft.address ?? ""}
             onChange={(e) => setDraft((d) => ({ ...d, address: e.target.value }))}

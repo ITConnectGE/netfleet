@@ -1,12 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 
 import { listDevices, type Device } from "@/lib/devices";
 import { eventsSummary, type Severity } from "@/lib/events";
 import { getFleetFirmwareSummary, type FleetFirmwareSummary } from "@/lib/firmware";
 import { listSites, type Site } from "@/lib/sites";
+
+const FleetMap = dynamic(() => import("@/components/fleet-map"), {
+  ssr: false,
+  loading: () => <div className="h-[28rem] animate-pulse rounded-lg bg-muted" />,
+});
 
 interface EventsSummary {
   unacknowledged_total: number;
@@ -100,6 +106,25 @@ export default function DashboardPage() {
           }
         />
       </div>
+
+      <section className="mt-10">
+        <div className="mb-3 flex items-end justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Fleet map</h2>
+            <p className="text-xs text-muted-foreground">
+              Sites with a saved location. Click a marker to see its devices.
+              Free tiles courtesy of OpenStreetMap.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/tenants"
+            className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+          >
+            Add a location →
+          </Link>
+        </div>
+        <FleetMap sites={sites ?? []} devices={devices ?? []} />
+      </section>
 
       {total === 0 && (
         <div className="mt-8 rounded-lg border border-dashed border-border bg-card p-6 text-sm">

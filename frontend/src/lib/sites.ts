@@ -8,6 +8,8 @@ export interface Site {
   name: string;
   slug: string;
   address: string | null;
+  latitude: number | null;
+  longitude: number | null;
   contact_email: string | null;
   contact_phone: string | null;
   notes: string | null;
@@ -21,6 +23,8 @@ export interface SiteCreate {
   name: string;
   slug: string;
   address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   contact_email?: string | null;
   contact_phone?: string | null;
   notes?: string | null;
@@ -29,6 +33,8 @@ export interface SiteCreate {
 export interface SiteUpdate {
   name?: string;
   address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   contact_email?: string | null;
   contact_phone?: string | null;
   notes?: string | null;

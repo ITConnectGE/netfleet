@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Leaflet styles must load globally — the map containers and tile layers
+   render from inline styles that depend on them. Imported here so the
+   per-map components don't need to do it themselves. */
+@import "leaflet/dist/leaflet.css";
+
 @layer base {
   :root {
     /* Surface */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -13,6 +14,11 @@ import {
   type SiteCreate,
 } from "@/lib/sites";
 import { deleteTenant, getTenant, type Tenant } from "@/lib/tenants";
+
+const SiteLocationPicker = dynamic(
+  () => import("@/components/site-location-picker"),
+  { ssr: false, loading: () => <div className="h-72 animate-pulse rounded-md bg-muted" /> },
+);
 
 export default function TenantDetailPage() {
   const params = useParams<{ id: string }>();
@@ -185,6 +191,8 @@ function SiteForm({
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [address, setAddress] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +204,8 @@ function SiteForm({
         name,
         slug,
         address: address || null,
+        latitude,
+        longitude,
         contact_email: contactEmail || null,
         contact_phone: contactPhone || null,
       };
@@ -253,6 +263,21 @@ function SiteForm({
             className={input}
           />
         </Field>
+        <div className="md:col-span-2">
+          <span className="text-xs font-medium text-muted-foreground">Location on map</span>
+          <div className="mt-1">
+            <SiteLocationPicker
+              latitude={latitude}
+              longitude={longitude}
+              onChange={(lat, lng) => {
+                setLatitude(lat);
+                setLongitude(lng);
+              }}
+              address={address}
+              onAddressChange={setAddress}
+            />
+          </div>
+        </div>
         <Field label="Contact email" htmlFor="s-email">
           <input
             id="s-email"
