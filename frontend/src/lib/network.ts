@@ -90,6 +90,34 @@ export async function listNeighbors(deviceId: string): Promise<Neighbor[]> {
   }
 }
 
+export interface NeighborDiscovery {
+  discover_interface_list: string | null;
+  protocols: string | null;
+}
+
+export async function getNeighborDiscovery(deviceId: string): Promise<NeighborDiscovery> {
+  try {
+    return await api
+      .get(`devices/${deviceId}/neighbor-discovery`)
+      .json<NeighborDiscovery>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function setNeighborDiscovery(
+  deviceId: string,
+  payload: NeighborDiscovery,
+): Promise<NeighborDiscovery> {
+  try {
+    return await api
+      .put(`devices/${deviceId}/neighbor-discovery`, { json: payload })
+      .json<NeighborDiscovery>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 // ---------------- Bridge hosts ----------------
 
 export interface BridgeHost {

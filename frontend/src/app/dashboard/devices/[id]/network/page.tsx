@@ -10,17 +10,20 @@ import {
   deleteRoute,
   deleteVlan,
   formatBytes,
+  getNeighborDiscovery,
   listArp,
   listBridgeHosts,
   listInterfaces,
   listNeighbors,
   listRoutes,
   listVlans,
+  setNeighborDiscovery,
   type ArpEntry,
   type BridgeHost,
   type Interface,
   type IpRoute,
   type Neighbor,
+  type NeighborDiscovery,
   type Vlan,
 } from "@/lib/network";
 import { getDevice, type Device } from "@/lib/devices";
@@ -72,6 +75,7 @@ export default function NetworkPage() {
 // ---------------- Neighbours ----------------
 
 function NeighborsTab({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
   const [view, setView] = useState<"table" | "graph">("graph");
   const { data, isLoading, error } = useQuery<Neighbor[]>({
     queryKey: ["neighbors", deviceId],
@@ -83,6 +87,28 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
   const { data: device } = useQuery<Device>({
     queryKey: ["device", deviceId],
     queryFn: () => getDevice(deviceId),
+  });
+  const { data: discovery } = useQuery<NeighborDiscovery>({
+    queryKey: ["neighbor-discovery", deviceId],
+    queryFn: () => getNeighborDiscovery(deviceId),
+  });
+  const discoveryOff =
+    !discovery ||
+    discovery.discover_interface_list === null ||
+    discovery.discover_interface_list === "" ||
+    discovery.discover_interface_list === "none" ||
+    !discovery.protocols ||
+    discovery.protocols === "";
+  const enableDiscovery = useMutation({
+    mutationFn: () =>
+      setNeighborDiscovery(deviceId, {
+        discover_interface_list: "all",
+        protocols: "cdp,lldp,mndp",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["neighbor-discovery", deviceId] });
+      qc.invalidateQueries({ queryKey: ["neighbors", deviceId] });
+    },
   });
 
   return (
@@ -113,12 +139,49 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
         </div>
       )}
 
+      {/* Always-available discovery status + enable bar above whichever view. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+        <div>
+          <span className="text-muted-foreground">Discovery on this device:</span>{" "}
+          <span className="font-mono">
+            {discovery
+              ? `interfaces=${discovery.discover_interface_list ?? "—"} · protocols=${discovery.protocols ?? "—"}`
+              : "…"}
+          </span>
+        </div>
+        {discoveryOff && (
+          <button
+            onClick={() => enableDiscovery.mutate()}
+            disabled={enableDiscovery.isPending}
+            className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {enableDiscovery.isPending ? "Enabling…" : "Enable on all interfaces (CDP+LLDP+MNDP)"}
+          </button>
+        )}
+      </div>
+      {enableDiscovery.error && (
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(enableDiscovery.error as Error).message}
+        </div>
+      )}
+
       {view === "graph" ? (
         <NeighborsGraph
           centerName={device?.name ?? "this device"}
           centerPlatform="MikroTik"
           neighbors={data ?? []}
           isLoading={isLoading}
+          emptyState={
+            discoveryOff && (
+              <button
+                onClick={() => enableDiscovery.mutate()}
+                disabled={enableDiscovery.isPending}
+                className="mt-3 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {enableDiscovery.isPending ? "Enabling…" : "Enable discovery now"}
+              </button>
+            )
+          }
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -142,7 +205,7 @@ function NeighborsTab({ deviceId }: { deviceId: string }) {
               {!isLoading && (!data || data.length === 0) && (
                 <EmptyRow
                   colSpan={10}
-                  label="No neighbours discovered. Enable LLDP/CDP under /ip neighbor discovery-settings on the device."
+                  label="No neighbours discovered. Use the Enable button above."
                 />
               )}
               {data?.map((n) => (
@@ -185,11 +248,13 @@ function NeighborsGraph({
   centerPlatform,
   neighbors,
   isLoading,
+  emptyState,
 }: {
   centerName: string;
   centerPlatform: string;
   neighbors: Neighbor[];
   isLoading: boolean;
+  emptyState?: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
 
@@ -202,26 +267,41 @@ function NeighborsGraph({
   }
   if (neighbors.length === 0) {
     return (
-      <div className="flex h-80 flex-col items-center justify-center rounded-lg border border-border bg-card text-center text-sm text-muted-foreground">
-        <p>No neighbours discovered.</p>
+      <div className="flex h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">No neighbours discovered.</p>
         <p className="mt-1 text-xs">
-          Enable LLDP/CDP under <code>/ip neighbor discovery-settings</code> on
-          this device.
+          Enable LLDP/CDP/MNDP on the device, then this page will populate.
         </p>
+        {emptyState}
       </div>
     );
   }
 
-  // Canvas + layout — center fixed, peers on a circle. Wider canvas as the
-  // peer count grows so labels don't pile up.
-  const w = 760;
-  const h = Math.max(440, 220 + neighbors.length * 14);
+  // Canvas + layout — the device sits pinned to the top-centre, peers fan
+  // out in a semicircle below it. This matches how an MSP usually thinks
+  // about the topology: the router we manage IS the edge, neighbours hang
+  // off it. We deliberately don't put the device in the middle of the
+  // canvas because that visually implies "centre of the network" which it
+  // almost never is.
+  const w = 800;
+  const h = Math.max(440, 240 + neighbors.length * 16);
   const cx = w / 2;
-  const cy = h / 2;
-  const radius = Math.min(w, h) / 2 - 80;
-
+  const cy = 80;
+  // Fan peers across the lower half. ANGLE_* are measured in SVG
+  // convention (y axis points down, so positive angle = downward arc).
+  const ANGLE_START = Math.PI * 0.15;
+  const ANGLE_END = Math.PI * 0.85;
+  // Clamp radius so the widest peer node still fits within the canvas
+  // even when the fan is most splayed (angle = ANGLE_START).
+  const NODE_HALF = 70;
+  const verticalRoom = h - cy - 100;
+  const horizontalRoom = (w / 2 - NODE_HALF) / Math.cos(ANGLE_START);
+  const radius = Math.min(verticalRoom, horizontalRoom);
   const nodes = neighbors.map((n, i) => {
-    const angle = (i / neighbors.length) * 2 * Math.PI - Math.PI / 2;
+    const angle =
+      neighbors.length === 1
+        ? Math.PI / 2
+        : ANGLE_START + (i / (neighbors.length - 1)) * (ANGLE_END - ANGLE_START);
     return {
       x: cx + radius * Math.cos(angle),
       y: cy + radius * Math.sin(angle),
@@ -236,7 +316,7 @@ function NeighborsGraph({
         viewBox={`0 0 ${w} ${h}`}
         className="block h-auto w-full"
         role="img"
-        aria-label="Network topology centered on this device"
+        aria-label="Network topology — local device at top, neighbours fanning out below"
       >
         {/* Edges first so nodes paint on top. */}
         {nodes.map((node, i) => {
@@ -454,7 +534,9 @@ function NodeTooltip({
   // the right edge of the canvas.
   const onLeft = x + 30 + boxW > canvasW;
   const tx = onLeft ? x - 30 - boxW : x + 30;
-  const ty = y - boxH / 2;
+  // Place above the node when it sits in the lower half of the canvas so
+  // the tooltip never falls off the bottom edge.
+  const ty = Math.max(8, y - boxH / 2);
   return (
     <g transform={`translate(${tx}, ${ty})`} pointerEvents="none">
       <rect

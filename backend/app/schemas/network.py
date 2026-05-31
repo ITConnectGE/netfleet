@@ -60,6 +60,16 @@ class ArpPublic(BaseModel):
 # ---------------- Neighbours (CDP / LLDP / MNDP) ----------------
 
 
+class NeighborDiscoveryPublic(BaseModel):
+    discover_interface_list: str | None
+    protocols: str | None
+
+
+class NeighborDiscoveryUpdate(BaseModel):
+    discover_interface_list: str | None = Field(default=None, max_length=64)
+    protocols: str | None = Field(default=None, max_length=64)
+
+
 class NeighborPublic(BaseModel):
     id: str | None
     interface: str | None

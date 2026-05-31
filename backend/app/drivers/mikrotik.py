@@ -33,6 +33,7 @@ from app.drivers.base import (
     LogEntry,
     NatRule,
     Neighbor,
+    NeighborDiscoverySettings,
     NtpClient,
     NtpServer,
     PppSecret,
@@ -324,6 +325,35 @@ class MikrotikDriver:
         ]
 
     # ============== Neighbours (CDP / LLDP / MNDP) ==============
+
+    async def ip_neighbor_discovery_get(
+        self, creds: DeviceCredentials
+    ) -> NeighborDiscoverySettings:
+        rows = await self._call(creds, "/ip/neighbor/discovery-settings/print")
+        r = rows[0] if rows else {}
+        return NeighborDiscoverySettings(
+            discover_interface_list=_to_str(r.get("discover-interface-list")),
+            # RouterOS calls this field `protocol` (singular) but it carries
+            # a comma list. Surface as `protocols` to make that obvious.
+            protocols=_to_str(r.get("protocol")),
+            raw=r,
+        )
+
+    async def ip_neighbor_discovery_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        discover_interface_list: str | None = None,
+        protocols: str | None = None,
+    ) -> None:
+        params: dict[str, Any] = {}
+        if discover_interface_list is not None:
+            params["discover-interface-list"] = discover_interface_list
+        if protocols is not None:
+            params["protocol"] = protocols
+        if not params:
+            return
+        await self._call(creds, "/ip/neighbor/discovery-settings/set", **params)
 
     async def ip_neighbors_list(self, creds: DeviceCredentials) -> list[Neighbor]:
         rows = await self._call(creds, "/ip/neighbor/print")
@@ -1275,24 +1305,28 @@ def _sftp_session(host: str, port: int, username: str, password: str):
 
 
 def _row_to_filter_rule(r: dict[str, Any]) -> FilterRule:
+    # RouterOS hands back port-shaped fields as `int` when the rule contains a
+    # single numeric port (e.g. `dst-port=3478`) and as `str` when it's a range
+    # or comma list (`80,443` / `1024-65535`). FilterRule's schema is `str | None`
+    # everywhere, so coerce here rather than at every caller.
     return FilterRule(
         id=r.get(".id"),
         chain=str(r.get("chain", "")),
         action=str(r.get("action", "")),
-        src_address=r.get("src-address"),
-        dst_address=r.get("dst-address"),
-        src_address_list=r.get("src-address-list"),
-        dst_address_list=r.get("dst-address-list"),
-        protocol=r.get("protocol"),
-        src_port=r.get("src-port"),
-        dst_port=r.get("dst-port"),
-        in_interface=r.get("in-interface"),
-        out_interface=r.get("out-interface"),
-        connection_state=r.get("connection-state"),
+        src_address=_to_str(r.get("src-address")),
+        dst_address=_to_str(r.get("dst-address")),
+        src_address_list=_to_str(r.get("src-address-list")),
+        dst_address_list=_to_str(r.get("dst-address-list")),
+        protocol=_to_str(r.get("protocol")),
+        src_port=_to_str(r.get("src-port")),
+        dst_port=_to_str(r.get("dst-port")),
+        in_interface=_to_str(r.get("in-interface")),
+        out_interface=_to_str(r.get("out-interface")),
+        connection_state=_to_str(r.get("connection-state")),
         log=_to_bool(r.get("log")),
-        log_prefix=r.get("log-prefix"),
+        log_prefix=_to_str(r.get("log-prefix")),
         disabled=_to_bool(r.get("disabled")),
-        comment=r.get("comment"),
+        comment=_to_str(r.get("comment")),
         raw=r,
     )
 
@@ -1315,6 +1349,17 @@ def _to_bool(v: Any) -> bool:
     if v is None:
         return False
     return str(v).strip().lower() in ("true", "yes", "1")
+
+
+def _to_str(v: Any) -> str | None:
+    """Defensive str coerce. librouteros occasionally returns int for fields
+    RouterOS prints as numbers — port, mtu-like — but our public schemas
+    declare them as `str | None`. Treat empty string as None to keep the
+    "field unset" path consistent on the wire."""
+    if v is None:
+        return None
+    s = str(v)
+    return s if s != "" else None
 
 
 def _parse_uptime(s: str) -> int | None:

@@ -25,6 +25,8 @@ from app.schemas.network import (
     IpAddressPublic,
     IpRouteCreate,
     IpRoutePublic,
+    NeighborDiscoveryPublic,
+    NeighborDiscoveryUpdate,
     NeighborPublic,
     VlanCreate,
     VlanPublic,
@@ -244,6 +246,70 @@ async def list_bridge_hosts(
 
 
 # ---------------- Neighbours (CDP / LLDP / MNDP) ----------------
+
+
+@router.get(
+    "/{device_id}/neighbor-discovery", response_model=NeighborDiscoveryPublic
+)
+async def get_neighbor_discovery(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> NeighborDiscoveryPublic:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        s = await get_driver(device.vendor).ip_neighbor_discovery_get(
+            _to_driver_creds(device)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return NeighborDiscoveryPublic(
+        discover_interface_list=s.discover_interface_list,
+        protocols=s.protocols,
+    )
+
+
+@router.put(
+    "/{device_id}/neighbor-discovery",
+    response_model=NeighborDiscoveryPublic,
+)
+async def set_neighbor_discovery(
+    device_id: UUID,
+    payload: NeighborDiscoveryUpdate,
+    request: Request,
+    user: User = Depends(require_permission("ip.neighbor", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> NeighborDiscoveryPublic:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).ip_neighbor_discovery_set(
+            _to_driver_creds(device),
+            discover_interface_list=payload.discover_interface_list,
+            protocols=payload.protocols,
+        )
+        s = await get_driver(device.vendor).ip_neighbor_discovery_get(
+            _to_driver_creds(device)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="ip.neighbor",
+        action="update",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(),
+    )
+    await session.commit()
+    return NeighborDiscoveryPublic(
+        discover_interface_list=s.discover_interface_list,
+        protocols=s.protocols,
+    )
 
 
 @router.get("/{device_id}/neighbors", response_model=list[NeighborPublic])

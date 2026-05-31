@@ -176,6 +176,21 @@ class ArpEntry:
 
 
 @dataclass(slots=True)
+class NeighborDiscoverySettings:
+    """RouterOS /ip/neighbor/discovery-settings (singleton).
+
+    `discover_interface_list` is either the literal "all" / "none" or a
+    named interface-list (e.g. "WAN"). `protocols` is the comma-separated
+    list of protocols to advertise + receive — typically
+    "cdp,lldp,mndp" when discovery is on.
+    """
+
+    discover_interface_list: str | None
+    protocols: str | None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class Neighbor:
     """One row from /ip/neighbor on RouterOS — a peer discovered via CDP,
     LLDP, or MikroTik's own MNDP. Other vendors use the same shape."""
@@ -473,6 +488,16 @@ class VendorDriver(Protocol):
 
     # CDP / LLDP / MNDP neighbour discovery
     async def ip_neighbors_list(self, creds: DeviceCredentials) -> list[Neighbor]: ...
+    async def ip_neighbor_discovery_get(
+        self, creds: DeviceCredentials
+    ) -> NeighborDiscoverySettings: ...
+    async def ip_neighbor_discovery_set(
+        self,
+        creds: DeviceCredentials,
+        *,
+        discover_interface_list: str | None = None,
+        protocols: str | None = None,
+    ) -> None: ...
 
     # Firmware
     async def firmware_check_updates(self, creds: DeviceCredentials) -> FirmwareInfo: ...

@@ -58,7 +58,7 @@ DRIVER_SECTIONS: dict[str, list[str]] = {
     "ip.address":               ["read", "write"],
     "ip.route":                 ["read", "write"],
     "ip.service":               ["read", "write"],
-    "ip.neighbor":              ["read"],
+    "ip.neighbor":              ["read", "write"],
     # DHCP
     "dhcp.server":              ["read", "write"],
     "dhcp.lease":               ["read", "write"],

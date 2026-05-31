@@ -43,26 +43,31 @@ export interface ListEventsParams {
   offset?: number;
 }
 
-function buildSearch(params: ListEventsParams): Record<string, string | string[]> {
-  const sp: Record<string, string | string[]> = {};
-  if (params.severity && params.severity.length > 0) sp.severity = params.severity;
-  if (params.device_id) sp.device_id = params.device_id;
-  if (params.tenant_id) sp.tenant_id = params.tenant_id;
-  if (params.site_id) sp.site_id = params.site_id;
-  if (params.acknowledged !== undefined) sp.acknowledged = String(params.acknowledged);
-  if (params.since) sp.since = params.since;
-  if (params.until) sp.until = params.until;
-  if (params.search) sp.search = params.search;
-  if (params.limit !== undefined) sp.limit = String(params.limit);
-  if (params.offset !== undefined) sp.offset = String(params.offset);
+// FastAPI's `list[Enum]` query parameter wants the key REPEATED
+// (?severity=critical&severity=error), not comma-joined. ky's
+// `searchParams` flattens arrays into a single comma-separated value,
+// so we build URLSearchParams manually here.
+function buildSearch(params: ListEventsParams): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (params.severity) {
+    for (const s of params.severity) sp.append("severity", s);
+  }
+  if (params.device_id) sp.set("device_id", params.device_id);
+  if (params.tenant_id) sp.set("tenant_id", params.tenant_id);
+  if (params.site_id) sp.set("site_id", params.site_id);
+  if (params.acknowledged !== undefined)
+    sp.set("acknowledged", String(params.acknowledged));
+  if (params.since) sp.set("since", params.since);
+  if (params.until) sp.set("until", params.until);
+  if (params.search) sp.set("search", params.search);
+  if (params.limit !== undefined) sp.set("limit", String(params.limit));
+  if (params.offset !== undefined) sp.set("offset", String(params.offset));
   return sp;
 }
 
 export async function listEvents(params: ListEventsParams = {}): Promise<EventListResponse> {
   try {
-    return await api
-      .get("events", { searchParams: buildSearch(params) as Record<string, string> })
-      .json<EventListResponse>();
+    return await api.get("events", { searchParams: buildSearch(params) }).json<EventListResponse>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }
