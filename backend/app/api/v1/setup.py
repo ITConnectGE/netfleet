@@ -31,19 +31,34 @@ async def perform_setup(
     session: AsyncSession = Depends(db_session),
     x_bootstrap_token: str = Header(default=""),
 ) -> SetupResponse:
-    # First-run takeover defence (reported by Bertie, 2026-05-31). When the
-    # installer has provisioned a bootstrap token, the very first POST /setup
-    # must carry it as `X-Bootstrap-Token`. Once `is_setup_complete=True` the
-    # service returns 409 either way, so the token is single-use by virtue of
-    # the DB state — there is no separate "consume" step to race.
+    # First-run takeover defence (reported by Bertie 2026-05-31, hardened
+    # against an empty-token fail-open per his 2026-06-01 follow-up).
     #
-    # Empty BOOTSTRAP_TOKEN means "feature disabled" — keeps in-place upgrades
-    # of already-configured orgs working (the endpoint will 409 on them
-    # regardless), and lets dev installs skip the token. install.sh now writes
-    # a real token on every new install so this branch is the exception.
+    # Two states to handle:
+    #
+    #   (a) Setup already complete (`is_setup_complete=True`). The endpoint
+    #       returns 409 — the token is consumed implicitly by the DB state
+    #       transition, so a leaked token is not a re-use risk.
+    #
+    #   (b) Setup NOT complete. We MUST require a configured server token
+    #       and a matching X-Bootstrap-Token header. An empty server token
+    #       used to be treated as "feature disabled" so legacy upgrades kept
+    #       working — but that left dev / hand-rolled `docker compose up`
+    #       deployments fail-open (anyone wins the admin account). Now we
+    #       fail closed with 503 telling the operator how to set the token.
     expected = settings.BOOTSTRAP_TOKEN
-    if expected:
-        # constant-time compare on bytes
+
+    already_complete = await setup_svc.setup_complete(session)
+    if not already_complete:
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "First-run setup is disabled: NETFLEET_BOOTSTRAP_TOKEN "
+                    "is not configured. Generate one (`openssl rand -hex 32`), "
+                    "set it in /opt/netfleet/.env, and restart the api service."
+                ),
+            )
         if not hmac.compare_digest(
             x_bootstrap_token.encode("utf-8"), expected.encode("utf-8")
         ):
