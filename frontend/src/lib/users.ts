@@ -57,6 +57,7 @@ export interface Assignment {
   scope_type: AssignmentScope;
   scope_id: string | null;
   scope_label: string | null;
+  expires_at: string | null;
   created_at: string;
 }
 

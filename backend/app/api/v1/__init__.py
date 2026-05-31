@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     access,
+    access_requests,
     audit,
     auth,
     backups,
@@ -57,6 +58,9 @@ router.include_router(settings_api.router, prefix="/settings", tags=["settings"]
 router.include_router(updates.router, prefix="/system/update", tags=["updates"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(access.router, prefix="/access", tags=["access"])
+router.include_router(
+    access_requests.router, prefix="/access-requests", tags=["access-requests"]
+)
 
 # Health is at the root of /api/v1 for easy probe endpoints
 router.add_api_route("/health", system.health, methods=["GET"], tags=["system"])

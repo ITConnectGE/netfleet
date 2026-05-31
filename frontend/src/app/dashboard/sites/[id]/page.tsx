@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AccessPanel } from "@/components/access-panel";
+import { RequestAccessButton } from "@/components/request-access-button";
 import { StatusPill } from "@/components/status-pill";
 import { listDevices, type Device } from "@/lib/devices";
 import { deleteSite, getSite, updateSite, type Site, type SiteUpdate } from "@/lib/sites";
@@ -129,7 +130,18 @@ export default function SiteDetailPage() {
         </table>
       </div>
 
-      <AccessPanel scope="site" id={params.id} />
+      <AccessPanel scope="site" id={id} />
+
+      {site && (
+        <div className="mt-4 flex justify-end">
+          <RequestAccessButton
+            scopeType="site"
+            scopeId={id}
+            scopeLabel={site.name}
+            variant="block"
+          />
+        </div>
+      )}
     </div>
   );
 }

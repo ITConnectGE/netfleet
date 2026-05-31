@@ -28,6 +28,7 @@ const NAV = [
   { href: "/dashboard/fleet", label: "Fleet" },
   { href: "/dashboard/bulk", label: "Bulk" },
   { href: "/dashboard/users", label: "Users" },
+  { href: "/dashboard/access-requests", label: "Access requests" },
   // Roles lived here in Phases 1-6; P21 Stage 2 moved them under
   // Settings → Access control to clean up the top bar.
   { href: "/dashboard/events", label: "Events" },

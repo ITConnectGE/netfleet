@@ -122,32 +122,51 @@ export default function UserDetailPage() {
                 </td>
               </tr>
             ) : (
-              assignments.map((a) => (
-                <tr key={a.id} className="hover:bg-accent/30">
-                  <td className="px-4 py-2.5 font-medium">{a.role_name}</td>
-                  <td className="px-4 py-2.5">
-                    <span className="font-mono text-xs">{a.scope_type}</span>
-                    {a.scope_label && (
-                      <span className="ml-2 text-muted-foreground">· {a.scope_label}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                    {new Date(a.created_at).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button
-                      onClick={() => {
-                        if (confirm(`Revoke "${a.role_name}" from this user?`)) {
-                          deleteAssignmentMut.mutate(a.id);
-                        }
-                      }}
-                      className="text-xs text-destructive hover:underline"
-                    >
-                      Revoke
-                    </button>
-                  </td>
-                </tr>
-              ))
+              assignments.map((a) => {
+                const expired =
+                  a.expires_at && new Date(a.expires_at).getTime() <= Date.now();
+                return (
+                  <tr key={a.id} className="hover:bg-accent/30">
+                    <td className="px-4 py-2.5 font-medium">{a.role_name}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="font-mono text-xs">{a.scope_type}</span>
+                      {a.scope_label && (
+                        <span className="ml-2 text-muted-foreground">
+                          · {a.scope_label}
+                        </span>
+                      )}
+                      {a.expires_at && (
+                        <span
+                          className={`ml-2 rounded-md px-1.5 py-0.5 text-[10px] ${
+                            expired
+                              ? "bg-red-100 text-red-900"
+                              : "bg-amber-100 text-amber-900"
+                          }`}
+                          title={`Expires ${new Date(a.expires_at).toLocaleString()}`}
+                        >
+                          {expired ? "expired" : "expires"}{" "}
+                          {new Date(a.expires_at).toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                      {new Date(a.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => {
+                          if (confirm(`Revoke "${a.role_name}" from this user?`)) {
+                            deleteAssignmentMut.mutate(a.id);
+                          }
+                        }}
+                        className="text-xs text-destructive hover:underline"
+                      >
+                        Revoke
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

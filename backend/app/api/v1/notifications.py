@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import db_session, get_current_user
+from app.models.access_request import AccessRequest, AccessRequestStatus
 from app.models.device import Device
 from app.models.user import User
 from app.services.firmware import _norm_version  # type: ignore[attr-defined]
@@ -46,7 +47,12 @@ MAX_FEED_ITEMS = 20
 
 class NotificationItem(BaseModel):
     id: str
-    kind: Literal["firmware_update", "device_added"]
+    kind: Literal[
+        "firmware_update",
+        "device_added",
+        "access_request_pending",
+        "access_request_decided",
+    ]
     title: str
     subtitle: str | None
     timestamp: datetime
@@ -111,6 +117,60 @@ async def list_my_notifications(
                     unread=_is_unread(d.created_at, watermark),
                 )
             )
+
+    # Access requests (P21 Stage 6). Admins see every pending request;
+    # everyone sees the latest decisions on their own requests.
+    if user.is_admin:
+        pending = list(
+            (
+                await session.execute(
+                    select(AccessRequest).where(
+                        AccessRequest.organization_id == user.organization_id,
+                        AccessRequest.status == AccessRequestStatus.PENDING,
+                    )
+                )
+            ).scalars()
+        )
+        for r in pending:
+            items.append(
+                NotificationItem(
+                    id=f"req:{r.id}",
+                    kind="access_request_pending",
+                    title=f"Access request: {r.scope_type.value}",
+                    subtitle=r.reason or "no reason given",
+                    timestamp=r.created_at,
+                    link_path=f"/dashboard/access-requests/{r.id}",
+                    unread=_is_unread(r.created_at, watermark),
+                )
+            )
+
+    own_decided = list(
+        (
+            await session.execute(
+                select(AccessRequest).where(
+                    AccessRequest.organization_id == user.organization_id,
+                    AccessRequest.requester_user_id == user.id,
+                    AccessRequest.status.in_(
+                        [AccessRequestStatus.APPROVED, AccessRequestStatus.DENIED]
+                    ),
+                )
+            )
+        ).scalars()
+    )
+    for r in own_decided:
+        ts = r.decided_at or r.updated_at
+        verdict = r.status.value
+        items.append(
+            NotificationItem(
+                id=f"req-decided:{r.id}",
+                kind="access_request_decided",
+                title=f"Access request {verdict}: {r.scope_type.value}",
+                subtitle=r.decision_note or None,
+                timestamp=ts,
+                link_path=f"/dashboard/access-requests/{r.id}",
+                unread=_is_unread(ts, watermark),
+            )
+        )
 
     items.sort(key=lambda i: i.timestamp, reverse=True)
     items = items[:MAX_FEED_ITEMS]

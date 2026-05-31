@@ -1,6 +1,7 @@
 """SQLAlchemy ORM models — importing this module registers all tables on Base.metadata."""
 
 from app.core.database import Base
+from app.models.access_request import AccessRequest, AccessRequestGrant, AccessRequestStatus
 from app.models.audit_log import AuditLog, AuditOutcome
 from app.models.device import Device, DeviceStatus, DeviceTransport
 from app.models.device_backup import BackupSource, BackupStatus, DeviceBackup
@@ -15,6 +16,9 @@ from app.models.user import AuthMethod, User
 
 __all__ = [
     "Base",
+    "AccessRequest",
+    "AccessRequestGrant",
+    "AccessRequestStatus",
     "AssignmentScope",
     "AuditLog",
     "AuditOutcome",

@@ -91,6 +91,7 @@ class AssignmentPublic(BaseModel):
     scope_type: AssignmentScope
     scope_id: UUID | None
     scope_label: str | None = None
+    expires_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

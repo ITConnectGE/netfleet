@@ -160,6 +160,7 @@ async def list_assignments(
             scope_type=a.scope_type,
             scope_id=a.scope_id,
             scope_label=scope_label,
+            expires_at=a.expires_at,
             created_at=a.created_at,
         )
         for a, role_name, scope_label in rows
@@ -276,6 +277,7 @@ async def bulk_create_assignments(
             scope_type=a.scope_type,
             scope_id=a.scope_id,
             scope_label=scope_label,
+            expires_at=a.expires_at,
             created_at=a.created_at,
         )
         for a, role_name, scope_label in all_rows

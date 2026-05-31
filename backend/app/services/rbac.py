@@ -15,6 +15,7 @@ ABAC), we can swap in Casbin behind this function without changing call-sites.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -120,7 +121,13 @@ async def can(
     )
     assignments = list((await session.execute(stmt)).scalars())
 
+    now = datetime.now(UTC)
     for a in assignments:
+        # Time-limited grants (P21 Stage 6) drop out of the policy
+        # check past their expiry — no need for a cleanup sweep, the
+        # row stays around for audit purposes.
+        if a.expires_at is not None and a.expires_at <= now:
+            continue
         if not _scope_matches(a, device_id=device_id, site_id=site_id, tenant_id=tenant_id):
             continue
         if _role_grants(a.role, section, action):

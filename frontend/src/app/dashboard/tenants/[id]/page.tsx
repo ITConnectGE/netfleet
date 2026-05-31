@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { AccessPanel } from "@/components/access-panel";
+import { RequestAccessButton } from "@/components/request-access-button";
 import {
   createSite,
   deleteSite,
@@ -185,6 +186,17 @@ export default function TenantDetailPage() {
       </div>
 
       <AccessPanel scope="tenant" id={tenantId} />
+
+      {tenant && (
+        <div className="mt-4 flex justify-end">
+          <RequestAccessButton
+            scopeType="tenant"
+            scopeId={tenantId}
+            scopeLabel={tenant.name}
+            variant="block"
+          />
+        </div>
+      )}
     </div>
   );
 }

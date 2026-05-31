@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -108,6 +109,10 @@ class RoleAssignment(IdMixin, TimestampsMixin, TableNameMixin, Base):
         default=AssignmentScope.ORGANIZATION,
     )
     scope_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), index=True)
+    # NULL = permanent grant (existing behaviour). When set, the RBAC
+    # resolver skips the assignment past this point in time. P21 Stage 6
+    # uses this for time-limited Request-Access approvals.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship("User", back_populates="role_assignments")
     role: Mapped[Role] = relationship("Role", back_populates="assignments")
