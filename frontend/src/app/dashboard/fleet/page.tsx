@@ -158,9 +158,14 @@ export default function FleetPage() {
           {filter ? "Nothing matches that filter." : "No tenants yet."}
         </div>
       ) : (
-        <div className="mt-6 space-y-10">
-          {filtered.map((t) => (
-            <TenantBlock key={t.id} tenant={t} highlight={filter.toLowerCase()} />
+        <div className="mt-4 space-y-4 rounded-lg border border-border bg-card">
+          {filtered.map((t, i) => (
+            <TenantBlock
+              key={t.id}
+              tenant={t}
+              highlight={filter.toLowerCase()}
+              isFirst={i === 0}
+            />
           ))}
         </div>
       )}
@@ -171,20 +176,22 @@ export default function FleetPage() {
 function TenantBlock({
   tenant,
   highlight,
+  isFirst,
 }: {
   tenant: TenantNode;
   highlight: string;
+  isFirst: boolean;
 }) {
   return (
-    <section>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2">
+    <section className={isFirst ? "" : "border-t border-border"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 bg-muted/40 px-3 py-1.5">
         <Link
           href={`/dashboard/tenants/${tenant.id}`}
-          className="text-lg font-semibold tracking-tight hover:underline"
+          className="text-sm font-semibold hover:underline"
         >
           <Highlighted text={tenant.name} needle={highlight} />
         </Link>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span>
             {tenant.sites.length} site{tenant.sites.length === 1 ? "" : "s"} ·{" "}
             {tenant.device_count} device{tenant.device_count === 1 ? "" : "s"}
@@ -195,7 +202,7 @@ function TenantBlock({
       </div>
 
       {tenant.sites.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="px-3 py-1.5 text-[11px] text-muted-foreground">
           No sites yet.{" "}
           <Link
             href={`/dashboard/tenants/${tenant.id}`}
@@ -205,24 +212,24 @@ function TenantBlock({
           </Link>
         </p>
       ) : (
-        <div className="mt-3 space-y-3">
+        <ul className="divide-y divide-border/70">
           {tenant.sites.map((s) => (
-            <SiteBlock key={s.id} site={s} highlight={highlight} />
+            <SiteRow key={s.id} site={s} highlight={highlight} />
           ))}
-        </div>
+        </ul>
       )}
     </section>
   );
 }
 
-function SiteBlock({ site, highlight }: { site: SiteNode; highlight: string }) {
+function SiteRow({ site, highlight }: { site: SiteNode; highlight: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <li>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-1.5">
         <div className="min-w-0">
           <Link
             href={`/dashboard/sites/${site.id}`}
-            className="font-medium hover:underline"
+            className="text-sm font-medium hover:underline"
           >
             <Highlighted text={site.name} needle={highlight} />
           </Link>
@@ -232,7 +239,7 @@ function SiteBlock({ site, highlight }: { site: SiteNode; highlight: string }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span>
             {site.devices.length} device{site.devices.length === 1 ? "" : "s"}
           </span>
@@ -241,16 +248,14 @@ function SiteBlock({ site, highlight }: { site: SiteNode; highlight: string }) {
         </div>
       </div>
 
-      {site.devices.length === 0 ? (
-        <p className="mt-2 text-xs text-muted-foreground">No devices.</p>
-      ) : (
-        <ul className="mt-3 divide-y divide-border/60">
+      {site.devices.length > 0 && (
+        <ul className="divide-y divide-border/40 border-t border-border/40 bg-muted/10 pl-6">
           {site.devices.map((d) => (
             <DeviceRow key={d.id} device={d} highlight={highlight} />
           ))}
         </ul>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -266,7 +271,7 @@ function DeviceRow({
     device.firmware &&
     normFw(device.firmware_available) !== normFw(device.firmware);
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 py-1.5 text-sm">
+    <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-1 text-xs">
       <Link
         href={`/dashboard/devices/${device.id}`}
         className="flex min-w-0 flex-1 items-baseline gap-2 hover:underline"
@@ -274,7 +279,7 @@ function DeviceRow({
         <span className="truncate font-medium">
           <Highlighted text={device.name} needle={highlight} />
         </span>
-        <span className="truncate font-mono text-[11px] text-muted-foreground">
+        <span className="truncate font-mono text-[10px] text-muted-foreground">
           {device.vendor} · {device.host}:{device.port}
         </span>
         {fwUpgrade && (
