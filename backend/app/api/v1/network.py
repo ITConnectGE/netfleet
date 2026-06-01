@@ -421,6 +421,39 @@ async def list_interfaces(
     ]
 
 
+@router.post(
+    "/{device_id}/interfaces/{interface_name}/reset-counters",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reset_interface_counters(
+    device_id: UUID,
+    interface_name: str,
+    request: Request,
+    user: User = Depends(require_permission("interface.list", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).interface_reset_counters(
+            _to_driver_creds(device), interface_name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="interface.list",
+        action="reset_counters",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"interface_name": interface_name},
+    )
+    await session.commit()
+
+
 # ---------------- VLANs ----------------
 
 

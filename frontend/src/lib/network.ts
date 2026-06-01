@@ -1,5 +1,18 @@
 import { api, readErrorMessage } from "@/lib/api";
 
+export async function resetInterfaceCounters(
+  deviceId: string,
+  interfaceName: string,
+): Promise<void> {
+  try {
+    await api.post(
+      `devices/${deviceId}/interfaces/${encodeURIComponent(interfaceName)}/reset-counters`,
+    );
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 // ---------------- Routes ----------------
 
 export interface IpRoute {

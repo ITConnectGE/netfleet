@@ -354,20 +354,56 @@ class MikrotikDriver:
                 id=r.get(".id"),
                 chain=str(r.get("chain", "")),
                 action=str(r.get("action", "")),
-                src_address=r.get("src-address"),
-                dst_address=r.get("dst-address"),
-                dst_port=r.get("dst-port"),
-                protocol=r.get("protocol"),
-                to_addresses=r.get("to-addresses"),
-                to_ports=r.get("to-ports"),
-                in_interface=r.get("in-interface"),
-                out_interface=r.get("out-interface"),
+                src_address=_to_str(r.get("src-address")),
+                dst_address=_to_str(r.get("dst-address")),
+                dst_port=_to_str(r.get("dst-port")),
+                protocol=_to_str(r.get("protocol")),
+                to_addresses=_to_str(r.get("to-addresses")),
+                to_ports=_to_str(r.get("to-ports")),
+                in_interface=_to_str(r.get("in-interface")),
+                out_interface=_to_str(r.get("out-interface")),
+                log=_to_bool(r.get("log")),
+                log_prefix=_to_str(r.get("log-prefix")),
+                bytes_count=_int_or_none(r.get("bytes")),
+                packets_count=_int_or_none(r.get("packets")),
                 disabled=_to_bool(r.get("disabled")),
                 comment=r.get("comment"),
                 raw=r,
             )
             for r in rows
         ]
+
+    async def firewall_nat_set(
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        disabled: bool | None = None,
+        log: bool | None = None,
+        log_prefix: str | None = None,
+    ) -> None:
+        params: dict[str, Any] = {".id": rule_id}
+        if disabled is not None:
+            params["disabled"] = "yes" if disabled else "no"
+        if log is not None:
+            params["log"] = "yes" if log else "no"
+        if log_prefix is not None:
+            params["log-prefix"] = log_prefix
+        await self._call(creds, "/ip/firewall/nat/set", **params)
+
+    async def firewall_nat_reset_counters(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None:
+        await self._call(
+            creds, "/ip/firewall/nat/reset-counters", **{".id": rule_id}
+        )
+
+    async def interface_reset_counters(
+        self, creds: DeviceCredentials, interface_name: str
+    ) -> None:
+        await self._call(
+            creds, "/interface/reset-counters", numbers=interface_name
+        )
 
     async def firewall_nat_add(self, creds: DeviceCredentials, rule: NatRule) -> str:
         params: dict[str, Any] = {"chain": rule.chain, "action": rule.action}
@@ -425,12 +461,29 @@ class MikrotikDriver:
         return str(rows[0].get("ret", "")) if rows else ""
 
     async def firewall_filter_set(
-        self, creds: DeviceCredentials, rule_id: str, *, disabled: bool | None = None
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        disabled: bool | None = None,
+        log: bool | None = None,
+        log_prefix: str | None = None,
     ) -> None:
         params: dict[str, Any] = {".id": rule_id}
         if disabled is not None:
             params["disabled"] = "yes" if disabled else "no"
+        if log is not None:
+            params["log"] = "yes" if log else "no"
+        if log_prefix is not None:
+            params["log-prefix"] = log_prefix
         await self._call(creds, "/ip/firewall/filter/set", **params)
+
+    async def firewall_filter_reset_counters(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None:
+        await self._call(
+            creds, "/ip/firewall/filter/reset-counters", **{".id": rule_id}
+        )
 
     async def firewall_filter_remove(
         self, creds: DeviceCredentials, rule_id: str

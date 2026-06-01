@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { useToast } from "@/components/toast";
 import {
   createRoute,
   createVlan,
@@ -17,6 +18,7 @@ import {
   listNeighbors,
   listRoutes,
   listVlans,
+  resetInterfaceCounters,
   setNeighborDiscovery,
   type ArpEntry,
   type BridgeHost,
@@ -676,13 +678,24 @@ function truncate(s: string, n: number): string {
 // ---------------- Interfaces ----------------
 
 function InterfacesTab({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
   const { data, isLoading, error } = useQuery<Interface[]>({
     queryKey: ["interfaces", deviceId],
     queryFn: () => listInterfaces(deviceId),
   });
 
+  const reset = useMutation({
+    mutationFn: (name: string) => resetInterfaceCounters(deviceId, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["interfaces", deviceId] });
+      toast.success("Counters reset");
+    },
+    onError: (e: Error) => toast.error("Reset failed", e.message),
+  });
+
   return (
-    <Section title="Interfaces" subtitle="All interfaces with link state and counters.">
+    <Section title="Interfaces" subtitle="All interfaces with link state and counters. Click Reset to zero rx/tx.">
       <ErrorOrTable error={error}>
         <table className="w-full text-sm">
           <thead className="border-b border-border bg-muted/50">
@@ -695,12 +708,13 @@ function InterfacesTab({ deviceId }: { deviceId: string }) {
               <th className="px-3 py-2 font-medium text-right">TX</th>
               <th className="px-3 py-2 font-medium">State</th>
               <th className="px-3 py-2 font-medium">Comment</th>
+              <th className="px-3 py-2 font-medium text-right" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {isLoading && <EmptyRow colSpan={8} label="Loading…" />}
+            {isLoading && <EmptyRow colSpan={9} label="Loading…" />}
             {!isLoading && (!data || data.length === 0) && (
-              <EmptyRow colSpan={8} label="No interfaces." />
+              <EmptyRow colSpan={9} label="No interfaces." />
             )}
             {data?.map((i) => (
               <tr key={i.id ?? i.name} className="hover:bg-accent/30">
@@ -730,6 +744,16 @@ function InterfacesTab({ deviceId }: { deviceId: string }) {
                   )}
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{i.comment ?? "—"}</td>
+                <td className="px-3 py-2 text-right">
+                  <button
+                    onClick={() => reset.mutate(i.name)}
+                    disabled={reset.isPending}
+                    className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                    title="Zero rx/tx counters on this interface"
+                  >
+                    Reset
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState } from "react";
 
 import {
   createWgInterface,

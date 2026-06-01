@@ -133,6 +133,10 @@ class NatRule:
     to_ports: str | None = None
     in_interface: str | None = None
     out_interface: str | None = None
+    log: bool = False
+    log_prefix: str | None = None
+    bytes_count: int | None = None
+    packets_count: int | None = None
     disabled: bool = False
     comment: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
@@ -157,6 +161,8 @@ class FilterRule:
     connection_state: str | None = None     # new,established,related,invalid
     log: bool = False
     log_prefix: str | None = None
+    bytes_count: int | None = None
+    packets_count: int | None = None
     disabled: bool = False
     comment: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
@@ -524,13 +530,37 @@ class VendorDriver(Protocol):
     ) -> None: ...
     async def firewall_nat_list(self, creds: DeviceCredentials) -> list[NatRule]: ...
     async def firewall_nat_add(self, creds: DeviceCredentials, rule: NatRule) -> str: ...
+    async def firewall_nat_set(
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        disabled: bool | None = None,
+        log: bool | None = None,
+        log_prefix: str | None = None,
+    ) -> None: ...
     async def firewall_nat_remove(self, creds: DeviceCredentials, rule_id: str) -> None: ...
+    async def firewall_nat_reset_counters(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None: ...
+    async def interface_reset_counters(
+        self, creds: DeviceCredentials, interface_name: str
+    ) -> None: ...
     async def firewall_filter_list(self, creds: DeviceCredentials) -> list[FilterRule]: ...
     async def firewall_filter_add(
         self, creds: DeviceCredentials, rule: FilterRule
     ) -> str: ...
     async def firewall_filter_set(
-        self, creds: DeviceCredentials, rule_id: str, *, disabled: bool | None = None
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        disabled: bool | None = None,
+        log: bool | None = None,
+        log_prefix: str | None = None,
+    ) -> None: ...
+    async def firewall_filter_reset_counters(
+        self, creds: DeviceCredentials, rule_id: str
     ) -> None: ...
     async def firewall_filter_remove(
         self, creds: DeviceCredentials, rule_id: str

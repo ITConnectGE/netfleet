@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { listDevices, type Device } from "@/lib/devices";
@@ -715,6 +715,3 @@ function NavRow({
 
 const input =
   "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
-
-// Silence unused FormEvent import warning until next iteration drops it
-void {} as FormEvent;

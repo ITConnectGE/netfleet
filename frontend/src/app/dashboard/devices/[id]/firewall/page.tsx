@@ -7,11 +7,19 @@ import { useState, type FormEvent } from "react";
 import { useToast } from "@/components/toast";
 import {
   createFilterRule,
+  createNatRule,
   deleteFilterRule,
+  deleteNatRule,
   listFilterRules,
+  listNatRules,
   moveFilterRule,
+  resetFilterRuleCounters,
+  resetNatRuleCounters,
   setFilterRuleDisabled,
+  updateFilterRule,
+  updateNatRule,
   type FilterRule,
+  type NatRule,
 } from "@/lib/firewall";
 
 const CHAINS = ["input", "forward", "output"] as const;
@@ -29,6 +37,7 @@ export default function FirewallPage() {
   const deviceId = params.id;
   const qc = useQueryClient();
   const toast = useToast();
+  const [section, setSection] = useState<"filter" | "nat">("filter");
 
   const [chainFilter, setChainFilter] = useState<"all" | "input" | "forward" | "output">("all");
   const [showForm, setShowForm] = useState(false);
@@ -46,6 +55,20 @@ export default function FirewallPage() {
   const del = useMutation({
     mutationFn: (id: string) => deleteFilterRule(deviceId, id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-filter", deviceId] }),
+  });
+  const toggleLog = useMutation({
+    mutationFn: ({ id, log }: { id: string; log: boolean }) =>
+      updateFilterRule(deviceId, id, { log }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-filter", deviceId] }),
+    onError: (e: Error) => toast.error("Log toggle failed", e.message),
+  });
+  const reset = useMutation({
+    mutationFn: (id: string) => resetFilterRuleCounters(deviceId, id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fw-filter", deviceId] });
+      toast.success("Counters reset");
+    },
+    onError: (e: Error) => toast.error("Reset failed", e.message),
   });
   const move = useMutation({
     mutationFn: ({ id, beforeId }: { id: string; beforeId: string | null }) =>
@@ -113,18 +136,43 @@ export default function FirewallPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Firewall — Filter rules</h2>
+          <h2 className="text-lg font-semibold">
+            Firewall — {section === "filter" ? "Filter rules" : "NAT"}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Tick <strong>log</strong> on a rule to mirror its hits into the device&apos;s log topic — view them on the Logs tab.
+            {section === "filter"
+              ? "Toggle Log per rule to mirror hits into the device log; bytes/packets are live counters."
+              : "Source / destination address translation. Includes DST-NAT (port forwarding) and SRC-NAT (masquerade)."}
           </p>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-        >
-          {showForm ? "Cancel" : "+ New rule"}
-        </button>
+        {section === "filter" && (
+          <button
+            onClick={() => setShowForm((s) => !s)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+          >
+            {showForm ? "Cancel" : "+ New rule"}
+          </button>
+        )}
       </div>
+
+      <div className="mt-4 inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+        {(["filter", "nat"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setSection(s)}
+            className={`rounded px-3 py-1.5 font-medium transition ${
+              section === s
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {s === "filter" ? "Filter" : "NAT"}
+          </button>
+        ))}
+      </div>
+
+      {section === "nat" && <NatPanel deviceId={deviceId} />}
+      {section === "filter" && (<>
 
       <div className="mt-4 inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
         {(["all", ...CHAINS] as const).map((c) => (
@@ -245,18 +293,34 @@ export default function FirewallPage() {
                     {r.connection_state ?? "—"}
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {r.log ? (
-                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                        log
-                      </span>
-                    ) : (
-                      "—"
+                    <button
+                      onClick={() => r.id && toggleLog.mutate({ id: r.id, log: !r.log })}
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] ${
+                        r.log
+                          ? "bg-amber-100 text-amber-900"
+                          : "border border-input bg-background text-muted-foreground"
+                      }`}
+                      title="Toggle logging for this rule"
+                    >
+                      {r.log ? "ON" : "off"}
+                    </button>
+                    {(r.bytes_count != null || r.packets_count != null) && (
+                      <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                        {formatBytes(r.bytes_count)} / {r.packets_count ?? 0}
+                      </div>
                     )}
                   </td>
                   <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">
                     {r.comment ?? "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => r.id && reset.mutate(r.id)}
+                      className="mr-3 text-xs text-muted-foreground hover:underline"
+                      title="Zero bytes / packets counters"
+                    >
+                      Reset
+                    </button>
                     <button
                       onClick={() => r.id && toggle.mutate({ id: r.id, disabled: !r.disabled })}
                       className="text-xs text-muted-foreground hover:underline"
@@ -278,6 +342,7 @@ export default function FirewallPage() {
           </tbody>
         </table>
       </div>
+      </>)}
     </div>
   );
 }
@@ -544,3 +609,393 @@ function Field({
 
 const input =
   "block w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+
+// ---------------- NAT ----------------
+
+function NatPanel({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [chainFilter, setChainFilter] = useState<"all" | "srcnat" | "dstnat">("all");
+
+  const { data: rules, isLoading, error } = useQuery<NatRule[]>({
+    queryKey: ["fw-nat", deviceId],
+    queryFn: () => listNatRules(deviceId),
+  });
+
+  const toggle = useMutation({
+    mutationFn: ({ id, disabled }: { id: string; disabled: boolean }) =>
+      updateNatRule(deviceId, id, { disabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-nat", deviceId] }),
+  });
+  const toggleLog = useMutation({
+    mutationFn: ({ id, log }: { id: string; log: boolean }) =>
+      updateNatRule(deviceId, id, { log }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-nat", deviceId] }),
+  });
+  const reset = useMutation({
+    mutationFn: (id: string) => resetNatRuleCounters(deviceId, id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fw-nat", deviceId] });
+      toast.success("Counters reset");
+    },
+    onError: (e: Error) => toast.error("Reset failed", e.message),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => deleteNatRule(deviceId, id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fw-nat", deviceId] }),
+  });
+
+  const filtered = (rules ?? []).filter((r) =>
+    chainFilter === "all" ? true : r.chain === chainFilter,
+  );
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between">
+        <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+          {(["all", "srcnat", "dstnat"] as const).map((c) => (
+            <button
+              key={c}
+              onClick={() => setChainFilter(c)}
+              className={`rounded px-3 py-1.5 font-medium transition ${
+                chainFilter === c
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {c.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setShowForm((s) => !s)}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+        >
+          {showForm ? "Cancel" : "+ New NAT rule"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(error as Error).message}
+        </div>
+      )}
+
+      {showForm && (
+        <NatRuleForm
+          deviceId={deviceId}
+          onCreated={() => {
+            qc.invalidateQueries({ queryKey: ["fw-nat", deviceId] });
+            setShowForm(false);
+          }}
+        />
+      )}
+
+      <div className="mt-6 overflow-x-auto rounded-lg border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead className="border-b border-border bg-muted/50">
+            <tr className="text-left">
+              <th className="px-3 py-2.5 font-medium">Chain</th>
+              <th className="px-3 py-2.5 font-medium">Action</th>
+              <th className="px-3 py-2.5 font-medium">Src</th>
+              <th className="px-3 py-2.5 font-medium">Dst</th>
+              <th className="px-3 py-2.5 font-medium">Proto</th>
+              <th className="px-3 py-2.5 font-medium">Dst port</th>
+              <th className="px-3 py-2.5 font-medium">→ To</th>
+              <th className="px-3 py-2.5 font-medium">Bytes / Packets</th>
+              <th className="px-3 py-2.5 font-medium">Log</th>
+              <th className="px-3 py-2.5 font-medium">Comment</th>
+              <th className="px-3 py-2.5 font-medium text-right" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {isLoading && (
+              <tr>
+                <td colSpan={11} className="px-3 py-6 text-center text-muted-foreground">
+                  Loading…
+                </td>
+              </tr>
+            )}
+            {!isLoading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">
+                  No NAT rules.
+                </td>
+              </tr>
+            )}
+            {filtered.map((r) => (
+              <tr
+                key={r.id}
+                className={`hover:bg-accent/30 ${r.disabled ? "opacity-50" : ""}`}
+              >
+                <td className="px-3 py-2 font-mono text-xs">{r.chain}</td>
+                <td className="px-3 py-2">
+                  <ActionPill action={r.action} />
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {r.src_address ?? "—"}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {r.dst_address ?? "—"}
+                </td>
+                <td className="px-3 py-2 text-xs">{r.protocol ?? "—"}</td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {r.dst_port ?? "—"}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11px]">
+                  {r.to_addresses ?? "—"}
+                  {r.to_ports && (
+                    <span className="ml-1 text-muted-foreground">
+                      :{r.to_ports}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-[10px] text-muted-foreground">
+                  {formatBytes(r.bytes_count)} / {r.packets_count ?? 0}
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  <button
+                    onClick={() => r.id && toggleLog.mutate({ id: r.id, log: !r.log })}
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] ${
+                      r.log
+                        ? "bg-amber-100 text-amber-900"
+                        : "border border-input bg-background text-muted-foreground"
+                    }`}
+                  >
+                    {r.log ? "ON" : "off"}
+                  </button>
+                </td>
+                <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">
+                  {r.comment ?? "—"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <button
+                    onClick={() => r.id && reset.mutate(r.id)}
+                    className="mr-3 text-xs text-muted-foreground hover:underline"
+                    title="Zero bytes/packets counters"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={() =>
+                      r.id && toggle.mutate({ id: r.id, disabled: !r.disabled })
+                    }
+                    className="text-xs text-muted-foreground hover:underline"
+                  >
+                    {r.disabled ? "Enable" : "Disable"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (r.id && confirm("Delete this NAT rule?")) del.mutate(r.id);
+                    }}
+                    className="ml-3 text-xs text-destructive hover:underline"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function NatRuleForm({
+  deviceId,
+  onCreated,
+}: {
+  deviceId: string;
+  onCreated: () => void;
+}) {
+  const [chain, setChain] = useState<"srcnat" | "dstnat" | "output">("dstnat");
+  const [action, setAction] = useState<string>("dst-nat");
+  const [srcAddress, setSrcAddress] = useState("");
+  const [dstAddress, setDstAddress] = useState("");
+  const [protocol, setProtocol] = useState("tcp");
+  const [dstPort, setDstPort] = useState("");
+  const [toAddresses, setToAddresses] = useState("");
+  const [toPorts, setToPorts] = useState("");
+  const [inInterface, setInInterface] = useState("");
+  const [outInterface, setOutInterface] = useState("");
+  const [log, setLog] = useState(false);
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const m = useMutation({
+    mutationFn: () =>
+      createNatRule(deviceId, {
+        chain,
+        action,
+        src_address: srcAddress || null,
+        dst_address: dstAddress || null,
+        protocol: protocol || null,
+        dst_port: dstPort || null,
+        to_addresses: toAddresses || null,
+        to_ports: toPorts || null,
+        in_interface: inInterface || null,
+        out_interface: outInterface || null,
+        log,
+        comment: comment || null,
+      }),
+    onSuccess: () => onCreated(),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        setError(null);
+        m.mutate();
+      }}
+      className="mt-4 rounded-lg border border-border bg-card p-5"
+    >
+      {error && (
+        <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Field label="Chain" htmlFor="n-ch">
+          <select
+            id="n-ch"
+            value={chain}
+            onChange={(e) =>
+              setChain(e.target.value as "srcnat" | "dstnat" | "output")
+            }
+            className={input}
+          >
+            <option value="dstnat">dstnat (port forward)</option>
+            <option value="srcnat">srcnat (masquerade)</option>
+            <option value="output">output</option>
+          </select>
+        </Field>
+        <Field label="Action" htmlFor="n-act">
+          <select
+            id="n-act"
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+            className={input}
+          >
+            <option value="dst-nat">dst-nat</option>
+            <option value="src-nat">src-nat</option>
+            <option value="masquerade">masquerade</option>
+            <option value="redirect">redirect</option>
+            <option value="netmap">netmap</option>
+            <option value="accept">accept</option>
+            <option value="log">log</option>
+          </select>
+        </Field>
+        <Field label="Protocol" htmlFor="n-proto">
+          <input
+            id="n-proto"
+            value={protocol}
+            onChange={(e) => setProtocol(e.target.value)}
+            className={input}
+            placeholder="tcp"
+          />
+        </Field>
+        <Field label="Comment" htmlFor="n-cm">
+          <input
+            id="n-cm"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            className={input}
+          />
+        </Field>
+        <Field label="Src address" htmlFor="n-src">
+          <input
+            id="n-src"
+            value={srcAddress}
+            onChange={(e) => setSrcAddress(e.target.value)}
+            className={`${input} font-mono`}
+            placeholder="0.0.0.0/0"
+          />
+        </Field>
+        <Field label="Dst address" htmlFor="n-dst">
+          <input
+            id="n-dst"
+            value={dstAddress}
+            onChange={(e) => setDstAddress(e.target.value)}
+            className={`${input} font-mono`}
+            placeholder="public IP / blank for any"
+          />
+        </Field>
+        <Field label="Dst port" htmlFor="n-dport">
+          <input
+            id="n-dport"
+            value={dstPort}
+            onChange={(e) => setDstPort(e.target.value)}
+            className={`${input} font-mono`}
+            placeholder="80"
+          />
+        </Field>
+        <Field label="In interface" htmlFor="n-in">
+          <input
+            id="n-in"
+            value={inInterface}
+            onChange={(e) => setInInterface(e.target.value)}
+            className={input}
+            placeholder="ether1 (WAN)"
+          />
+        </Field>
+        <Field label="→ To addresses" htmlFor="n-to" hint="dst-nat / src-nat target">
+          <input
+            id="n-to"
+            value={toAddresses}
+            onChange={(e) => setToAddresses(e.target.value)}
+            className={`${input} font-mono`}
+            placeholder="192.168.88.10"
+          />
+        </Field>
+        <Field label="→ To ports" htmlFor="n-top">
+          <input
+            id="n-top"
+            value={toPorts}
+            onChange={(e) => setToPorts(e.target.value)}
+            className={`${input} font-mono`}
+            placeholder="8080"
+          />
+        </Field>
+        <Field label="Out interface" htmlFor="n-out">
+          <input
+            id="n-out"
+            value={outInterface}
+            onChange={(e) => setOutInterface(e.target.value)}
+            className={input}
+            placeholder="ether1 (for srcnat)"
+          />
+        </Field>
+        <label className="flex items-end gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={log}
+            onChange={(e) => setLog(e.target.checked)}
+            className="size-4 rounded"
+          />
+          Log hits
+        </label>
+      </div>
+      <div className="mt-5 flex justify-end">
+        <button
+          type="submit"
+          disabled={m.isPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {m.isPending ? "Adding…" : "Add NAT rule"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function formatBytes(n: number | null | undefined): string {
+  if (!n) return "0";
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}K`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}M`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)}G`;
+}

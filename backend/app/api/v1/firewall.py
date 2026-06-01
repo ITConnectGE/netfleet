@@ -17,6 +17,7 @@ from app.api.dependencies import (
     require_permission,
 )
 from app.drivers.base import FilterRule as DriverFilterRule
+from app.drivers.base import NatRule as DriverNatRule
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from pydantic import BaseModel
@@ -26,6 +27,9 @@ from app.schemas.firewall import (
     FilterRulePublic,
     FilterRuleUpdate,
     LogEntryPublic,
+    NatRuleCreate,
+    NatRulePublic,
+    NatRuleUpdate,
 )
 
 
@@ -167,7 +171,13 @@ async def update_filter(
 ) -> None:
     try:
         await fw_svc.set_filter(
-            session, user.organization_id, device_id, rule_id, disabled=payload.disabled
+            session,
+            user.organization_id,
+            device_id,
+            rule_id,
+            disabled=payload.disabled,
+            log=payload.log,
+            log_prefix=payload.log_prefix,
         )
     except device_svc.DeviceNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
@@ -185,6 +195,38 @@ async def update_filter(
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
         request_payload={"rule_id": rule_id, **payload.model_dump(exclude_unset=True)},
+    )
+    await session.commit()
+
+
+@router.post(
+    "/{device_id}/firewall/filter/{rule_id}/reset-counters",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reset_filter_counters(
+    device_id: UUID,
+    rule_id: str,
+    request: Request,
+    user: User = Depends(require_permission("firewall.filter", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await fw_svc.reset_filter_counters(
+            session, user.organization_id, device_id, rule_id
+        )
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.filter",
+        action="reset_counters",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"rule_id": rule_id},
     )
     await session.commit()
 
@@ -258,6 +300,207 @@ async def move_filter(
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
         request_payload={"rule_id": rule_id, "before_id": payload.before_id},
+    )
+    await session.commit()
+
+
+# ---------------- NAT ----------------
+
+
+@router.get("/{device_id}/firewall/nat", response_model=list[NatRulePublic])
+async def list_nat(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[NatRulePublic]:
+    try:
+        items = await fw_svc.list_nat(session, user.organization_id, device_id)
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    out: list[NatRulePublic] = []
+    for r in items:
+        try:
+            out.append(
+                NatRulePublic(
+                    id=r.id,
+                    chain=r.chain,
+                    action=r.action,
+                    src_address=r.src_address,
+                    dst_address=r.dst_address,
+                    dst_port=r.dst_port,
+                    protocol=r.protocol,
+                    to_addresses=r.to_addresses,
+                    to_ports=r.to_ports,
+                    in_interface=r.in_interface,
+                    out_interface=r.out_interface,
+                    log=r.log,
+                    log_prefix=r.log_prefix,
+                    bytes_count=r.bytes_count,
+                    packets_count=r.packets_count,
+                    disabled=r.disabled,
+                    comment=r.comment,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "firewall.nat.row_invalid",
+                device_id=str(device_id),
+                error=str(e),
+                row=getattr(r, "raw", None),
+            )
+    return out
+
+
+@router.post(
+    "/{device_id}/firewall/nat",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_nat(
+    device_id: UUID,
+    payload: NatRuleCreate,
+    request: Request,
+    user: User = Depends(require_permission("firewall.nat", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    rule = DriverNatRule(
+        id=None,
+        chain=payload.chain,
+        action=payload.action,
+        src_address=payload.src_address,
+        dst_address=payload.dst_address,
+        dst_port=payload.dst_port,
+        protocol=payload.protocol,
+        to_addresses=payload.to_addresses,
+        to_ports=payload.to_ports,
+        in_interface=payload.in_interface,
+        out_interface=payload.out_interface,
+        log=payload.log,
+        log_prefix=payload.log_prefix,
+        disabled=payload.disabled,
+        comment=payload.comment,
+    )
+    try:
+        new_id = await fw_svc.add_nat(session, user.organization_id, device_id, rule)
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.nat",
+        action="create",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload.model_dump(),
+        response_meta={"rule_id": new_id},
+    )
+    await session.commit()
+    return {"id": new_id}
+
+
+@router.patch(
+    "/{device_id}/firewall/nat/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def update_nat(
+    device_id: UUID,
+    rule_id: str,
+    payload: NatRuleUpdate,
+    request: Request,
+    user: User = Depends(require_permission("firewall.nat", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await fw_svc.set_nat(
+            session,
+            user.organization_id,
+            device_id,
+            rule_id,
+            disabled=payload.disabled,
+            log=payload.log,
+            log_prefix=payload.log_prefix,
+        )
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.nat",
+        action="update",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"rule_id": rule_id, **payload.model_dump(exclude_unset=True)},
+    )
+    await session.commit()
+
+
+@router.delete(
+    "/{device_id}/firewall/nat/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_nat(
+    device_id: UUID,
+    rule_id: str,
+    request: Request,
+    user: User = Depends(require_permission("firewall.nat", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await fw_svc.remove_nat(session, user.organization_id, device_id, rule_id)
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.nat",
+        action="delete",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"rule_id": rule_id},
+    )
+    await session.commit()
+
+
+@router.post(
+    "/{device_id}/firewall/nat/{rule_id}/reset-counters",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reset_nat_counters(
+    device_id: UUID,
+    rule_id: str,
+    request: Request,
+    user: User = Depends(require_permission("firewall.nat", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await fw_svc.reset_nat_counters(
+            session, user.organization_id, device_id, rule_id
+        )
+    except fw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="firewall.nat",
+        action="reset_counters",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload={"rule_id": rule_id},
     )
     await session.commit()
 
