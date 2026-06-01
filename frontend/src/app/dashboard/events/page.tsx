@@ -95,7 +95,9 @@ export default function EventsPage() {
     },
   });
 
-  const rows = data?.rows ?? [];
+  // Memoise so the empty-array fallback doesn't churn useMemo on every
+  // render before the first fetch resolves.
+  const rows = useMemo<EventRow[]>(() => data?.rows ?? [], [data]);
 
   const filteredRows = useMemo(() => {
     const f = colFilters;

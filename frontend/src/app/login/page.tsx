@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/logo";
 import {
@@ -21,7 +21,21 @@ interface OtpInfo {
   destinationHint: string;
 }
 
+// Next.js 15 bails out of static prerender for any page that calls
+// useSearchParams() unless that call sits inside a Suspense boundary —
+// see https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+// We split the page so the search-param reader lives below a Suspense
+// fallback, which lets the build finish without bouncing the whole
+// /login page to fully client-side.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Honour ?next= so the Events page (and anywhere else that bounces
