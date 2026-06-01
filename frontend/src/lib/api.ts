@@ -18,7 +18,19 @@ export const api: KyInstance = ky.create({
   retry: { limit: 0 },
   hooks: {
     beforeRequest: [
-      (request) => {
+      async (request) => {
+        // Proactive refresh: if the access token is within 60 s of
+        // expiry — or already gone but a refresh cookie may still be
+        // valid — try to mint a fresh one before the request goes out.
+        // Avoids the "tab idle for 16 min → first click 401s" round
+        // trip and keeps the layout's /auth/me poll silent.
+        if (
+          !request.url.includes("/auth/refresh") &&
+          !request.url.endsWith("/auth/login") &&
+          authStorage.isExpiringSoon(60_000)
+        ) {
+          await tryRefresh();
+        }
         const token = authStorage.getAccessToken();
         if (token) {
           request.headers.set("Authorization", `Bearer ${token}`);
@@ -27,10 +39,23 @@ export const api: KyInstance = ky.create({
     ],
     afterResponse: [
       async (request, _options, response) => {
-        if (response.status !== 401 || request.url.includes("/auth/")) {
-          return response;
-        }
-        // Try refresh exactly once
+        // Only bootstrap auth endpoints are excluded — `/auth/refresh`
+        // because retrying it after a 401 would loop, `/auth/login` /
+        // `/auth/totp/verify` / `/auth/otp/verify` because their 401
+        // means "bad credentials", not "stale access token". For
+        // everything else (including `/auth/me`, which is what the
+        // layout polls every few seconds) a 401 should opportunistically
+        // try the refresh — that's the difference between "session
+        // continues" and "user gets bounced to /login after 15 min".
+        const u = request.url;
+        const skip =
+          response.status !== 401 ||
+          u.includes("/auth/refresh") ||
+          u.endsWith("/auth/login") ||
+          u.endsWith("/auth/totp/verify") ||
+          u.endsWith("/auth/otp/verify") ||
+          u.endsWith("/auth/otp/send");
+        if (skip) return response;
         const refreshed = await tryRefresh();
         if (!refreshed) {
           authStorage.clear();

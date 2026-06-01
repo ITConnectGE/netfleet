@@ -198,18 +198,18 @@ export default function FleetPage() {
           {filter ? "Nothing matches that filter." : "No tenants yet."}
         </div>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
+        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">Tenant</th>
-                <th className="px-3 py-2 font-medium">Site</th>
-                <th className="px-3 py-2 font-medium">Device</th>
-                <th className="px-3 py-2 font-medium">IP / Host</th>
-                <th className="px-3 py-2 font-medium">Model</th>
-                <th className="px-3 py-2 font-medium">Firmware</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium text-right">Details</th>
+            <thead className="sticky top-0 z-10 bg-muted/70 text-left text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/60">
+              <tr className="border-b border-border">
+                <th className="px-3 py-2.5 font-medium">Tenant</th>
+                <th className="px-3 py-2.5 font-medium">Site</th>
+                <th className="px-3 py-2.5 font-medium">Device</th>
+                <th className="px-3 py-2.5 font-medium">IP / Host</th>
+                <th className="px-3 py-2.5 font-medium">Model</th>
+                <th className="px-3 py-2.5 font-medium">Firmware</th>
+                <th className="px-3 py-2.5 font-medium">Status</th>
+                <th className="px-3 py-2.5 font-medium text-right">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -230,24 +230,29 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
     device?.firmware_available &&
     device?.firmware &&
     normFw(device.firmware_available) !== normFw(device.firmware);
-  // Subtle top border at tenant boundaries so the eye can find group
-  // breaks even when the tenant cell is blank on continuation rows.
-  const groupBorder = tenantFirst ? "border-t border-border" : "";
+  // Heavier accent line at tenant boundaries; thinner divider between
+  // sites within a tenant. Makes the visual hierarchy readable at a
+  // glance without forcing a separator row.
+  const groupBorder = tenantFirst
+    ? "border-t-2 border-border"
+    : siteFirst
+      ? "border-t border-border/60"
+      : "";
   return (
-    <tr className={`${groupBorder} hover:bg-muted/30`}>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+    <tr className={`${groupBorder} transition-colors hover:bg-accent/40`}>
+      <td className="whitespace-nowrap px-3 py-2 align-top">
         {tenantFirst ? (
           <Link
             href={`/dashboard/tenants/${tenant.id}`}
-            className="font-medium hover:underline"
+            className="font-semibold text-foreground hover:underline"
           >
             <Highlighted text={tenant.name} needle={highlight} />
           </Link>
         ) : (
-          <span className="text-muted-foreground/40">↳</span>
+          <span className="select-none text-muted-foreground/30">·</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+      <td className="whitespace-nowrap px-3 py-2 align-top">
         {site == null ? (
           <span className="text-xs italic text-muted-foreground">
             No sites
@@ -255,15 +260,15 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
         ) : siteFirst ? (
           <Link
             href={`/dashboard/sites/${site.id}`}
-            className="hover:underline"
+            className="text-foreground/90 hover:underline"
           >
             <Highlighted text={site.name} needle={highlight} />
           </Link>
         ) : (
-          <span className="text-muted-foreground/40">↳</span>
+          <span className="select-none text-muted-foreground/30">·</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top">
+      <td className="whitespace-nowrap px-3 py-2 align-top">
         {device == null ? (
           site == null ? null : (
             <span className="text-xs italic text-muted-foreground">
@@ -273,13 +278,13 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
         ) : (
           <Link
             href={`/dashboard/devices/${device.id}`}
-            className="font-medium hover:underline"
+            className="font-medium text-foreground hover:underline"
           >
             <Highlighted text={device.name} needle={highlight} />
           </Link>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
+      <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-xs text-muted-foreground">
         {device ? (
           <Highlighted
             text={`${device.host}:${device.port}`}
@@ -289,14 +294,14 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
           <span className="text-muted-foreground/40">—</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+      <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">
         {device?.model ? (
           <Highlighted text={device.model} needle={highlight} />
         ) : (
           <span className="text-muted-foreground/40">—</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+      <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">
         {device?.firmware ? (
           <span className="inline-flex items-baseline gap-1">
             <Highlighted text={device.firmware} needle={highlight} />
@@ -313,14 +318,20 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
           <span className="text-muted-foreground/40">—</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top">
-        {device ? <StatusPill status={device.status} /> : null}
+      <td className="whitespace-nowrap px-3 py-2 align-top">
+        {device ? (
+          <StatusPill
+            status={device.status}
+            lastSeenAt={device.last_seen_at}
+            error={device.status_error}
+          />
+        ) : null}
       </td>
-      <td className="whitespace-nowrap px-3 py-1.5 align-top text-right">
+      <td className="whitespace-nowrap px-3 py-2 align-top text-right">
         {device ? (
           <Link
             href={`/dashboard/devices/${device.id}`}
-            className="text-xs text-primary hover:underline"
+            className="text-xs font-medium text-primary hover:underline"
           >
             Open →
           </Link>

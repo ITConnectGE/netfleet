@@ -35,7 +35,14 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- Tokens ---
-    ACCESS_TOKEN_TTL: int = 900
+    # Access token kept short-ish but long enough that an operator who
+    # alt-tabs away mid-investigation isn't bounced every 15 min. The
+    # frontend pro-actively refreshes within 60 s of expiry, so the
+    # practical upper bound is "how long can a refresh outage last
+    # before we want forced re-login" — 1 h is the sweet spot. Refresh
+    # token still expires after 30 days of inactivity (the cookie's
+    # max-age is reset on every successful refresh).
+    ACCESS_TOKEN_TTL: int = 3600
     REFRESH_TOKEN_TTL: int = 2_592_000
 
     # --- OIDC ---

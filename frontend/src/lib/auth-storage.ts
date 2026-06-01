@@ -40,6 +40,18 @@ class AuthStorage {
     return this.token;
   }
 
+  /** True when the token is missing or less than `withinMs` from
+   *  expiry — used by the bearer-token hook to refresh proactively so
+   *  long-idle tabs don't burn one round-trip on a guaranteed-401. */
+  isExpiringSoon(withinMs: number): boolean {
+    if (!this.expiresAt) return this.token === null;
+    return this.expiresAt - Date.now() < withinMs;
+  }
+
+  expiresAtMs(): number | null {
+    return this.expiresAt;
+  }
+
   setAccessToken(token: string, expiresAtIso: string): void {
     this.token = token;
     this.expiresAt = new Date(expiresAtIso).getTime();
