@@ -6,12 +6,14 @@ import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/logo";
 import {
+  fetchOidcProviders,
   fetchSetupStatus,
   login,
   sendOtpCode,
   verifyLoginOtp,
   verifyTotp,
   type MfaMethod,
+  type OidcProvider,
 } from "@/lib/auth";
 
 type Phase = "password" | "choose" | "totp" | "otp";
@@ -61,6 +63,8 @@ function LoginPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [providers, setProviders] = useState<OidcProvider[]>([]);
+
   // If the system isn't set up yet, send the user to the setup wizard.
   useEffect(() => {
     fetchSetupStatus()
@@ -69,6 +73,12 @@ function LoginPageInner() {
       })
       .catch(() => {});
   }, [router]);
+
+  // OIDC providers — Microsoft / Google buttons appear above the
+  // password form when the admin enabled them in Settings → Authorization.
+  useEffect(() => {
+    fetchOidcProviders().then(setProviders).catch(() => setProviders([]));
+  }, []);
 
   async function onSubmitPassword(e: FormEvent) {
     e.preventDefault();
@@ -198,8 +208,28 @@ function LoginPageInner() {
             </div>
           )}
 
+          {phase === "password" && providers.length > 0 && (
+            <div className="mt-6 space-y-2">
+              {providers.map((p) => (
+                <a
+                  key={p.provider}
+                  href={p.start_url}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2.5 text-sm font-medium transition hover:bg-accent"
+                >
+                  <ProviderIcon provider={p.provider} />
+                  {p.label}
+                </a>
+              ))}
+              <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                or sign in with email
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </div>
+          )}
+
           {phase === "password" && (
-            <form className="mt-6 space-y-4" onSubmit={onSubmitPassword}>
+            <form className={providers.length > 0 ? "space-y-4" : "mt-6 space-y-4"} onSubmit={onSubmitPassword}>
               <Field label="Email" htmlFor="email">
                 <input
                   id="email"
@@ -421,6 +451,36 @@ function MicrosoftLogo(props: React.SVGProps<SVGSVGElement>) {
       <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
     </svg>
   );
+}
+
+function GoogleLogo(props: React.SVGProps<SVGSVGElement>) {
+  // Stylised "G" mark; flat colours so it inherits no theme tint.
+  return (
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        d="M21.6 12.227c0-.682-.061-1.337-.175-1.965H12v3.717h5.385a4.6 4.6 0 0 1-1.997 3.018v2.51h3.232c1.893-1.744 2.98-4.31 2.98-7.28Z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 22c2.7 0 4.964-.895 6.62-2.493l-3.232-2.51c-.895.6-2.04.955-3.388.955-2.605 0-4.81-1.76-5.598-4.123H3.064v2.59A9.997 9.997 0 0 0 12 22Z"
+        fill="#34A853"
+      />
+      <path
+        d="M6.402 13.829A6.014 6.014 0 0 1 6.09 12c0-.635.11-1.251.31-1.829V7.581H3.064A9.996 9.996 0 0 0 2 12c0 1.614.386 3.14 1.064 4.42l3.338-2.591Z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 6.039c1.47 0 2.788.505 3.825 1.498l2.868-2.868C16.96 3.146 14.694 2.25 12 2.25A9.997 9.997 0 0 0 3.064 7.58l3.338 2.591C7.19 7.808 9.395 6.04 12 6.04Z"
+        fill="#EA4335"
+      />
+    </svg>
+  );
+}
+
+function ProviderIcon({ provider }: { provider: "microsoft" | "google" }) {
+  const cls = "size-5 shrink-0";
+  if (provider === "microsoft") return <MicrosoftLogo className={cls} />;
+  return <GoogleLogo className={cls} />;
 }
 
 const inputClass =

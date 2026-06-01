@@ -205,6 +205,27 @@ export async function fetchSetupStatus(): Promise<{ setup_complete: boolean }> {
   return api.get("setup/status").json<{ setup_complete: boolean }>();
 }
 
+export interface OidcProvider {
+  provider: "microsoft" | "google";
+  label: string;
+  start_url: string;
+}
+
+/** Public-safe list of OIDC providers the admin enabled in Settings →
+ *  Authorization. The login page uses it to render SSO buttons. Returns
+ *  an empty list when neither provider is on (the API never 401s
+ *  here, but we still treat any error as "no SSO available"). */
+export async function fetchOidcProviders(): Promise<OidcProvider[]> {
+  try {
+    const json = await api
+      .get("auth/oidc/providers")
+      .json<{ providers: OidcProvider[] }>();
+    return json.providers ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export interface SetupPayload {
   organization_name: string;
   organization_slug: string;
