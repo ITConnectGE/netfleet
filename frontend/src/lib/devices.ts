@@ -110,6 +110,14 @@ export async function testDeviceConnection(id: string): Promise<TestConnectionRe
   return api.post(`devices/${id}/test-connection`).json<TestConnectionResult>();
 }
 
+export async function rebootDevice(id: string): Promise<void> {
+  try {
+    await api.post(`devices/${id}/reboot`, { timeout: 30_000 });
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function getOnboardingScript(
   id: string,
   options: { includePassword?: boolean } = {},

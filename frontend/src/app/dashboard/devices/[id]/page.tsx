@@ -14,6 +14,7 @@ import { downloadAuthed } from "@/lib/api";
 import {
   deleteDevice,
   getDevice,
+  rebootDevice,
   testDeviceConnection,
   updateDevice,
   type Device,
@@ -59,6 +60,18 @@ export default function DeviceDetailPage() {
   const test = useMutation<TestConnectionResult>({
     mutationFn: () => testDeviceConnection(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["device", id] }),
+  });
+
+  const reboot = useMutation({
+    mutationFn: () => rebootDevice(id),
+    onSuccess: () => {
+      toast.success(
+        "Reboot triggered",
+        "The router will be back online in a couple of minutes. Use Test Connection then.",
+      );
+      qc.invalidateQueries({ queryKey: ["device", id] });
+    },
+    onError: (e: Error) => toast.error("Reboot failed", e.message),
   });
 
   const del = useMutation({
@@ -118,6 +131,23 @@ export default function DeviceDetailPage() {
             title="Edit credentials, host / port, SSH port, notes"
           >
             Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                confirm(
+                  `Reboot "${device.name}"? The router will be unreachable for 1–3 minutes.`,
+                )
+              ) {
+                reboot.mutate();
+              }
+            }}
+            disabled={reboot.isPending}
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+            title="Trigger /system/reboot on the device"
+          >
+            {reboot.isPending ? "Rebooting…" : "Reboot"}
           </button>
           <button
             type="button"

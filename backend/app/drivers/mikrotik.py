@@ -127,6 +127,20 @@ class MikrotikDriver:
             raw={**r, **(identity_rows[0] if identity_rows else {}), **rb_raw},
         )
 
+    async def system_reboot(self, creds: DeviceCredentials) -> None:
+        # The router terminates the API session right after enqueueing
+        # the reboot, so the librouteros call almost always raises a
+        # transport-level exception before it sees an OK. Swallow it —
+        # the operator's intent has been honoured by the time we get
+        # here.
+        try:
+            await self._call(creds, "/system/reboot")
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if any(s in msg for s in ("not allowed", "no permission", "auth")):
+                raise
+            # Otherwise it's the expected "device went away" race.
+
     # ============== DHCP ==============
 
     async def dhcp_leases(self, creds: DeviceCredentials) -> list[DhcpLease]:

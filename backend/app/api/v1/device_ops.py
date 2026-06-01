@@ -13,6 +13,7 @@ from app.api.dependencies import (
     get_current_user,
     require_permission,
 )
+from app.drivers import get_driver
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.device_ops import (
@@ -25,8 +26,48 @@ from app.schemas.device_ops import (
 from app.services import audit as audit_svc
 from app.services import device as device_svc
 from app.services import device_ops as ops
+from app.services.device import _to_driver_creds, get_device
 
 router = APIRouter()
+
+
+# ---------------- Reboot ----------------
+
+
+@router.post(
+    "/{device_id}/reboot",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reboot_device(
+    device_id: UUID,
+    request: Request,
+    user: User = Depends(require_permission("system.reboot", "execute")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    """Trigger a clean reboot on the device. The router drops the API
+    session as part of the operation, so a 204 from this endpoint just
+    means "the reboot was enqueued" — confirmation will come from the
+    next Test Connection cycle a couple of minutes later."""
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        await get_driver(device.vendor).system_reboot(_to_driver_creds(device))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
+        ) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.reboot",
+        action="trigger",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await session.commit()
 
 
 # ---------------- IP services ----------------
