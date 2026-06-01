@@ -285,14 +285,18 @@ class MikrotikDriver:
         self, creds: DeviceCredentials
     ) -> list[DhcpNetwork]:
         rows = await self._call(creds, "/ip/dhcp-server/network/print")
+        # RouterOS returns dns-server / ntp-server as a comma-joined
+        # string in older versions, but newer 7.x can serialise them
+        # as a Python list through librouteros. The pydantic public
+        # schema only knows about `str | None`, so coerce here.
         return [
             DhcpNetwork(
                 id=r.get(".id"),
                 address=str(r.get("address", "")),
-                gateway=r.get("gateway"),
-                netmask=r.get("netmask"),
-                dns_servers=r.get("dns-server"),
-                ntp_servers=r.get("ntp-server"),
+                gateway=_csv_or_none(r.get("gateway")),
+                netmask=_csv_or_none(r.get("netmask")),
+                dns_servers=_csv_or_none(r.get("dns-server")),
+                ntp_servers=_csv_or_none(r.get("ntp-server")),
                 domain=r.get("domain"),
                 comment=r.get("comment"),
                 raw=r,
@@ -1292,24 +1296,39 @@ class MikrotikDriver:
         if interface:
             params["?interface"] = interface
         rows = await self._call(creds, "/interface/wireguard/peers/print", **params)
-        return [
-            WireguardPeer(
-                id=r.get(".id"),
-                interface=str(r.get("interface", "")),
-                public_key=r.get("public-key"),
-                # preshared_key never returned — use reveal endpoint
-                allowed_address=r.get("allowed-address"),
-                endpoint_address=r.get("endpoint-address"),
-                endpoint_port=int(r["endpoint-port"]) if r.get("endpoint-port") else None,
-                persistent_keepalive=(
-                    int(r["persistent-keepalive"]) if r.get("persistent-keepalive") else None
-                ),
-                disabled=_to_bool(r.get("disabled")),
-                comment=r.get("comment"),
-                raw=r,
-            )
-            for r in rows
-        ]
+        out: list[WireguardPeer] = []
+        for r in rows:
+            try:
+                out.append(
+                    WireguardPeer(
+                        id=r.get(".id"),
+                        interface=str(r.get("interface", "")),
+                        public_key=_csv_or_none(r.get("public-key")),
+                        # preshared_key is masked by RouterOS — use the
+                        # NetFleet-side cache (wg_peer_secrets) via the
+                        # reveal endpoint.
+                        allowed_address=_csv_or_none(r.get("allowed-address")),
+                        endpoint_address=_to_str(r.get("endpoint-address")),
+                        endpoint_port=_int_or_none(r.get("endpoint-port")),
+                        # RouterOS returns this as "25" or "30s" or "1m"
+                        # depending on version; coerce loosely so peers
+                        # created outside NetFleet still load.
+                        persistent_keepalive=_duration_to_seconds(
+                            r.get("persistent-keepalive")
+                        ),
+                        disabled=_to_bool(r.get("disabled")),
+                        comment=r.get("comment"),
+                        raw=r,
+                    )
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "mikrotik.wg_peer.row_invalid",
+                    host=creds.host,
+                    error=str(e),
+                    row=r,
+                )
+        return out
 
     async def wireguard_peer_add(
         self, creds: DeviceCredentials, peer: WireguardPeer
@@ -1392,8 +1411,14 @@ class MikrotikDriver:
             )
         except Exception as e:
             raise RuntimeError(
-                f"failed to pull {backup_filename} via SFTP — "
-                f"check that SSH is enabled and reachable from NetFleet: {e}"
+                f"failed to pull {backup_filename} via SFTP on "
+                f"{creds.host}:{ssh_port} — {e}. "
+                "On the router, verify (1) /ip/service set ssh disabled=no, "
+                "(2) the ssh service has no address whitelist OR includes "
+                "NetFleet's outgoing IP, and (3) the input firewall chain "
+                "accepts TCP/{port} from NetFleet's source. "
+                "If SSH actually listens on a different port, edit the "
+                "device's SSH port (defaults to 22).".format(port=ssh_port)
             ) from e
 
         rsc_text = ""
@@ -1686,6 +1711,68 @@ def _to_str(v: Any) -> str | None:
         return None
     s = str(v)
     return s if s != "" else None
+
+
+def _csv_or_none(v: Any) -> str | None:
+    """RouterOS can serialise multi-valued fields (dns-server, ntp-server,
+    gateway with multiple gateways, …) as either a comma-joined string
+    or a Python list, depending on RouterOS version + librouteros build.
+    Public schemas type these as `str | None`, so collapse list → CSV
+    here so pydantic validation doesn't trip and return 500 for a
+    perfectly fine row."""
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        out = ",".join(str(x) for x in v if x is not None and str(x) != "")
+        return out or None
+    s = str(v)
+    return s if s != "" else None
+
+
+def _int_or_none(v: Any) -> int | None:
+    """Loose int coerce. Returns None for missing, empty, or junk values.
+    Used for RouterOS port fields that occasionally come back as strings
+    with junk attached (no separator) on certain versions."""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return int(str(v).strip().split()[0])
+        except (IndexError, ValueError):
+            return None
+
+
+def _duration_to_seconds(v: Any) -> int | None:
+    """RouterOS prints durations as e.g. ``"25"``, ``"30s"``, ``"1m"``,
+    ``"1h30m"``. Convert any of those to integer seconds. None / empty
+    / unparseable returns None so the field stays "unset" rather than
+    surfacing a 500."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    units = {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}
+    total = 0
+    num = ""
+    for ch in s:
+        if ch.isdigit():
+            num += ch
+            continue
+        if ch in units and num:
+            total += int(num) * units[ch]
+            num = ""
+        else:
+            # Unknown character — bail and let the caller see None.
+            return None
+    if num:
+        # Trailing bare number with no unit — assume seconds.
+        total += int(num)
+    return total or None
 
 
 def _parse_uptime(s: str) -> int | None:

@@ -13,6 +13,7 @@ class DeviceBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=8728, ge=1, le=65535)
+    ssh_port: int = Field(default=22, ge=1, le=65535)
     transport: DeviceTransport = DeviceTransport.API
     verify_tls: bool = True
     notes: str | None = Field(default=None, max_length=2048)
@@ -36,6 +37,7 @@ class DeviceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     host: str | None = Field(default=None, min_length=1, max_length=255)
     port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
     transport: DeviceTransport | None = None
     verify_tls: bool | None = None
     username: str | None = Field(default=None, min_length=1, max_length=64)
@@ -56,6 +58,7 @@ class DevicePublic(BaseModel):
     name: str
     host: str
     port: int
+    ssh_port: int = 22
     transport: DeviceTransport
     verify_tls: bool
     username: str

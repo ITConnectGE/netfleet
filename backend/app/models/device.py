@@ -56,6 +56,10 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=8728)
+    # Independent of `port` so operators that moved RouterOS SSH off 22
+    # can still take backups — binary .backup files are SFTP-pulled
+    # off the device, librouteros has no file-download method.
+    ssh_port: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     transport: Mapped[DeviceTransport] = mapped_column(
         Enum(DeviceTransport, name="device_transport", values_callable=lambda c: [e.value for e in c]),
         nullable=False,

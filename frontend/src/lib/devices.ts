@@ -11,6 +11,7 @@ export interface Device {
   name: string;
   host: string;
   port: number;
+  ssh_port: number;
   transport: DeviceTransport;
   verify_tls: boolean;
   username: string;
@@ -38,6 +39,7 @@ export interface DeviceCreate {
   name: string;
   host: string;
   port?: number;
+  ssh_port?: number;
   transport?: DeviceTransport;
   verify_tls?: boolean;
   username: string;
@@ -50,6 +52,7 @@ export interface DeviceUpdate {
   name?: string;
   host?: string;
   port?: number;
+  ssh_port?: number;
   transport?: DeviceTransport;
   verify_tls?: boolean;
   username?: string;

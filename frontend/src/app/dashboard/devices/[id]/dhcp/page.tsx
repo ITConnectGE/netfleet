@@ -1017,29 +1017,154 @@ function PoolsPanel({ deviceId }: { deviceId: string }) {
               />
             )}
             {visible.map((p) => (
-              <tr key={p.id ?? p.name} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{p.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{p.ranges}</td>
-                <td className="px-3 py-2 font-mono text-xs">{p.next_pool ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {p.comment ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-right text-xs">
-                  <button
-                    onClick={() => {
-                      if (p.id && confirm(`Delete pool "${p.name}"?`)) del.mutate(p.id);
-                    }}
-                    className="text-destructive hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
+              <PoolRow
+                key={p.id ?? p.name}
+                pool={p}
+                deviceId={deviceId}
+                onDelete={() => {
+                  if (p.id && confirm(`Delete pool "${p.name}"?`)) del.mutate(p.id);
+                }}
+              />
             ))}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function PoolRow({
+  pool,
+  deviceId,
+  onDelete,
+}: {
+  pool: DhcpPool;
+  deviceId: string;
+  onDelete: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(pool.name);
+  const [ranges, setRanges] = useState(pool.ranges);
+  const [nextPool, setNextPool] = useState(pool.next_pool ?? "");
+  const [comment, setComment] = useState(pool.comment ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  function startEditing() {
+    setName(pool.name);
+    setRanges(pool.ranges);
+    setNextPool(pool.next_pool ?? "");
+    setComment(pool.comment ?? "");
+    setError(null);
+    setEditing(true);
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!pool.id) return Promise.reject(new Error("missing pool id"));
+      return updateDhcpPool(deviceId, pool.id, {
+        name,
+        ranges,
+        next_pool: nextPool || null,
+        comment: comment || null,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dhcp-pools", deviceId] });
+      toast.success("Pool updated");
+      setEditing(false);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  if (!editing) {
+    return (
+      <tr className="hover:bg-accent/30">
+        <td className="px-3 py-2 font-medium">{pool.name}</td>
+        <td className="px-3 py-2 font-mono text-xs">{pool.ranges}</td>
+        <td className="px-3 py-2 font-mono text-xs">{pool.next_pool ?? "—"}</td>
+        <td className="px-3 py-2 text-xs text-muted-foreground">
+          {pool.comment ?? "—"}
+        </td>
+        <td className="px-3 py-2 text-right text-xs">
+          {pool.id && (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="mr-3 text-primary hover:underline"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="text-destructive hover:underline"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="bg-accent/20 align-top">
+      <td className="px-3 py-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className={`${input} text-sm`}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          value={ranges}
+          onChange={(e) => setRanges(e.target.value)}
+          className={`${input} font-mono text-xs`}
+          placeholder="10.0.0.10-10.0.0.250"
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          value={nextPool}
+          onChange={(e) => setNextPool(e.target.value)}
+          className={`${input} font-mono text-xs`}
+          placeholder="optional"
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          className={`${input} text-xs`}
+        />
+        {error && (
+          <p className="mt-1 text-[11px] text-destructive">{error}</p>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          className="mr-2 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setEditing(false);
+          }}
+          className="text-muted-foreground hover:underline"
+        >
+          Cancel
+        </button>
+      </td>
+    </tr>
   );
 }
 
@@ -1157,7 +1282,6 @@ function ipToInt(s: string): number {
 
 // Silence unused-import warnings until the edit forms come online.
 void updateDhcpNetwork;
-void updateDhcpPool;
 void updateDhcpServer;
 
 const input =

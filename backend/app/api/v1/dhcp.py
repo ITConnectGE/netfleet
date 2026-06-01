@@ -338,19 +338,42 @@ async def list_networks(
         items = await get_driver(device.vendor).dhcp_networks_list(_to_driver_creds(device))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [
-        DhcpNetworkPublic(
-            id=n.id,
-            address=n.address,
-            gateway=n.gateway,
-            netmask=n.netmask,
-            dns_servers=n.dns_servers,
-            ntp_servers=n.ntp_servers,
-            domain=n.domain,
-            comment=n.comment,
-        )
-        for n in items
-    ]
+    # Validate each row independently so a single weird payload (RouterOS
+    # version drift, unexpected list fields) doesn't make the whole
+    # Networks tab look empty. Bad rows get logged but otherwise dropped.
+    out: list[DhcpNetworkPublic] = []
+    for n in items:
+        try:
+            out.append(
+                DhcpNetworkPublic(
+                    id=n.id,
+                    address=n.address,
+                    gateway=_flatten(n.gateway),
+                    netmask=_flatten(n.netmask),
+                    dns_servers=_flatten(n.dns_servers),
+                    ntp_servers=_flatten(n.ntp_servers),
+                    domain=_flatten(n.domain),
+                    comment=n.comment,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            # Log + skip; the rest of the table still renders.
+            import structlog
+
+            structlog.get_logger(__name__).warning(
+                "dhcp.network.row_invalid", device_id=str(device_id), row=getattr(n, "raw", None)
+            )
+    return out
+
+
+def _flatten(v):
+    """Defensive coerce for fields the public schema declares as ``str |
+    None`` — older RouterOS gave us strings, newer can hand back lists."""
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        return ",".join(str(x) for x in v if x is not None) or None
+    return str(v) if str(v) != "" else None
 
 
 @router.post(

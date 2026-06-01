@@ -409,20 +409,35 @@ async def list_wg_peers(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except vpn_svc.OperationError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [
-        WireguardPeerPublic(
-            id=p.id,
-            interface=p.interface,
-            public_key=p.public_key,
-            allowed_address=p.allowed_address,
-            endpoint_address=p.endpoint_address,
-            endpoint_port=p.endpoint_port,
-            persistent_keepalive=p.persistent_keepalive,
-            disabled=p.disabled,
-            comment=p.comment,
-        )
-        for p in items
-    ]
+    # Validate per row so one weird payload (RouterOS field shape drift,
+    # peers created outside NetFleet with rare unit suffixes, …) doesn't
+    # zero out the whole list.
+    out: list[WireguardPeerPublic] = []
+    import structlog as _structlog
+    _l = _structlog.get_logger(__name__)
+    for p in items:
+        try:
+            out.append(
+                WireguardPeerPublic(
+                    id=p.id,
+                    interface=p.interface,
+                    public_key=p.public_key,
+                    allowed_address=p.allowed_address,
+                    endpoint_address=p.endpoint_address,
+                    endpoint_port=p.endpoint_port,
+                    persistent_keepalive=p.persistent_keepalive,
+                    disabled=p.disabled,
+                    comment=p.comment,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            _l.warning(
+                "wg.peer.row_invalid",
+                device_id=str(device_id),
+                error=str(e),
+                row=getattr(p, "raw", None),
+            )
+    return out
 
 
 @router.post(
