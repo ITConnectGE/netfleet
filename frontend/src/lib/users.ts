@@ -47,6 +47,12 @@ export interface UserInviteResponse {
    * server has only the hash from this point on.
    */
   generated_password: string | null;
+  /**
+   * True when the welcome email with sign-in details was delivered to
+   * the invitee — the inviter doesn't need to relay the password
+   * manually in this case.
+   */
+  email_sent: boolean;
 }
 
 export interface Assignment {

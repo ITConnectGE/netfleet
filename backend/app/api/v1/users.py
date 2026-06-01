@@ -6,10 +6,12 @@ from dataclasses import asdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, require_permission
 from app.models.audit_log import AuditOutcome
+from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.secret_audit import RiskReport, UnrotatedSecretPublic
 from app.schemas.user import (
@@ -78,8 +80,30 @@ async def create_user(
         },
     )
     await session.commit()
+
+    # Best-effort welcome email with the credentials inline so the
+    # inviter doesn't have to relay the password manually. We send
+    # whether the password was generated or supplied — the invitee
+    # always needs the URL + username + initial password to sign in.
+    email_sent = False
+    plaintext = generated or payload.password
+    if plaintext:
+        org = (
+            await session.execute(
+                select(Organization).where(Organization.id == actor.organization_id)
+            )
+        ).scalar_one()
+        email_sent = await user_svc.send_invite_email(
+            org=org,
+            user=new_user,
+            plaintext_password=plaintext,
+            inviter=actor,
+        )
+
     item = _to_list_item(new_user, len(payload.role_ids))
-    return UserInviteResponse(user=item, generated_password=generated)
+    return UserInviteResponse(
+        user=item, generated_password=generated, email_sent=email_sent
+    )
 
 
 @router.patch("/{user_id}", response_model=UserListItem)

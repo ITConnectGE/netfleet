@@ -115,6 +115,8 @@ async def _dispatch(
     )
 
     if channel == "sms":
+        if not org.mfa_sms_otp_enabled:
+            raise OtpDispatchError("SMS sign-in codes are disabled for this organisation.")
         if not user.mobile_phone:
             raise OtpDispatchError("No mobile number on file for this user.")
         if not (org.sms_enabled and org.sms_api_url and org.sms_body_template):
@@ -132,6 +134,8 @@ async def _dispatch(
             raise OtpDispatchError(f"SMS gateway failed: {e}") from e
 
     # channel == "email"
+    if not org.mfa_email_otp_enabled:
+        raise OtpDispatchError("Email sign-in codes are disabled for this organisation.")
     try:
         await email_svc.send_email(
             org,

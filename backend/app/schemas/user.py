@@ -50,12 +50,15 @@ class UserUpdate(BaseModel):
 
 
 class UserInviteResponse(BaseModel):
-    """Returned by POST /users when a password was auto-generated. The
-    plaintext is included exactly once so the inviter can hand it to the
-    invitee out of band; we never expose it again."""
+    """Returned by POST /users. When a password was auto-generated the
+    plaintext is included exactly once. When `email_sent=True` the
+    invitee has been mailed their credentials directly and the inviter
+    shouldn't need to copy/paste them; otherwise the inviter falls back
+    to handing the password over out-of-band."""
 
     user: UserListItem
     generated_password: str | None = None
+    email_sent: bool = False
 
 
 class PasswordResetRequest(BaseModel):

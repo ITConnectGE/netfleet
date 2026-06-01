@@ -97,19 +97,29 @@ def available_mfa_methods(
 
     ``destination_hint`` is None for TOTP (no out-of-band delivery) and
     a masked label for email / SMS (so the picker UI can show "code to
-    n***@example.com" without leaking the full address)."""
+    n***@example.com" without leaking the full address).
+
+    Org-wide MFA toggles in Settings → Authorization are honoured here
+    so a globally-disabled factor never shows up in the picker, even
+    if individual users still have the enrolment bit set."""
     out: list[tuple[str, str | None]] = []
-    if user.totp_enrolled:
+    totp_allowed = getattr(organization, "mfa_totp_enabled", True)
+    email_allowed = getattr(organization, "mfa_email_otp_enabled", True)
+    sms_allowed = getattr(organization, "mfa_sms_otp_enabled", True)
+
+    if user.totp_enrolled and totp_allowed:
         out.append(("totp", None))
     if user.otp_login_enabled:
-        local, _, domain = user.email.partition("@")
-        head = local[0] if local else ""
-        email_hint = f"{head}***@{domain}" if domain else "****"
-        out.append(("email", email_hint))
+        if email_allowed:
+            local, _, domain = user.email.partition("@")
+            head = local[0] if local else ""
+            email_hint = f"{head}***@{domain}" if domain else "****"
+            out.append(("email", email_hint))
         # SMS only when both the user has a mobile AND the org has the
         # gateway turned on + configured.
         sms_ready = bool(
-            user.mobile_phone
+            sms_allowed
+            and user.mobile_phone
             and getattr(organization, "sms_enabled", False)
             and getattr(organization, "sms_api_url", None)
             and getattr(organization, "sms_body_template", None)

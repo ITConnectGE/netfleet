@@ -1,4 +1,4 @@
-"""Organization-scoped settings service — currently just SMTP."""
+"""Organization-scoped settings service — SMTP, SMS, authorization."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import encrypt_field
 from app.models.organization import Organization
-from app.schemas.settings import SmtpSettingsUpdate
+from app.schemas.settings import AuthSettingsUpdate, SmtpSettingsUpdate
 
 
 class OrganizationNotFound(Exception):
@@ -54,6 +54,39 @@ async def update_smtp(
 
     for key, value in data.items():
         setattr(org, key, value)
+
+    await session.flush()
+    return org
+
+
+async def update_auth(
+    session: AsyncSession,
+    organization_id: UUID,
+    payload: AuthSettingsUpdate,
+) -> Organization:
+    """Update OIDC + MFA toggles. Client secrets are encrypted at rest."""
+    org = await get_organization(session, organization_id)
+    data = payload.model_dump(exclude_unset=True)
+
+    # Client secrets: same trichotomy as SMTP password.
+    for raw_key, enc_attr in (
+        ("microsoft_oidc_client_secret", "microsoft_oidc_client_secret_encrypted"),
+        ("google_oidc_client_secret", "google_oidc_client_secret_encrypted"),
+    ):
+        if raw_key in data:
+            raw = data.pop(raw_key)
+            setattr(org, enc_attr, encrypt_field(raw) if raw else None)
+
+    # Treat empty strings as "clear" on optional text fields.
+    nullable_text = (
+        "microsoft_oidc_tenant_id",
+        "microsoft_oidc_client_id",
+        "google_oidc_client_id",
+    )
+    for k, v in data.items():
+        if k in nullable_text and isinstance(v, str) and not v.strip():
+            v = None
+        setattr(org, k, v)
 
     await session.flush()
     return org

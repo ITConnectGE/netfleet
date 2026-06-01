@@ -6,12 +6,15 @@ import secrets
 import string
 from uuid import UUID
 
+import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.models.device import Device
+from app.models.organization import Organization
 from app.models.role import AssignmentScope, Role, RoleAssignment
 from app.models.site import Site
 from app.models.tenant import Tenant
@@ -22,6 +25,9 @@ from app.schemas.user import (
     UserCreate,
     UserUpdate,
 )
+from app.services import email as email_svc
+
+log = structlog.get_logger(__name__)
 
 # Character set for auto-generated invite passwords. We deliberately
 # drop characters that are ambiguous in print (`0`, `O`, `1`, `l`, `I`,
@@ -83,6 +89,101 @@ def generate_invite_password() -> str:
     return "".join(
         secrets.choice(_INVITE_PWD_ALPHABET) for _ in range(_INVITE_PWD_LENGTH)
     )
+
+
+def _format_invite_email(
+    *,
+    org: Organization,
+    user: User,
+    plaintext_password: str,
+    inviter: User | None,
+) -> tuple[str, str, str]:
+    """Build (subject, body_text, body_html) for the welcome email.
+    Plaintext password is included exactly once — same trust model as
+    the API response. Caller is responsible for not logging it."""
+    login_url = f"{settings.PUBLIC_URL.rstrip('/')}/login"
+    ips = org.netfleet_external_ips or ""
+    inviter_line = (
+        f"\nInvited by: {inviter.display_name or inviter.email}\n" if inviter else ""
+    )
+    ip_line = f"NetFleet server IP(s): {ips}\n" if ips else ""
+
+    subject = f"Welcome to NetFleet — {org.name}"
+    body_text = (
+        f"Hello {user.display_name or user.email},\n\n"
+        f"You've been invited to access {org.name}'s NetFleet portal.\n"
+        f"{inviter_line}\n"
+        f"Sign in at: {login_url}\n"
+        f"Username:   {user.email}\n"
+        f"Password:   {plaintext_password}\n\n"
+        f"{ip_line}"
+        f"For security, you will be asked to choose a new password the first time you sign in.\n\n"
+        f"— NetFleet\n"
+    )
+    safe_inviter = ""
+    if inviter:
+        safe_inviter = (
+            f"<p style='margin:0 0 12px;color:#475569;'>Invited by "
+            f"<strong>{(inviter.display_name or inviter.email)}</strong></p>"
+        )
+    safe_ip = (
+        f"<p style='margin:0 0 16px;color:#475569;'>NetFleet server IP(s): "
+        f"<code>{ips}</code></p>"
+        if ips
+        else ""
+    )
+    body_html = (
+        "<div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;"
+        "max-width:560px;margin:0 auto;padding:24px;color:#0f172a;'>"
+        f"<h2 style='margin:0 0 12px;'>Welcome to NetFleet</h2>"
+        f"<p style='margin:0 0 16px;'>You've been invited to access "
+        f"<strong>{org.name}</strong>'s NetFleet portal.</p>"
+        f"{safe_inviter}"
+        f"<div style='background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;"
+        f"padding:16px;margin:0 0 16px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;'>"
+        f"<div><strong>URL:</strong> <a href='{login_url}'>{login_url}</a></div>"
+        f"<div><strong>Username:</strong> {user.email}</div>"
+        f"<div><strong>Password:</strong> {plaintext_password}</div>"
+        f"</div>"
+        f"{safe_ip}"
+        f"<p style='margin:0 0 16px;color:#475569;'>"
+        f"For security, you will be asked to choose a new password the first time you sign in.</p>"
+        f"<p style='margin:24px 0 0;color:#94a3b8;font-size:12px;'>— NetFleet</p>"
+        "</div>"
+    )
+    return subject, body_text, body_html
+
+
+async def send_invite_email(
+    *,
+    org: Organization,
+    user: User,
+    plaintext_password: str,
+    inviter: User | None,
+) -> bool:
+    """Best-effort welcome email. Returns True on dispatch, False on
+    SMTP misconfig / send error. Never raises — invite creation must
+    not fail when the mail server is down."""
+    subject, body_text, body_html = _format_invite_email(
+        org=org, user=user, plaintext_password=plaintext_password, inviter=inviter,
+    )
+    try:
+        await email_svc.send_email(
+            org,
+            to=user.email,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+        )
+        return True
+    except (email_svc.SmtpNotConfigured, email_svc.SmtpSendError) as e:
+        log.warning(
+            "invite_email.failed",
+            user_id=str(user.id),
+            email=user.email,
+            error=str(e),
+        )
+        return False
 
 
 async def create_user(

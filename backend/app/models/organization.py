@@ -60,6 +60,26 @@ class Organization(IdMixin, TimestampsMixin, TableNameMixin, Base):
     # support staff onboarding new clients). Comma-separated, IPs or CIDRs.
     netfleet_external_ips: Mapped[str | None] = mapped_column(Text)
 
+    # --- Authorization: external IdPs (per-org Microsoft / Google OIDC) ---
+    # Tenant id can be a UUID, "common", "organizations", or "consumers"
+    # (Microsoft Entra terminology); empty means "common" by default.
+    microsoft_oidc_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    microsoft_oidc_tenant_id: Mapped[str | None] = mapped_column(String(128))
+    microsoft_oidc_client_id: Mapped[str | None] = mapped_column(String(255))
+    microsoft_oidc_client_secret_encrypted: Mapped[str | None] = mapped_column(String(1024))
+
+    google_oidc_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    google_oidc_client_id: Mapped[str | None] = mapped_column(String(255))
+    google_oidc_client_secret_encrypted: Mapped[str | None] = mapped_column(String(1024))
+
+    # --- Authorization: org-wide MFA factor toggles ---
+    # When the admin turns a factor off here, the corresponding per-user
+    # enrollment / dispatch path returns 503. Existing enrollments aren't
+    # deleted — flipping the toggle back on restores them.
+    mfa_totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    mfa_sms_otp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    mfa_email_otp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     users: Mapped[list[User]] = relationship(
         "User",
         back_populates="organization",

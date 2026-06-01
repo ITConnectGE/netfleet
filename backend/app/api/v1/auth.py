@@ -307,6 +307,16 @@ async def totp_enroll_begin(
 ):
     if user.totp_enrolled:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="TOTP already enrolled")
+    org = (
+        await session.execute(
+            select(Organization).where(Organization.id == user.organization_id)
+        )
+    ).scalar_one()
+    if not org.mfa_totp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticator-app sign-in is disabled by the administrator.",
+        )
     secret, uri = await auth_svc.begin_totp_enrollment(session, user)
     return TotpEnrollResponse(secret=secret, otpauth_uri=uri)
 

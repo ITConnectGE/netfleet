@@ -187,3 +187,54 @@ export async function testSms(to: string, content: string): Promise<SmsTestResul
     throw new Error(await readErrorMessage(e));
   }
 }
+
+// ---------------- Authorization (OIDC + MFA toggles) ----------------
+
+export interface AuthSettings {
+  microsoft_oidc_enabled: boolean;
+  microsoft_oidc_tenant_id: string | null;
+  microsoft_oidc_client_id: string | null;
+  has_microsoft_oidc_client_secret: boolean;
+
+  google_oidc_enabled: boolean;
+  google_oidc_client_id: string | null;
+  has_google_oidc_client_secret: boolean;
+
+  mfa_totp_enabled: boolean;
+  mfa_sms_otp_enabled: boolean;
+  mfa_email_otp_enabled: boolean;
+
+  microsoft_redirect_uri: string;
+  google_redirect_uri: string;
+}
+
+export interface AuthSettingsUpdate {
+  microsoft_oidc_enabled?: boolean;
+  microsoft_oidc_tenant_id?: string | null;
+  microsoft_oidc_client_id?: string | null;
+  microsoft_oidc_client_secret?: string;
+
+  google_oidc_enabled?: boolean;
+  google_oidc_client_id?: string | null;
+  google_oidc_client_secret?: string;
+
+  mfa_totp_enabled?: boolean;
+  mfa_sms_otp_enabled?: boolean;
+  mfa_email_otp_enabled?: boolean;
+}
+
+export async function getAuthSettings(): Promise<AuthSettings> {
+  return api.get("settings/authorization").json<AuthSettings>();
+}
+
+export async function updateAuthSettings(
+  payload: AuthSettingsUpdate,
+): Promise<AuthSettings> {
+  try {
+    return await api
+      .patch("settings/authorization", { json: payload })
+      .json<AuthSettings>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}

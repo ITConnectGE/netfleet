@@ -121,3 +121,50 @@ class SmsProviderPreset(BaseModel):
     success_status_max: int = 299
     success_body_contains: str | None = None
     notes: str | None = None
+
+
+# ---------------- Authorization (OIDC + MFA toggles) ----------------
+
+
+class AuthSettingsPublic(BaseModel):
+    """Org-wide authorization config exposed to admins. Client secrets
+    are never returned in plaintext — only a `has_*_secret` boolean."""
+
+    microsoft_oidc_enabled: bool
+    microsoft_oidc_tenant_id: str | None
+    microsoft_oidc_client_id: str | None
+    has_microsoft_oidc_client_secret: bool
+
+    google_oidc_enabled: bool
+    google_oidc_client_id: str | None
+    has_google_oidc_client_secret: bool
+
+    mfa_totp_enabled: bool
+    mfa_sms_otp_enabled: bool
+    mfa_email_otp_enabled: bool
+
+    # Convenience: the redirect/callback URLs the admin must paste into
+    # the IdP console. Built from PUBLIC_URL on the server so the UI
+    # doesn't have to know where the API lives.
+    microsoft_redirect_uri: str
+    google_redirect_uri: str
+
+    model_config = {"from_attributes": True}
+
+
+class AuthSettingsUpdate(BaseModel):
+    """All fields optional — partial updates supported. Set the
+    `*_client_secret` fields to '' to clear them."""
+
+    microsoft_oidc_enabled: bool | None = None
+    microsoft_oidc_tenant_id: str | None = Field(default=None, max_length=128)
+    microsoft_oidc_client_id: str | None = Field(default=None, max_length=255)
+    microsoft_oidc_client_secret: str | None = Field(default=None, max_length=512)
+
+    google_oidc_enabled: bool | None = None
+    google_oidc_client_id: str | None = Field(default=None, max_length=255)
+    google_oidc_client_secret: str | None = Field(default=None, max_length=512)
+
+    mfa_totp_enabled: bool | None = None
+    mfa_sms_otp_enabled: bool | None = None
+    mfa_email_otp_enabled: bool | None = None

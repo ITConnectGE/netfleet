@@ -7,10 +7,13 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, require_permission
+from app.core.config import settings as app_settings
 from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.settings import (
+    AuthSettingsPublic,
+    AuthSettingsUpdate,
     OrgInfoPublic,
     OrgInfoUpdate,
     SmsProviderPreset,
@@ -262,6 +265,69 @@ async def test_sms(
         response_body=body,
         error=err,
     )
+
+
+# ---------------- Authorization (Microsoft / Google OIDC + MFA toggles) ----------------
+
+
+def _auth_to_public(org: Organization) -> AuthSettingsPublic:
+    base = app_settings.PUBLIC_URL.rstrip("/")
+    return AuthSettingsPublic(
+        microsoft_oidc_enabled=org.microsoft_oidc_enabled,
+        microsoft_oidc_tenant_id=org.microsoft_oidc_tenant_id,
+        microsoft_oidc_client_id=org.microsoft_oidc_client_id,
+        has_microsoft_oidc_client_secret=bool(org.microsoft_oidc_client_secret_encrypted),
+        google_oidc_enabled=org.google_oidc_enabled,
+        google_oidc_client_id=org.google_oidc_client_id,
+        has_google_oidc_client_secret=bool(org.google_oidc_client_secret_encrypted),
+        mfa_totp_enabled=org.mfa_totp_enabled,
+        mfa_sms_otp_enabled=org.mfa_sms_otp_enabled,
+        mfa_email_otp_enabled=org.mfa_email_otp_enabled,
+        microsoft_redirect_uri=f"{base}/api/v1/oidc/microsoft/callback",
+        google_redirect_uri=f"{base}/api/v1/oidc/google/callback",
+    )
+
+
+@router.get("/authorization", response_model=AuthSettingsPublic)
+async def get_authorization(
+    user: User = Depends(require_permission("settings", "read")),
+    session: AsyncSession = Depends(db_session),
+) -> AuthSettingsPublic:
+    org = await settings_svc.get_organization(session, user.organization_id)
+    return _auth_to_public(org)
+
+
+@router.patch("/authorization", response_model=AuthSettingsPublic)
+async def update_authorization(
+    payload: AuthSettingsUpdate,
+    request: Request,
+    user: User = Depends(require_permission("settings", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> AuthSettingsPublic:
+    org = await settings_svc.update_auth(session, user.organization_id, payload)
+
+    audit_payload = payload.model_dump(
+        exclude_unset=True,
+        exclude={"microsoft_oidc_client_secret", "google_oidc_client_secret"},
+    )
+    if payload.microsoft_oidc_client_secret is not None:
+        audit_payload["microsoft_oidc_client_secret"] = "***REDACTED***"
+    if payload.google_oidc_client_secret is not None:
+        audit_payload["google_oidc_client_secret"] = "***REDACTED***"
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="settings",
+        action="update_authorization",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=audit_payload,
+    )
+    await session.commit()
+    return _auth_to_public(org)
 
 
 # ---------------- System backup (full DB + device files) ----------------

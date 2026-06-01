@@ -9,6 +9,7 @@ import { downloadAuthed } from "@/lib/api";
 import {
   createSystemBackup,
   deleteSystemBackup,
+  getAuthSettings,
   getOrgInfo,
   getSmsPresets,
   getSmsSettings,
@@ -16,9 +17,12 @@ import {
   listSystemBackups,
   testSms,
   testSmtp,
+  updateAuthSettings,
   updateOrgInfo,
   updateSmsSettings,
   updateSmtpSettings,
+  type AuthSettings,
+  type AuthSettingsUpdate,
   type OrgInfo,
   type SmsProviderPreset,
   type SmsSettings,
@@ -72,11 +76,292 @@ export default function SettingsPage() {
         </Link>
 
         <OrgInfoSection />
+        <AuthorizationSection />
         <SmtpSection />
         <SmsSection />
         <SystemBackupSection />
       </div>
     </div>
+  );
+}
+
+function AuthorizationSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data, isLoading } = useQuery<AuthSettings>({
+    queryKey: ["auth-settings"],
+    queryFn: getAuthSettings,
+  });
+
+  const [draft, setDraft] = useState<AuthSettingsUpdate>({});
+  const [msSecretTouched, setMsSecretTouched] = useState(false);
+  const [googleSecretTouched, setGoogleSecretTouched] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      setDraft({
+        microsoft_oidc_enabled: data.microsoft_oidc_enabled,
+        microsoft_oidc_tenant_id: data.microsoft_oidc_tenant_id ?? "",
+        microsoft_oidc_client_id: data.microsoft_oidc_client_id ?? "",
+        google_oidc_enabled: data.google_oidc_enabled,
+        google_oidc_client_id: data.google_oidc_client_id ?? "",
+        mfa_totp_enabled: data.mfa_totp_enabled,
+        mfa_sms_otp_enabled: data.mfa_sms_otp_enabled,
+        mfa_email_otp_enabled: data.mfa_email_otp_enabled,
+      });
+      setMsSecretTouched(false);
+      setGoogleSecretTouched(false);
+    }
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const payload: AuthSettingsUpdate = { ...draft };
+      if (!msSecretTouched) delete payload.microsoft_oidc_client_secret;
+      if (!googleSecretTouched) delete payload.google_oidc_client_secret;
+      const nullable: (keyof AuthSettingsUpdate)[] = [
+        "microsoft_oidc_tenant_id",
+        "microsoft_oidc_client_id",
+        "google_oidc_client_id",
+      ];
+      for (const k of nullable) {
+        if (payload[k] === "") (payload as Record<string, unknown>)[k] = null;
+      }
+      return updateAuthSettings(payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auth-settings"] });
+      toast.success("Authorization settings saved");
+      setMsSecretTouched(false);
+      setGoogleSecretTouched(false);
+    },
+    onError: (e: Error) => toast.error("Save failed", e.message),
+  });
+
+  if (isLoading || !data) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  return (
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+      className="rounded-lg border border-border bg-card p-6"
+    >
+      <div>
+        <h2 className="text-lg font-semibold">Authorization</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          External identity providers and which multi-factor methods users
+          are allowed to use. Changes take effect on the next sign-in.
+        </p>
+      </div>
+
+      {/* ---------------- Microsoft Entra ---------------- */}
+      <fieldset className="mt-6 rounded-md border border-border p-4">
+        <legend className="flex items-center gap-3 px-2">
+          <span className="text-sm font-medium">Microsoft Entra ID</span>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={draft.microsoft_oidc_enabled ?? false}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, microsoft_oidc_enabled: e.target.checked }))
+              }
+              className="size-3.5 rounded"
+            />
+            Enabled
+          </label>
+        </legend>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Tenant ID"
+            hint='Use "common" for any Microsoft account, "organizations" for any work/school tenant, or a specific tenant UUID.'
+          >
+            <input
+              type="text"
+              value={draft.microsoft_oidc_tenant_id ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, microsoft_oidc_tenant_id: e.target.value }))
+              }
+              placeholder="common"
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </Field>
+          <Field label="Client (application) ID">
+            <input
+              type="text"
+              value={draft.microsoft_oidc_client_id ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, microsoft_oidc_client_id: e.target.value }))
+              }
+              placeholder="00000000-0000-0000-0000-000000000000"
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </Field>
+          <Field
+            label="Client secret"
+            hint={
+              data.has_microsoft_oidc_client_secret && !msSecretTouched
+                ? "Leave blank to keep the existing secret"
+                : undefined
+            }
+          >
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder={data.has_microsoft_oidc_client_secret ? "•••••••• (set)" : ""}
+              value={draft.microsoft_oidc_client_secret ?? ""}
+              onChange={(e) => {
+                setDraft((d) => ({
+                  ...d,
+                  microsoft_oidc_client_secret: e.target.value,
+                }));
+                setMsSecretTouched(true);
+              }}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Redirect URI (paste into Entra app)">
+            <input
+              type="text"
+              readOnly
+              value={data.microsoft_redirect_uri}
+              onFocus={(e) => e.currentTarget.select()}
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </Field>
+        </div>
+      </fieldset>
+
+      {/* ---------------- Google ---------------- */}
+      <fieldset className="mt-5 rounded-md border border-border p-4">
+        <legend className="flex items-center gap-3 px-2">
+          <span className="text-sm font-medium">Google Workspace</span>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={draft.google_oidc_enabled ?? false}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, google_oidc_enabled: e.target.checked }))
+              }
+              className="size-3.5 rounded"
+            />
+            Enabled
+          </label>
+        </legend>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Client ID">
+            <input
+              type="text"
+              value={draft.google_oidc_client_id ?? ""}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, google_oidc_client_id: e.target.value }))
+              }
+              placeholder="…apps.googleusercontent.com"
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </Field>
+          <Field
+            label="Client secret"
+            hint={
+              data.has_google_oidc_client_secret && !googleSecretTouched
+                ? "Leave blank to keep the existing secret"
+                : undefined
+            }
+          >
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder={data.has_google_oidc_client_secret ? "•••••••• (set)" : ""}
+              value={draft.google_oidc_client_secret ?? ""}
+              onChange={(e) => {
+                setDraft((d) => ({
+                  ...d,
+                  google_oidc_client_secret: e.target.value,
+                }));
+                setGoogleSecretTouched(true);
+              }}
+              className={inputClass}
+            />
+          </Field>
+          <div className="md:col-span-2">
+            <Field label="Redirect URI (paste into the Google Cloud console)">
+              <input
+                type="text"
+                readOnly
+                value={data.google_redirect_uri}
+                onFocus={(e) => e.currentTarget.select()}
+                className={`${inputClass} font-mono text-xs`}
+              />
+            </Field>
+          </div>
+        </div>
+      </fieldset>
+
+      {/* ---------------- MFA toggles ---------------- */}
+      <fieldset className="mt-5 rounded-md border border-border p-4">
+        <legend className="px-2 text-sm font-medium">
+          Multi-factor authentication
+        </legend>
+        <p className="text-xs text-muted-foreground">
+          Turn a factor off here to forbid it organisation-wide. Existing
+          enrolments survive — flipping the switch back on restores them.
+        </p>
+        <div className="mt-3 flex flex-col gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.mfa_totp_enabled ?? true}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, mfa_totp_enabled: e.target.checked }))
+              }
+              className="size-4 rounded"
+            />
+            Authenticator app (TOTP)
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.mfa_email_otp_enabled ?? true}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, mfa_email_otp_enabled: e.target.checked }))
+              }
+              className="size-4 rounded"
+            />
+            One-time codes by email
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.mfa_sms_otp_enabled ?? true}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, mfa_sms_otp_enabled: e.target.checked }))
+              }
+              className="size-4 rounded"
+            />
+            One-time codes by SMS
+          </label>
+        </div>
+      </fieldset>
+
+      <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
+        Microsoft / Google sign-in buttons appear on the login page in a
+        follow-up release; you can configure the credentials here today so
+        the integration is ready when it ships.
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <button
+          type="submit"
+          disabled={save.isPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
   );
 }
 

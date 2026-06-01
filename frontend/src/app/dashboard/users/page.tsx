@@ -148,6 +148,7 @@ function UserForm({ onCreated }: { onCreated: () => void }) {
   const [generated, setGenerated] = useState<{
     password: string;
     email: string;
+    emailSent: boolean;
   } | null>(null);
 
   const { data: roles } = useQuery<Role[]>({
@@ -170,10 +171,20 @@ function UserForm({ onCreated }: { onCreated: () => void }) {
         role_ids: Array.from(roleIds),
       }),
     onSuccess: (res) => {
-      if (res.generated_password) {
-        // Surface the one-shot password in a modal so it doesn't
-        // disappear behind a toast; the inviter has to hand it off.
-        setGenerated({ password: res.generated_password, email });
+      // Three outcomes:
+      //   - email delivered → simple toast, invitee got the creds inline
+      //   - generated password but email failed → modal so the inviter
+      //     can still hand the password off out of band
+      //   - inviter typed the password themselves → nothing to surface
+      if (res.email_sent) {
+        toast.success("Invite emailed", email);
+        onCreated();
+      } else if (res.generated_password) {
+        setGenerated({
+          password: res.generated_password,
+          email,
+          emailSent: false,
+        });
       } else {
         toast.success("User created", email);
         onCreated();
@@ -343,6 +354,7 @@ function UserForm({ onCreated }: { onCreated: () => void }) {
         <GeneratedPasswordModal
           email={generated.email}
           password={generated.password}
+          emailSent={generated.emailSent}
           onClose={() => {
             setGenerated(null);
             onCreated();
@@ -356,10 +368,12 @@ function UserForm({ onCreated }: { onCreated: () => void }) {
 function GeneratedPasswordModal({
   email,
   password,
+  emailSent,
   onClose,
 }: {
   email: string;
   password: string;
+  emailSent: boolean;
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -368,9 +382,19 @@ function GeneratedPasswordModal({
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl">
         <h3 className="text-lg font-semibold">User invited</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Hand this password to <span className="font-mono">{email}</span> through a
-          channel they trust. NetFleet will not show it again — they will be
-          forced to change it on first sign-in.
+          {emailSent ? (
+            <>
+              An invite email with sign-in details has been delivered to{" "}
+              <span className="font-mono">{email}</span>.
+            </>
+          ) : (
+            <>
+              SMTP is unavailable — hand this password to{" "}
+              <span className="font-mono">{email}</span> through a channel
+              they trust. NetFleet will not show it again; they will be
+              forced to change it on first sign-in.
+            </>
+          )}
         </p>
         <div className="mt-4 flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2 font-mono text-sm">
           <span className="flex-1 select-all break-all">{password}</span>
@@ -387,16 +411,19 @@ function GeneratedPasswordModal({
             Copy
           </button>
         </div>
-        <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          Once you close this dialog the plaintext is gone — only the hash
-          stays on the server.
-        </div>
+        {!emailSent && (
+          <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Once you close this dialog the plaintext is gone — only the
+            hash stays on the server. Configure SMTP in Settings to have
+            future invites delivered automatically.
+          </div>
+        )}
         <div className="mt-5 flex justify-end">
           <button
             onClick={onClose}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            I&apos;ve copied it
+            {emailSent ? "Done" : "I’ve copied it"}
           </button>
         </div>
       </div>
