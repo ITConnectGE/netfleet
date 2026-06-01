@@ -29,6 +29,7 @@ export default function DeviceDetailPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const id = params.id;
+  const [editing, setEditing] = useState(false);
 
   const { data: device, isLoading } = useQuery<Device>({
     queryKey: ["device", id],
@@ -109,6 +110,14 @@ export default function DeviceDetailPage() {
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
           >
             {test.isPending ? "Testing…" : "Test connection"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+            title="Edit credentials, host / port, SSH port, notes"
+          >
+            Edit
           </button>
           <button
             type="button"
@@ -228,9 +237,245 @@ export default function DeviceDetailPage() {
           variant="block"
         />
       </div>
+
+      {editing && (
+        <EditDeviceModal
+          device={device}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            qc.invalidateQueries({ queryKey: ["device", id] });
+            qc.invalidateQueries({ queryKey: ["devices"] });
+            toast.success("Device updated");
+          }}
+        />
+      )}
     </div>
   );
 }
+
+function EditDeviceModal({
+  device,
+  onClose,
+  onSaved,
+}: {
+  device: Device;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(device.name);
+  const [host, setHost] = useState(device.host);
+  const [port, setPort] = useState<number>(device.port);
+  const [sshPort, setSshPort] = useState<number>(device.ssh_port ?? 22);
+  const [transport, setTransport] = useState(device.transport);
+  const [username, setUsername] = useState(device.username);
+  // Password / API key blanks mean "leave the stored value alone" — only
+  // changed when the operator actually types something here.
+  const [password, setPassword] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [verifyTls, setVerifyTls] = useState(device.verify_tls);
+  const [notes, setNotes] = useState(device.notes ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  const m = useMutation({
+    mutationFn: () =>
+      updateDevice(device.id, {
+        name,
+        host,
+        port,
+        ssh_port: sshPort,
+        transport,
+        username,
+        password: password ? password : undefined,
+        api_key: apiKey ? apiKey : undefined,
+        verify_tls: verifyTls,
+        notes: notes || null,
+      }),
+    onSuccess: () => onSaved(),
+    onError: (e: Error) => {
+      setError(e.message);
+      toast.error("Save failed", e.message);
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Edit device</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Leave password / API key blank to keep the current value. Both are
+          encrypted at rest.
+        </p>
+
+        {error && (
+          <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setError(null);
+            m.mutate();
+          }}
+          className="mt-4 grid gap-3 md:grid-cols-2"
+        >
+          <label className="block space-y-1 text-sm font-medium">
+            Display name
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={modalInput}
+            />
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            Vendor
+            <input
+              value={device.vendor}
+              disabled
+              className={`${modalInput} cursor-not-allowed bg-muted text-muted-foreground`}
+            />
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            Host / IP
+            <input
+              required
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              className={`${modalInput} font-mono`}
+            />
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            API port
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={port}
+              onChange={(e) => setPort(Number(e.target.value))}
+              className={modalInput}
+            />
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            SSH port
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={sshPort}
+              onChange={(e) => setSshPort(Number(e.target.value))}
+              className={modalInput}
+            />
+            <span className="block text-[11px] italic font-normal text-muted-foreground">
+              Used for backups + restore (SFTP). Default 22.
+            </span>
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            Transport
+            <select
+              value={transport}
+              onChange={(e) =>
+                setTransport(e.target.value as Device["transport"])
+              }
+              className={modalInput}
+            >
+              {(["api", "rest", "ssh", "netconf"] as const).map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            Username
+            <input
+              required
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
+              className={modalInput}
+            />
+          </label>
+          <label className="flex items-end gap-2 pb-2 text-sm">
+            <input
+              type="checkbox"
+              checked={verifyTls}
+              onChange={(e) => setVerifyTls(e.target.checked)}
+              className="size-4 rounded"
+            />
+            Reject untrusted TLS
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            Password{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              {device.has_password ? "(set — leave blank to keep)" : "(none)"}
+            </span>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              className={modalInput}
+            />
+          </label>
+          <label className="block space-y-1 text-sm font-medium">
+            API key{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              {device.has_api_key ? "(set — leave blank to keep)" : "(none)"}
+            </span>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              autoComplete="new-password"
+              className={modalInput}
+            />
+          </label>
+          <label className="md:col-span-2 block space-y-1 text-sm font-medium">
+            Notes
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className={modalInput}
+            />
+          </label>
+          <div className="md:col-span-2 mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={m.isPending}
+              className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {m.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+const modalInput =
+  "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
