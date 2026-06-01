@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Logo } from "@/components/logo";
 import {
@@ -23,6 +23,15 @@ interface OtpInfo {
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Honour ?next= so the Events page (and anywhere else that bounces
+  // here on a 401) can send the operator back to where they were.
+  const next = useMemo(() => {
+    const raw = searchParams.get("next");
+    if (!raw) return "/dashboard";
+    // Only follow same-origin relative paths to avoid open-redirect.
+    return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
+  }, [searchParams]);
   const [phase, setPhase] = useState<Phase>("password");
 
   const [email, setEmail] = useState("");
@@ -69,7 +78,7 @@ export default function LoginPage() {
         });
         setPhase("otp");
       } else {
-        router.replace("/dashboard");
+        router.replace(next);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -105,7 +114,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await verifyTotp(mfaTempToken, code);
-      router.replace("/dashboard");
+      router.replace(next);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -120,7 +129,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await verifyLoginOtp(mfaTempToken, code);
-      router.replace("/dashboard");
+      router.replace(next);
     } catch (e) {
       setError((e as Error).message);
     } finally {

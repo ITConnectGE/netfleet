@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   acknowledgeEvents,
@@ -13,16 +14,38 @@ import {
 } from "@/lib/events";
 
 const SEVERITIES: Severity[] = ["critical", "error", "warning", "info"];
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 200;
+
+interface ColDef {
+  id: string;
+  label: string;
+  filterable: boolean;
+  width?: string;
+}
+
+// Per-column header definitions. The filter row applies client-side
+// substring matches on top of the server-fetched page.
+const COLS: ColDef[] = [
+  { id: "check", label: "", filterable: false, width: "w-10" },
+  { id: "when", label: "When", filterable: true },
+  { id: "severity", label: "Severity", filterable: true },
+  { id: "topics", label: "Topics", filterable: true },
+  { id: "device", label: "Device", filterable: true },
+  { id: "tenant", label: "Tenant / Site", filterable: true },
+  { id: "message", label: "Message", filterable: true },
+  { id: "ack", label: "Ack", filterable: false },
+];
 
 export default function EventsPage() {
   const qc = useQueryClient();
+  const router = useRouter();
 
   const [severity, setSeverity] = useState<Severity[]>(["critical", "error", "warning"]);
   const [showAcked, setShowAcked] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
 
   const { data, isLoading, error } = useQuery<EventListResponse>({
     queryKey: ["events", severity.join(","), showAcked, search, page],
@@ -36,7 +59,33 @@ export default function EventsPage() {
       }),
     refetchInterval: 30_000,
     placeholderData: (prev) => prev,
+    retry: (failureCount, err) => {
+      // Auth errors keep failing — don't hammer the API.
+      const msg = (err as Error)?.message?.toLowerCase() ?? "";
+      if (msg.includes("token") || msg.includes("unauthorized") || msg.includes("401")) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
+
+  // The me query in the layout caches the user object, so an expired
+  // session here never trips the layout's existing /login redirect.
+  // Catch the typical auth failure messages and bounce manually.
+  useEffect(() => {
+    if (!error) return;
+    const msg = (error as Error).message?.toLowerCase() ?? "";
+    if (
+      msg.includes("missing bearer token") ||
+      msg.includes("invalid bearer token") ||
+      msg.includes("token expired") ||
+      msg.includes("unauthorized")
+    ) {
+      router.replace(
+        `/login?next=${encodeURIComponent("/dashboard/events")}`,
+      );
+    }
+  }, [error, router]);
 
   const ack = useMutation({
     mutationFn: (ids: string[]) => acknowledgeEvents(ids),
@@ -47,18 +96,58 @@ export default function EventsPage() {
   });
 
   const rows = data?.rows ?? [];
+
+  const filteredRows = useMemo(() => {
+    const f = colFilters;
+    return rows.filter((r) => {
+      if (f.when) {
+        const needle = f.when.toLowerCase();
+        const display = new Date(r.observed_at).toLocaleString().toLowerCase();
+        const devTime = (r.device_time ?? "").toLowerCase();
+        if (!display.includes(needle) && !devTime.includes(needle)) return false;
+      }
+      if (f.severity && !r.severity.toLowerCase().includes(f.severity.toLowerCase())) {
+        return false;
+      }
+      if (f.topics && !r.topics.toLowerCase().includes(f.topics.toLowerCase())) {
+        return false;
+      }
+      if (f.device) {
+        const needle = f.device.toLowerCase();
+        if (!(r.device_name?.toLowerCase().includes(needle) ?? false)) {
+          return false;
+        }
+      }
+      if (f.tenant) {
+        const needle = f.tenant.toLowerCase();
+        const blob = [r.tenant_name, r.site_name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!blob.includes(needle)) return false;
+      }
+      if (f.message && !r.message.toLowerCase().includes(f.message.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [rows, colFilters]);
+
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   const allOnPageSelected =
-    rows.length > 0 && rows.every((r) => selected.has(r.id));
+    filteredRows.length > 0 && filteredRows.every((r) => selected.has(r.id));
   const toggleAllOnPage = () => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (allOnPageSelected) rows.forEach((r) => next.delete(r.id));
-      else rows.forEach((r) => next.add(r.id));
+      if (allOnPageSelected) filteredRows.forEach((r) => next.delete(r.id));
+      else filteredRows.forEach((r) => next.add(r.id));
       return next;
     });
   };
+
+  const onColFilter = (id: string, value: string) =>
+    setColFilters((prev) => ({ ...prev, [id]: value }));
 
   const severityCounts = data?.by_severity;
 
@@ -162,42 +251,60 @@ export default function EventsPage() {
 
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/50">
-            <tr className="text-left">
-              <th className="w-10 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={allOnPageSelected}
-                  onChange={toggleAllOnPage}
-                  aria-label="Select all on this page"
-                />
-              </th>
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">Severity</th>
-              <th className="px-3 py-2 font-medium">Topics</th>
-              <th className="px-3 py-2 font-medium">Device</th>
-              <th className="px-3 py-2 font-medium">Tenant / Site</th>
-              <th className="px-3 py-2 font-medium">Message</th>
-              <th className="px-3 py-2 font-medium">Ack</th>
+          <thead className="bg-muted/50 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+            <tr>
+              {COLS.map((c) => (
+                <th
+                  key={c.id}
+                  className={`px-3 py-2 font-medium ${c.width ?? ""}`}
+                >
+                  {c.id === "check" ? (
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={toggleAllOnPage}
+                      aria-label="Select all on this page"
+                    />
+                  ) : (
+                    c.label
+                  )}
+                </th>
+              ))}
+            </tr>
+            <tr className="border-b border-border bg-muted/20">
+              {COLS.map((c) => (
+                <th key={`${c.id}-f`} className="px-2 py-1 align-top">
+                  {c.filterable ? (
+                    <input
+                      value={colFilters[c.id] ?? ""}
+                      onChange={(e) => onColFilter(c.id, e.target.value)}
+                      placeholder="filter…"
+                      aria-label={`Filter ${c.label}`}
+                      className="block w-full rounded border border-input bg-background px-2 py-0.5 text-[11px] font-normal text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  ) : null}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {isLoading && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={COLS.length} className="px-3 py-6 text-center text-muted-foreground">
                   Loading…
                 </td>
               </tr>
             )}
-            {!isLoading && rows.length === 0 && (
+            {!isLoading && filteredRows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
-                  No matching events. Either nothing has gone wrong (nice!), or
-                  the scanner has not run a tick yet (default cadence is 5 min).
+                <td colSpan={COLS.length} className="px-3 py-8 text-center text-muted-foreground">
+                  {rows.length === 0
+                    ? "No matching events. Either nothing has gone wrong (nice!), or the scanner has not run a tick yet (default cadence is 5 min)."
+                    : "No rows match the column filters above."}
                 </td>
               </tr>
             )}
-            {rows.map((r) => (
+            {filteredRows.map((r) => (
               <EventTr
                 key={r.id}
                 row={r}
@@ -218,7 +325,9 @@ export default function EventsPage() {
 
       <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {data ? `${rows.length} of ${data.total} matching` : ""}
+          {data
+            ? `${filteredRows.length} of ${rows.length} on page · ${data.total} matching server-side`
+            : ""}
         </span>
         <div className="flex items-center gap-2">
           <button
