@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 import { useToast } from "@/components/toast";
 import {
@@ -14,6 +14,8 @@ import {
   getNeighborDiscovery,
   listArp,
   listBridgeHosts,
+  listInterfaceListMembers,
+  listInterfaceLists,
   listInterfaces,
   listNeighbors,
   listRoutes,
@@ -23,6 +25,8 @@ import {
   type ArpEntry,
   type BridgeHost,
   type Interface,
+  type InterfaceList,
+  type InterfaceListMember,
   type IpRoute,
   type Neighbor,
   type NeighborDiscovery,
@@ -30,7 +34,14 @@ import {
 } from "@/lib/network";
 import { getDevice, type Device } from "@/lib/devices";
 
-type Tab = "interfaces" | "routes" | "vlans" | "arp" | "bridge" | "neighbors";
+type Tab =
+  | "interfaces"
+  | "interface-lists"
+  | "routes"
+  | "vlans"
+  | "arp"
+  | "bridge"
+  | "neighbors";
 
 export default function NetworkPage() {
   const params = useParams<{ id: string }>();
@@ -43,6 +54,7 @@ export default function NetworkPage() {
         {(
           [
             ["interfaces", "Interfaces"],
+            ["interface-lists", "Interface lists"],
             ["routes", "Routes"],
             ["vlans", "VLANs"],
             ["arp", "ARP"],
@@ -65,6 +77,7 @@ export default function NetworkPage() {
       </div>
 
       {tab === "interfaces" && <InterfacesTab deviceId={deviceId} />}
+      {tab === "interface-lists" && <InterfaceListsTab deviceId={deviceId} />}
       {tab === "routes" && <RoutesTab deviceId={deviceId} />}
       {tab === "vlans" && <VlansTab deviceId={deviceId} />}
       {tab === "arp" && <ArpTab deviceId={deviceId} />}
@@ -684,6 +697,21 @@ function InterfacesTab({ deviceId }: { deviceId: string }) {
     queryKey: ["interfaces", deviceId],
     queryFn: () => listInterfaces(deviceId),
   });
+  // Membership is a 1:N join (one physical interface in many lists),
+  // so we fetch it alongside and build the lookup once per render.
+  const { data: members } = useQuery<InterfaceListMember[]>({
+    queryKey: ["interface-list-members", deviceId],
+    queryFn: () => listInterfaceListMembers(deviceId),
+  });
+  const listsByInterface = useMemo(() => {
+    const m = new Map<string, InterfaceListMember[]>();
+    for (const row of members ?? []) {
+      const existing = m.get(row.interface) ?? [];
+      existing.push(row);
+      m.set(row.interface, existing);
+    }
+    return m;
+  }, [members]);
 
   const reset = useMutation({
     mutationFn: (name: string) => resetInterfaceCounters(deviceId, name),
@@ -707,58 +735,224 @@ function InterfacesTab({ deviceId }: { deviceId: string }) {
               <th className="px-3 py-2 font-medium text-right">RX</th>
               <th className="px-3 py-2 font-medium text-right">TX</th>
               <th className="px-3 py-2 font-medium">State</th>
+              <th className="px-3 py-2 font-medium">Lists</th>
               <th className="px-3 py-2 font-medium">Comment</th>
               <th className="px-3 py-2 font-medium text-right" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {isLoading && <EmptyRow colSpan={9} label="Loading…" />}
+            {isLoading && <EmptyRow colSpan={10} label="Loading…" />}
             {!isLoading && (!data || data.length === 0) && (
-              <EmptyRow colSpan={9} label="No interfaces." />
+              <EmptyRow colSpan={10} label="No interfaces." />
             )}
-            {data?.map((i) => (
-              <tr key={i.id ?? i.name} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{i.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{i.type}</td>
-                <td className="px-3 py-2 font-mono text-[11px]">{i.mac_address ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{i.mtu ?? "—"}</td>
-                <td className="px-3 py-2 text-right font-mono text-xs">
-                  {formatBytes(i.rx_bytes)}
-                </td>
-                <td className="px-3 py-2 text-right font-mono text-xs">
-                  {formatBytes(i.tx_bytes)}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {i.disabled ? (
-                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-800">
-                      disabled
-                    </span>
-                  ) : i.running ? (
-                    <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800">
-                      running
-                    </span>
-                  ) : (
-                    <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                      down
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{i.comment ?? "—"}</td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    onClick={() => reset.mutate(i.name)}
-                    disabled={reset.isPending}
-                    className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
-                    title="Zero rx/tx counters on this interface"
-                  >
-                    Reset
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {data?.map((i) => {
+              const memberships = listsByInterface.get(i.name) ?? [];
+              return (
+                <tr key={i.id ?? i.name} className="hover:bg-accent/30">
+                  <td className="px-3 py-2 font-medium">{i.name}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{i.type}</td>
+                  <td className="px-3 py-2 font-mono text-[11px]">{i.mac_address ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{i.mtu ?? "—"}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs">
+                    {formatBytes(i.rx_bytes)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-xs">
+                    {formatBytes(i.tx_bytes)}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {i.disabled ? (
+                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-800">
+                        disabled
+                      </span>
+                    ) : i.running ? (
+                      <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800">
+                        running
+                      </span>
+                    ) : (
+                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+                        down
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {memberships.length === 0 ? (
+                      <span className="text-[10px] text-muted-foreground/60">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {memberships.map((m) => (
+                          <span
+                            key={`${m.list}-${m.id ?? m.interface}`}
+                            title={
+                              m.dynamic
+                                ? "Dynamic membership — comes from include/exclude rules on the list"
+                                : m.disabled
+                                  ? "Membership row is disabled"
+                                  : `Manually added to list "${m.list}"`
+                            }
+                            className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                              m.disabled
+                                ? "bg-zinc-100 text-zinc-500 line-through"
+                                : m.dynamic
+                                  ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                                  : "bg-indigo-100 text-indigo-800"
+                            }`}
+                          >
+                            {m.list}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{i.comment ?? "—"}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => reset.mutate(i.name)}
+                      disabled={reset.isPending}
+                      className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                      title="Zero rx/tx counters on this interface"
+                    >
+                      Reset
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </ErrorOrTable>
+    </Section>
+  );
+}
+
+// ---------------- Interface lists ----------------
+
+function InterfaceListsTab({ deviceId }: { deviceId: string }) {
+  const { data: lists, isLoading: listsLoading, error: listsError } = useQuery<
+    InterfaceList[]
+  >({
+    queryKey: ["interface-lists", deviceId],
+    queryFn: () => listInterfaceLists(deviceId),
+  });
+  const { data: members, error: memberError } = useQuery<InterfaceListMember[]>({
+    queryKey: ["interface-list-members", deviceId],
+    queryFn: () => listInterfaceListMembers(deviceId),
+  });
+
+  // Index members by list name so each card can render its own
+  // interface chips without rescanning the full membership list.
+  const membersByList = useMemo(() => {
+    const m = new Map<string, InterfaceListMember[]>();
+    for (const row of members ?? []) {
+      const existing = m.get(row.list) ?? [];
+      existing.push(row);
+      m.set(row.list, existing);
+    }
+    return m;
+  }, [members]);
+
+  const sortedLists = useMemo(
+    () => [...(lists ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [lists],
+  );
+
+  return (
+    <Section
+      title="Interface lists"
+      subtitle="Named groups used in firewall rules, routing marks and discovery scope. Includes built-in lists like all, dynamic and none."
+    >
+      {(listsError || memberError) && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {(listsError ?? memberError)?.message}
+        </div>
+      )}
+      {listsLoading && (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      )}
+      {!listsLoading && sortedLists.length === 0 && !listsError && (
+        <p className="text-sm text-muted-foreground">No interface lists yet.</p>
+      )}
+      <div className="grid gap-3 md:grid-cols-2">
+        {sortedLists.map((lst) => {
+          const rows = membersByList.get(lst.name) ?? [];
+          return (
+            <div
+              key={lst.id ?? lst.name}
+              className="rounded-lg border border-border bg-card p-4"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">{lst.name}</h3>
+                    {lst.builtin && (
+                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
+                        built-in
+                      </span>
+                    )}
+                    {lst.dynamic && !lst.builtin && (
+                      <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 ring-1 ring-blue-200">
+                        dynamic
+                      </span>
+                    )}
+                  </div>
+                  {lst.comment && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {lst.comment}
+                    </p>
+                  )}
+                </div>
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  {rows.length} member{rows.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {(lst.include || lst.exclude) && (
+                <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
+                  {lst.include && (
+                    <div>
+                      <span className="font-mono text-foreground/70">include:</span>{" "}
+                      {lst.include}
+                    </div>
+                  )}
+                  {lst.exclude && (
+                    <div>
+                      <span className="font-mono text-foreground/70">exclude:</span>{" "}
+                      {lst.exclude}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap gap-1">
+                {rows.length === 0 ? (
+                  <span className="text-[11px] italic text-muted-foreground/70">
+                    No interfaces in this list.
+                  </span>
+                ) : (
+                  rows.map((m) => (
+                    <span
+                      key={`${m.id ?? m.interface}-${m.interface}`}
+                      title={
+                        m.dynamic
+                          ? "Dynamic — matched via include/exclude, not a manual entry"
+                          : m.disabled
+                            ? "Disabled member row"
+                            : "Manual member"
+                      }
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] ${
+                        m.disabled
+                          ? "bg-zinc-100 text-zinc-500 line-through"
+                          : m.dynamic
+                            ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                            : "bg-indigo-100 text-indigo-800"
+                      }`}
+                    >
+                      {m.interface}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Section>
   );
 }

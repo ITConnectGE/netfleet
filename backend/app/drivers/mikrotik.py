@@ -30,6 +30,8 @@ from app.drivers.base import (
     FilterRule,
     FirmwareInfo,
     Interface,
+    InterfaceList,
+    InterfaceListMember,
     IpAddress,
     IpRoute,
     IpService,
@@ -613,6 +615,45 @@ class MikrotikDriver:
             for r in rows
             if str(r.get("list", "")).lower() == list_name.lower()
             and r.get("interface")
+        ]
+
+    async def interface_lists(
+        self, creds: DeviceCredentials
+    ) -> list[InterfaceList]:
+        rows = await self._call(creds, "/interface/list/print")
+        return [
+            InterfaceList(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                include=_to_str(r.get("include")),
+                exclude=_to_str(r.get("exclude")),
+                dynamic=_to_bool(r.get("dynamic")),
+                builtin=_to_bool(r.get("builtin")),
+                comment=_to_str(r.get("comment")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def interface_list_membership(
+        self, creds: DeviceCredentials
+    ) -> list[InterfaceListMember]:
+        """Every (list, interface) pair on the box. Returned ordered
+        the same way RouterOS prints them so the UI can group by list
+        without a second sort step."""
+        rows = await self._call(creds, "/interface/list/member/print")
+        return [
+            InterfaceListMember(
+                id=r.get(".id"),
+                list=str(r.get("list", "")),
+                interface=str(r.get("interface", "")),
+                dynamic=_to_bool(r.get("dynamic")),
+                disabled=_to_bool(r.get("disabled")),
+                comment=_to_str(r.get("comment")),
+                raw=r,
+            )
+            for r in rows
+            if r.get("list") and r.get("interface")
         ]
 
     async def ip_address_add(
@@ -1743,6 +1784,8 @@ def _row_to_filter_rule(r: dict[str, Any]) -> FilterRule:
         connection_state=_to_str(r.get("connection-state")),
         log=_to_bool(r.get("log")),
         log_prefix=_to_str(r.get("log-prefix")),
+        bytes_count=_int_or_none(r.get("bytes")),
+        packets_count=_int_or_none(r.get("packets")),
         disabled=_to_bool(r.get("disabled")),
         comment=_to_str(r.get("comment")),
         raw=r,

@@ -459,6 +459,35 @@ class WireguardPeer:
 
 
 @dataclass(slots=True)
+class InterfaceList:
+    """A /interface/list row — a named group of interfaces used in
+    firewall, routing-mark and discovery rules."""
+
+    id: str | None
+    name: str
+    include: str | None = None
+    exclude: str | None = None
+    dynamic: bool = False
+    builtin: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class InterfaceListMember:
+    """A /interface/list/member row — an interface's membership in a
+    named list. One physical interface can belong to multiple lists."""
+
+    id: str | None
+    list: str
+    interface: str
+    dynamic: bool = False
+    disabled: bool = False
+    comment: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class BackupArtifact:
     """The result of /system/backup/save + /export — both blobs."""
 

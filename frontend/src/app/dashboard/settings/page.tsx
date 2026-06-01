@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { useToast } from "@/components/toast";
 import { downloadAuthed } from "@/lib/api";
@@ -32,7 +32,34 @@ import {
   type SystemBackupListResponse,
 } from "@/lib/settings";
 
+type SettingsTab = "general" | "authorization" | "email" | "sms" | "backups";
+
+const TABS: { key: SettingsTab; label: string; hint: string }[] = [
+  { key: "general", label: "General", hint: "Org info + shortcuts" },
+  { key: "authorization", label: "Authorization", hint: "OIDC + MFA factors" },
+  { key: "email", label: "Email (SMTP)", hint: "Outbound mail" },
+  { key: "sms", label: "SMS gateway", hint: "OTP delivery" },
+  { key: "backups", label: "Backups & updates", hint: "Snapshots, restore, upgrade" },
+];
+
 export default function SettingsPage() {
+  // Persist the active tab across reloads so an admin who deep-links to
+  // "the SMTP one" doesn't get bounced back to General after every save.
+  const [tab, setTab] = useState<SettingsTab>("general");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.sessionStorage.getItem("settings.tab");
+    if (stored && TABS.some((t) => t.key === stored)) {
+      setTab(stored as SettingsTab);
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("settings.tab", tab);
+  }, [tab]);
+
+  const active = useMemo(() => TABS.find((t) => t.key === tab) ?? TABS[0], [tab]);
+
   return (
     <div>
       <div>
@@ -42,44 +69,74 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="mt-8 max-w-3xl space-y-8">
-        <Link
-          href="/dashboard/settings/updates"
-          className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold">In-app updates</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Check for a newer NetFleet release and upgrade with one click. Pre-update
-                Postgres backup included.
-              </p>
-            </div>
-            <span className="text-sm text-primary">Open →</span>
-          </div>
-        </Link>
+      <div
+        className="mt-6 inline-flex flex-wrap gap-1 rounded-md border border-border bg-muted/40 p-1 text-xs"
+        role="tablist"
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={t.key === tab}
+            onClick={() => setTab(t.key)}
+            title={t.hint}
+            className={`rounded px-3 py-1.5 font-medium transition ${
+              t.key === tab
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">{active.hint}</p>
 
-        <Link
-          href="/dashboard/roles"
-          className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Access control</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Roles and the permission matrix. Assign roles to users from the
-                Users page.
-              </p>
-            </div>
-            <span className="text-sm text-primary">Open →</span>
-          </div>
-        </Link>
-
-        <OrgInfoSection />
-        <AuthorizationSection />
-        <SmtpSection />
-        <SmsSection />
-        <SystemBackupSection />
+      <div className="mt-4 max-w-3xl space-y-8">
+        {tab === "general" && (
+          <>
+            <OrgInfoSection />
+            <Link
+              href="/dashboard/roles"
+              className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold">Access control</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Roles and the permission matrix. Assign roles to users from the
+                    Users page.
+                  </p>
+                </div>
+                <span className="text-sm text-primary">Open →</span>
+              </div>
+            </Link>
+          </>
+        )}
+        {tab === "authorization" && <AuthorizationSection />}
+        {tab === "email" && <SmtpSection />}
+        {tab === "sms" && <SmsSection />}
+        {tab === "backups" && (
+          <>
+            <Link
+              href="/dashboard/settings/updates"
+              className="block rounded-lg border border-border bg-card p-5 transition hover:border-primary/40"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold">In-app updates</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Check for a newer NetFleet release and upgrade with one
+                    click. Pre-update Postgres backup included.
+                  </p>
+                </div>
+                <span className="text-sm text-primary">Open →</span>
+              </div>
+            </Link>
+            <SystemBackupSection />
+          </>
+        )}
       </div>
     </div>
   );

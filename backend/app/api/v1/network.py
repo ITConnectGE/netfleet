@@ -22,6 +22,8 @@ from app.models.user import User
 from app.schemas.network import (
     ArpPublic,
     BridgeHostPublic,
+    InterfaceListMemberPublic,
+    InterfaceListPublic,
     InterfacePublic,
     IpAddressPublic,
     IpRouteCreate,
@@ -452,6 +454,68 @@ async def reset_interface_counters(
         request_payload={"interface_name": interface_name},
     )
     await session.commit()
+
+
+# ---------------- Interface lists ----------------
+
+
+@router.get(
+    "/{device_id}/interface-lists",
+    response_model=list[InterfaceListPublic],
+)
+async def list_interface_lists(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[InterfaceListPublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        items = await get_driver(device.vendor).interface_lists(
+            _to_driver_creds(device)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        InterfaceListPublic(
+            id=lst.id,
+            name=lst.name,
+            include=lst.include,
+            exclude=lst.exclude,
+            dynamic=lst.dynamic,
+            builtin=lst.builtin,
+            comment=lst.comment,
+        )
+        for lst in items
+    ]
+
+
+@router.get(
+    "/{device_id}/interface-list-members",
+    response_model=list[InterfaceListMemberPublic],
+)
+async def list_interface_list_members(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[InterfaceListMemberPublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        items = await get_driver(device.vendor).interface_list_membership(
+            _to_driver_creds(device)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        InterfaceListMemberPublic(
+            id=m.id,
+            list=m.list,
+            interface=m.interface,
+            dynamic=m.dynamic,
+            disabled=m.disabled,
+            comment=m.comment,
+        )
+        for m in items
+    ]
 
 
 # ---------------- VLANs ----------------

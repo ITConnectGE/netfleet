@@ -116,6 +116,33 @@ class InterfacePublic(BaseModel):
     comment: str | None
 
 
+# ---------------- Interface lists ----------------
+
+
+class InterfaceListPublic(BaseModel):
+    """A named group of interfaces. Used in firewall rules, routing
+    marks, and neighbour-discovery scope."""
+
+    id: str | None
+    name: str
+    include: str | None = None
+    exclude: str | None = None
+    dynamic: bool = False
+    builtin: bool = False
+    comment: str | None = None
+
+
+class InterfaceListMemberPublic(BaseModel):
+    """One interface's membership in a named list."""
+
+    id: str | None
+    list: str
+    interface: str
+    dynamic: bool = False
+    disabled: bool = False
+    comment: str | None = None
+
+
 # ---------------- VLANs ----------------
 
 

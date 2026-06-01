@@ -184,6 +184,43 @@ export interface VlanCreate {
 export async function listInterfaces(deviceId: string): Promise<Interface[]> {
   return api.get(`devices/${deviceId}/interfaces`).json<Interface[]>();
 }
+
+// ---------------- Interface lists ----------------
+
+export interface InterfaceList {
+  id: string | null;
+  name: string;
+  include: string | null;
+  exclude: string | null;
+  dynamic: boolean;
+  builtin: boolean;
+  comment: string | null;
+}
+
+export interface InterfaceListMember {
+  id: string | null;
+  list: string;
+  interface: string;
+  dynamic: boolean;
+  disabled: boolean;
+  comment: string | null;
+}
+
+export async function listInterfaceLists(
+  deviceId: string,
+): Promise<InterfaceList[]> {
+  return api
+    .get(`devices/${deviceId}/interface-lists`)
+    .json<InterfaceList[]>();
+}
+
+export async function listInterfaceListMembers(
+  deviceId: string,
+): Promise<InterfaceListMember[]> {
+  return api
+    .get(`devices/${deviceId}/interface-list-members`)
+    .json<InterfaceListMember[]>();
+}
 export async function listVlans(deviceId: string): Promise<Vlan[]> {
   return api.get(`devices/${deviceId}/vlans`).json<Vlan[]>();
 }
