@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { useToast } from "@/components/toast";
+import { getDevice, rebootDevice, type Device } from "@/lib/devices";
 import {
   createSnmpCommunity,
   deleteSnmpCommunity,
@@ -28,6 +30,7 @@ const TABS = [
   { id: "clock", label: "Clock & time zone" },
   { id: "ntp", label: "NTP" },
   { id: "snmp", label: "SNMP" },
+  { id: "reboot", label: "Reboot" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -110,8 +113,88 @@ export default function SystemPage() {
             <SnmpCommunitiesSection deviceId={deviceId} />
           </>
         )}
+        {activeTab === "reboot" && <RebootSection deviceId={deviceId} />}
       </div>
     </div>
+  );
+}
+
+// ---------------- Reboot ----------------
+
+function RebootSection({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirmText, setConfirmText] = useState("");
+
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+  });
+
+  const reboot = useMutation({
+    mutationFn: () => rebootDevice(deviceId),
+    onSuccess: () => {
+      setConfirmText("");
+      qc.invalidateQueries({ queryKey: ["device", deviceId] });
+      toast.success(
+        "Reboot triggered",
+        "The router will be back online in 1–3 minutes. Re-run Test Connection then.",
+      );
+    },
+    onError: (e: Error) => toast.error("Reboot failed", e.message),
+  });
+
+  const expected = device?.name ?? "";
+  const armed = confirmText.trim() === expected && expected !== "";
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold">Reboot</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Cleanly reboots the device via{" "}
+        <span className="font-mono">/system/reboot</span>. Active sessions and
+        traffic through the router are interrupted for ~1–3 minutes.
+      </p>
+
+      <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50/60 p-5">
+        <h3 className="text-sm font-semibold text-amber-900">
+          ⚠ Destructive — confirm the device name to arm
+        </h3>
+        <p className="mt-1 text-xs text-amber-900/80">
+          Type{" "}
+          <span className="font-mono">
+            {expected || "(loading…)"}
+          </span>{" "}
+          below to enable the Reboot button. Closes the API session, drops the
+          uplink, may require a couple of minutes before the device responds
+          again.
+        </p>
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder="device name"
+          className="mt-3 block w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => reboot.mutate()}
+            disabled={!armed || reboot.isPending}
+            className="rounded-md border border-amber-400 bg-amber-100 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {reboot.isPending ? "Rebooting…" : "Reboot device"}
+          </button>
+          <span className="text-xs text-muted-foreground">
+            Audit log entry will record this action.
+          </span>
+        </div>
+      </div>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Need to upgrade firmware instead? Use the Firmware card on the device
+        overview — it reboots automatically as part of the upgrade.
+      </p>
+    </section>
   );
 }
 
