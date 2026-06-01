@@ -13,9 +13,16 @@ import {
   type AutoUpgradePolicy,
   type FirmwareStatus,
   type FirmwareUpgradeStatus,
-  type FirmwareUpgradeTarget,
 } from "@/lib/firmware";
 
+/**
+ * Compact firmware widget for the device overview. Designed to sit on
+ * a single row most of the time and fold the auto-upgrade policy / last
+ * upgrade detail behind <details> so the overview doesn't get a
+ * card-on-card wall. RouterBOARD bootloader status is intentionally not
+ * shown here — operators that need it can read /system/routerboard on
+ * the device or check the Firmware service page.
+ */
 export function FirmwareCard({ deviceId }: { deviceId: string }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<FirmwareStatus>({
@@ -39,8 +46,7 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
     },
   });
   const upgrade = useMutation({
-    mutationFn: (opts: { target: FirmwareUpgradeTarget }) =>
-      triggerFirmwareUpgrade(deviceId, opts),
+    mutationFn: () => triggerFirmwareUpgrade(deviceId, { target: "routeros" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["firmware", deviceId] });
       qc.invalidateQueries({ queryKey: ["firmware-upgrade-status", deviceId] });
@@ -48,222 +54,180 @@ export function FirmwareCard({ deviceId }: { deviceId: string }) {
   });
 
   if (isLoading || !data) return null;
-  // Local alias so the nested closures below get the narrowed (non-undefined)
-  // type — TypeScript doesn't propagate the `!data` narrow into the body of a
-  // nested function declaration that captures `data` by reference.
   const fw = data;
-
   const needsUpgrade = fw.needs_upgrade;
-  // RouterOS' /system/package/update formats `latest-version` with a
-  // "(stable)" suffix while `installed-version` is bare, so a strict
-  // string compare flagged "7.23" vs "7.23 (stable)" as an upgrade.
-  // Strip parentheticals + whitespace before comparing so the badge
-  // only lights up when the actual semver differs.
-  const rbAvailableInfo = Boolean(
-    fw.routerboard_available &&
-      fw.routerboard_current &&
-      normFw(fw.routerboard_available) !== normFw(fw.routerboard_current),
-  );
 
-  function dialog(_target: FirmwareUpgradeTarget): boolean {
-    const lines: string[] = [];
-    lines.push("What this will do:");
-    lines.push("");
-    lines.push(
-      `  • Install RouterOS ${fw.available_version} (currently ${fw.current_version ?? "?"}).`,
+  function confirmUpgrade(): boolean {
+    return confirm(
+      `Install RouterOS ${fw.available_version} (currently ${fw.current_version ?? "?"})?\n\n` +
+        "The device will reboot — 3–5 min downtime, active sessions interrupted.\n" +
+        "Recommended: take a Backup first.",
     );
-    lines.push("  • Reboot the device to apply it (~3–5 min downtime).");
-    lines.push("");
-    lines.push(`Channel: ${fw.channel ?? "stable"}`);
-    lines.push("");
-    lines.push("Recommended: take a Backup first (Backups tab → Backup now).");
-    lines.push("Active sessions and traffic through this device will be interrupted.");
-    lines.push("");
-    lines.push("Continue?");
-    return confirm(lines.join("\n"));
-  }
-
-  function onUpgrade(target: FirmwareUpgradeTarget) {
-    if (dialog(target)) upgrade.mutate({ target });
   }
 
   return (
     <div
-      className={`rounded-lg border p-5 ${
+      className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border px-3 py-2 text-sm ${
         needsUpgrade ? "border-amber-300 bg-amber-50/40" : "border-border bg-card"
       }`}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-muted-foreground">Firmware</h3>
-            {needsUpgrade ? (
-              <span className="rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
-                update available
-              </span>
-            ) : (
-              <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
-                up to date
-              </span>
-            )}
-          </div>
+      <span className="font-medium text-muted-foreground">Firmware</span>
 
-          <div className="mt-3 space-y-2">
-            <FirmwareRow
-              label="RouterOS"
-              hint="The operating system running on the device."
-              installed={fw.current_version}
-              available={fw.available_version}
-              hasUpgrade={needsUpgrade}
-              onUpgrade={needsUpgrade ? () => onUpgrade("routeros") : undefined}
-              upgrading={upgrade.isPending}
-            />
-            {fw.routerboard_current && (
-              <FirmwareRow
-                label="RouterBOARD"
-                hint="Bootloader firmware. Read-only here — apply from the device after the next RouterOS upgrade reboot."
-                installed={fw.routerboard_current}
-                available={fw.routerboard_available}
-                hasUpgrade={rbAvailableInfo}
-                /* No onUpgrade — display only. */
-                upgrading={false}
-              />
-            )}
-          </div>
+      {needsUpgrade ? (
+        <span className="rounded-md bg-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
+          update available
+        </span>
+      ) : (
+        <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+          up to date
+        </span>
+      )}
 
-          <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-            <span className="text-muted-foreground">Channel</span>
-            <span className="font-mono">{fw.channel ?? "—"}</span>
-            <span className="text-muted-foreground">Last checked</span>
-            <span className="text-muted-foreground">
-              {fw.checked_at ? new Date(fw.checked_at).toLocaleString() : "never"}
+      <span className="font-mono">
+        {fw.current_version ?? "—"}
+        {needsUpgrade && (
+          <>
+            <span className="mx-1 text-muted-foreground">→</span>
+            <span className="font-semibold text-amber-900">
+              {fw.available_version ?? "—"}
             </span>
-          </div>
-        </div>
+          </>
+        )}
+      </span>
 
-        <div className="flex shrink-0 flex-col items-end gap-2">
+      <span className="text-xs text-muted-foreground">
+        ch <span className="font-mono">{fw.channel ?? "—"}</span>
+      </span>
+      <span className="text-xs text-muted-foreground">
+        checked{" "}
+        {fw.checked_at
+          ? new Date(fw.checked_at).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "never"}
+      </span>
+
+      <div className="ml-auto flex items-center gap-2">
+        {needsUpgrade && (
           <button
-            onClick={() => recheck.mutate()}
-            disabled={recheck.isPending}
-            className="rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            {recheck.isPending ? "Checking…" : "Check for updates"}
-          </button>
-        </div>
-      </div>
-
-      {upgrade.data && (
-        <div className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-          {upgrade.data.message}
-        </div>
-      )}
-      {recheck.error && (
-        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {(recheck.error as Error).message}
-        </div>
-      )}
-      {upgrade.error && (
-        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {(upgrade.error as Error).message}
-        </div>
-      )}
-
-      {upgradeStatus?.last_status && (
-        <div className="mt-4 rounded-md border border-border bg-background/60 px-3 py-2 text-xs">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-muted-foreground">Last upgrade</span>
-            <UpgradeStatusPill status={upgradeStatus.last_status} />
-          </div>
-          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
-            <span>Triggered</span>
-            <span>
-              {upgradeStatus.last_triggered_at
-                ? new Date(upgradeStatus.last_triggered_at).toLocaleString()
-                : "—"}
-            </span>
-            <span>From → To</span>
-            <span className="font-mono">
-              {upgradeStatus.last_from_version ?? "?"} →{" "}
-              {upgradeStatus.last_to_version ?? "?"}
-            </span>
-            {upgradeStatus.last_error && (
-              <>
-                <span>Error</span>
-                <span className="break-all font-mono text-destructive">
-                  {upgradeStatus.last_error}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      <PolicyForm deviceId={deviceId} initial={policy} />
-    </div>
-  );
-}
-
-function normFw(v: string | null | undefined): string {
-  if (!v) return "";
-  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
-
-function FirmwareRow({
-  label,
-  hint,
-  installed,
-  available,
-  hasUpgrade,
-  onUpgrade,
-  upgrading,
-}: {
-  label: string;
-  hint: string;
-  installed: string | null | undefined;
-  available: string | null | undefined;
-  hasUpgrade: boolean;
-  onUpgrade?: () => void;
-  upgrading?: boolean;
-}) {
-  return (
-    <div className="rounded-md border border-border/70 bg-background/50 px-3 py-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-sm font-medium">{label}</span>
-          <span className="text-[11px] text-muted-foreground">{hint}</span>
-        </div>
-        {onUpgrade && (
-          <button
-            onClick={onUpgrade}
-            disabled={upgrading}
+            onClick={() => {
+              if (confirmUpgrade()) upgrade.mutate();
+            }}
+            disabled={upgrade.isPending}
             className="rounded-md border border-amber-400 bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
           >
-            {upgrading ? "Upgrading…" : `Upgrade ${label}…`}
+            {upgrade.isPending ? "Upgrading…" : "Upgrade RouterOS"}
           </button>
         )}
+        <button
+          onClick={() => recheck.mutate()}
+          disabled={recheck.isPending}
+          className="rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+        >
+          {recheck.isPending ? "Checking…" : "Check"}
+        </button>
+        <FirmwareDetails
+          deviceId={deviceId}
+          upgradeStatus={upgradeStatus}
+          policy={policy}
+        />
       </div>
-      <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Installed</div>
-          <div className="font-mono">{installed ?? "—"}</div>
+
+      {/* Inline error / success — small, doesn't blow up the row height */}
+      {(upgrade.data || recheck.error || upgrade.error) && (
+        <div className="w-full text-xs">
+          {upgrade.data && (
+            <span className="text-emerald-800">{upgrade.data.message}</span>
+          )}
+          {recheck.error && (
+            <span className="text-destructive">
+              {(recheck.error as Error).message}
+            </span>
+          )}
+          {upgrade.error && (
+            <span className="text-destructive">
+              {(upgrade.error as Error).message}
+            </span>
+          )}
         </div>
-        <div className="text-muted-foreground">→</div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Available</div>
-          <div className={`font-mono ${hasUpgrade ? "font-semibold text-amber-900" : ""}`}>
-            {available ?? "—"}
-            {!hasUpgrade && available && installed === available && (
-              <span className="ml-2 text-[10px] font-normal text-emerald-700">(same)</span>
-            )}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
+function FirmwareDetails({
+  deviceId,
+  upgradeStatus,
+  policy,
+}: {
+  deviceId: string;
+  upgradeStatus: FirmwareUpgradeStatus | undefined;
+  policy: AutoUpgradePolicy | undefined;
+}) {
+  const hasLastUpgrade = Boolean(upgradeStatus?.last_status);
+  const hasAutoOn = Boolean(policy?.enabled);
+  // Hide "Details" entirely on a clean device with no auto-upgrade
+  // policy + no prior upgrades — there's literally nothing to show.
+  const empty = !hasLastUpgrade && !hasAutoOn && !policy;
+  if (empty) {
+    return null;
+  }
+  return (
+    <details className="relative">
+      <summary className="cursor-pointer list-none rounded-md border border-input bg-background px-2 py-1 text-xs hover:bg-accent">
+        Details{" "}
+        {hasAutoOn && (
+          <span className="ml-1 rounded-md bg-emerald-100 px-1 py-0.5 text-[9px] font-medium text-emerald-800">
+            auto on
+          </span>
+        )}
+      </summary>
+      <div className="absolute right-0 z-30 mt-1 w-80 space-y-3 rounded-md border border-border bg-popover p-3 text-xs shadow-md">
+        {hasLastUpgrade && upgradeStatus?.last_status && (
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-medium text-muted-foreground">
+                Last upgrade
+              </span>
+              <UpgradeStatusPill status={upgradeStatus.last_status} />
+            </div>
+            <div className="grid grid-cols-[6rem_1fr] gap-y-0.5 text-[11px] text-muted-foreground">
+              <span>Triggered</span>
+              <span>
+                {upgradeStatus.last_triggered_at
+                  ? new Date(upgradeStatus.last_triggered_at).toLocaleString()
+                  : "—"}
+              </span>
+              <span>From → To</span>
+              <span className="font-mono">
+                {upgradeStatus.last_from_version ?? "?"} →{" "}
+                {upgradeStatus.last_to_version ?? "?"}
+              </span>
+              {upgradeStatus.last_error && (
+                <>
+                  <span>Error</span>
+                  <span className="break-all font-mono text-destructive">
+                    {upgradeStatus.last_error}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+        <PolicyForm deviceId={deviceId} initial={policy} />
+      </div>
+    </details>
+  );
+}
 
-function UpgradeStatusPill({ status }: { status: "pending" | "succeeded" | "failed" }) {
+function UpgradeStatusPill({
+  status,
+}: {
+  status: "pending" | "succeeded" | "failed";
+}) {
   const cls =
     status === "succeeded"
       ? "bg-emerald-100 text-emerald-800"
@@ -271,7 +235,9 @@ function UpgradeStatusPill({ status }: { status: "pending" | "succeeded" | "fail
         ? "bg-amber-100 text-amber-900"
         : "bg-red-100 text-red-800";
   return (
-    <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>
+    <span
+      className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+    >
       {status}
     </span>
   );
@@ -316,67 +282,62 @@ function PolicyForm({
   };
 
   return (
-    <details className="mt-4 rounded-md border border-border bg-background/40 px-3 py-2 text-xs">
-      <summary className="cursor-pointer text-muted-foreground">
-        Auto-upgrade policy{" "}
-        {initial?.enabled && (
-          <span className="ml-2 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
-            on
-          </span>
-        )}
-      </summary>
-      <div className="mt-3 space-y-2">
-        <label className="flex items-center gap-2">
+    <div className="border-t border-border pt-2">
+      <div className="mb-2 font-medium text-muted-foreground">
+        Auto-upgrade policy
+      </div>
+      <label className="flex items-start gap-2 text-[11px]">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => markDirty(setEnabled)(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>Apply RouterOS upgrades automatically</span>
+      </label>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="block text-[10px]">
+          <span className="text-muted-foreground">Window start (UTC h)</span>
           <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => markDirty(setEnabled)(e.target.checked)}
+            type="number"
+            min={0}
+            max={23}
+            value={start}
+            onChange={(e) => markDirty(setStart)(e.target.value)}
+            placeholder="any"
+            className="mt-0.5 block w-full rounded-md border border-input bg-background px-2 py-1 font-mono"
           />
-          <span>Apply RouterOS upgrades automatically when an update is detected</span>
         </label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block">
-            <span className="text-muted-foreground">Window start (UTC hour)</span>
-            <input
-              type="number"
-              min={0}
-              max={23}
-              value={start}
-              onChange={(e) => markDirty(setStart)(e.target.value)}
-              placeholder="any"
-              className="mt-0.5 block w-full rounded-md border border-input bg-background px-2 py-1 font-mono"
-            />
-          </label>
-          <label className="block">
-            <span className="text-muted-foreground">Window end (UTC hour)</span>
-            <input
-              type="number"
-              min={0}
-              max={23}
-              value={end}
-              onChange={(e) => markDirty(setEnd)(e.target.value)}
-              placeholder="any"
-              className="mt-0.5 block w-full rounded-md border border-input bg-background px-2 py-1 font-mono"
-            />
-          </label>
-        </div>
-        <p className="text-[10px] text-muted-foreground">
-          Leave both blank to allow upgrades at any time. The window is inclusive
-          of start, exclusive of end, and may wrap midnight.
-        </p>
+        <label className="block text-[10px]">
+          <span className="text-muted-foreground">Window end (UTC h)</span>
+          <input
+            type="number"
+            min={0}
+            max={23}
+            value={end}
+            onChange={(e) => markDirty(setEnd)(e.target.value)}
+            placeholder="any"
+            className="mt-0.5 block w-full rounded-md border border-input bg-background px-2 py-1 font-mono"
+          />
+        </label>
+      </div>
+      <p className="mt-2 text-[10px] text-muted-foreground">
+        Leave both blank for any time; the window can wrap midnight.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
         <button
           onClick={() => save.mutate()}
           disabled={!dirty || save.isPending}
-          className="rounded-md border border-input bg-background px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+          className="rounded-md border border-input bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
         >
           {save.isPending ? "Saving…" : "Save policy"}
         </button>
         {save.error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+          <span className="text-[11px] text-destructive">
             {(save.error as Error).message}
-          </div>
+          </span>
         )}
       </div>
-    </details>
+    </div>
   );
 }
