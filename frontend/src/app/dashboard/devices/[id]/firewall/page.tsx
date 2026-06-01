@@ -942,7 +942,7 @@ function NatRuleForm({
             placeholder="ether1 (WAN)"
           />
         </Field>
-        <Field label="→ To addresses" htmlFor="n-to" hint="dst-nat / src-nat target">
+        <Field label="→ To addresses (dst-nat / src-nat target)" htmlFor="n-to">
           <input
             id="n-to"
             value={toAddresses}
