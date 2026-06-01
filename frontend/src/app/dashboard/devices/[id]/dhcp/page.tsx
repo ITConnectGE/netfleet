@@ -27,6 +27,7 @@ import {
   type DhcpPool,
   type DhcpServer,
 } from "@/lib/dhcp";
+import { listInterfaces, type Interface } from "@/lib/network";
 
 const TABS = [
   { id: "leases", label: "Leases" },
@@ -498,6 +499,10 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
     queryKey: ["dhcp-pools", deviceId],
     queryFn: () => listDhcpPools(deviceId),
   });
+  const { data: interfaces } = useQuery<Interface[]>({
+    queryKey: ["interfaces", deviceId],
+    queryFn: () => listInterfaces(deviceId),
+  });
   const [showForm, setShowForm] = useState(false);
 
   const cols: ColDef[] = [
@@ -552,6 +557,7 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
         <ServerForm
           deviceId={deviceId}
           pools={pools ?? []}
+          interfaces={interfaces ?? []}
           onCreated={() => {
             qc.invalidateQueries({ queryKey: ["dhcp-servers", deviceId] });
             setShowForm(false);
@@ -577,37 +583,16 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
               />
             )}
             {visible.map((s) => (
-              <tr key={s.id ?? s.name} className="hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{s.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{s.interface}</td>
-                <td className="px-3 py-2 text-xs">{s.address_pool ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{s.lease_time ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{s.authoritative ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">
-                  {s.disabled ? (
-                    <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-zinc-800">
-                      disabled
-                    </span>
-                  ) : (
-                    <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
-                      active
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {s.comment ?? "—"}
-                </td>
-                <td className="px-3 py-2 text-right text-xs">
-                  <button
-                    onClick={() => {
-                      if (s.id && confirm(`Delete server "${s.name}"?`)) del.mutate(s.id);
-                    }}
-                    className="text-destructive hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
+              <ServerRow
+                key={s.id ?? s.name}
+                server={s}
+                deviceId={deviceId}
+                pools={pools ?? []}
+                interfaces={interfaces ?? []}
+                onDelete={() => {
+                  if (s.id && confirm(`Delete server "${s.name}"?`)) del.mutate(s.id);
+                }}
+              />
             ))}
           </tbody>
         </table>
@@ -616,13 +601,249 @@ function ServersPanel({ deviceId }: { deviceId: string }) {
   );
 }
 
+function ServerRow({
+  server,
+  deviceId,
+  pools,
+  interfaces,
+  onDelete,
+}: {
+  server: DhcpServer;
+  deviceId: string;
+  pools: DhcpPool[];
+  interfaces: Interface[];
+  onDelete: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(server.name);
+  const [iface, setIface] = useState(server.interface);
+  const [pool, setPool] = useState(server.address_pool ?? "");
+  const [leaseTime, setLeaseTime] = useState(server.lease_time ?? "");
+  const [disabled, setDisabled] = useState(server.disabled);
+  const [comment, setComment] = useState(server.comment ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  function startEditing() {
+    setName(server.name);
+    setIface(server.interface);
+    setPool(server.address_pool ?? "");
+    setLeaseTime(server.lease_time ?? "");
+    setDisabled(server.disabled);
+    setComment(server.comment ?? "");
+    setError(null);
+    setEditing(true);
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!server.id) return Promise.reject(new Error("missing server id"));
+      return updateDhcpServer(deviceId, server.id, {
+        name,
+        interface: iface,
+        address_pool: pool || null,
+        lease_time: leaseTime || null,
+        disabled,
+        comment: comment || null,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dhcp-servers", deviceId] });
+      toast.success("Server updated");
+      setEditing(false);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  if (!editing) {
+    return (
+      <tr className="hover:bg-accent/30">
+        <td className="px-3 py-2 font-medium">{server.name}</td>
+        <td className="px-3 py-2 font-mono text-xs">{server.interface}</td>
+        <td className="px-3 py-2 text-xs">{server.address_pool ?? "—"}</td>
+        <td className="px-3 py-2 text-xs">{server.lease_time ?? "—"}</td>
+        <td className="px-3 py-2 text-xs">{server.authoritative ?? "—"}</td>
+        <td className="px-3 py-2 text-xs">
+          {server.disabled ? (
+            <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-zinc-800">
+              disabled
+            </span>
+          ) : (
+            <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
+              active
+            </span>
+          )}
+        </td>
+        <td className="px-3 py-2 text-xs text-muted-foreground">
+          {server.comment ?? "—"}
+        </td>
+        <td className="px-3 py-2 text-right text-xs">
+          {server.id && (
+            <button
+              type="button"
+              onClick={startEditing}
+              className="mr-3 text-primary hover:underline"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="text-destructive hover:underline"
+          >
+            Delete
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="bg-accent/20 align-top">
+      <td className="px-3 py-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className={`${input} text-sm`}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <InterfaceSelect
+          value={iface}
+          onChange={setIface}
+          interfaces={interfaces}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <select
+          value={pool}
+          onChange={(e) => setPool(e.target.value)}
+          className={`${input} text-xs`}
+        >
+          <option value="">— none —</option>
+          {pools.map((p) => (
+            <option key={p.id ?? p.name} value={p.name}>
+              {p.name} ({p.ranges})
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="px-3 py-2">
+        <input
+          value={leaseTime}
+          onChange={(e) => setLeaseTime(e.target.value)}
+          className={`${input} font-mono text-xs`}
+          placeholder="1d, 30m, 12h"
+        />
+      </td>
+      <td className="px-3 py-2 text-xs text-muted-foreground">
+        {server.authoritative ?? "—"}
+      </td>
+      <td className="px-3 py-2">
+        <label className="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={disabled}
+            onChange={(e) => setDisabled(e.target.checked)}
+            className="size-3.5"
+          />
+          disabled
+        </label>
+      </td>
+      <td className="px-3 py-2">
+        <input
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          className={`${input} text-xs`}
+        />
+        {error && (
+          <p className="mt-1 text-[11px] text-destructive">{error}</p>
+        )}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right text-xs">
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          className="mr-2 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setEditing(false);
+          }}
+          className="text-muted-foreground hover:underline"
+        >
+          Cancel
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function InterfaceSelect({
+  value,
+  onChange,
+  interfaces,
+  required,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  interfaces: Interface[];
+  required?: boolean;
+}) {
+  // Group bridge-like interfaces first since DHCP usually lives on them.
+  const sorted = useMemo(() => {
+    const score = (t: string) => {
+      if (t === "bridge") return 0;
+      if (t === "vlan") return 1;
+      if (t === "ether") return 2;
+      if (t === "wireguard" || t.startsWith("wg")) return 9; // rarely a DHCP target
+      return 3;
+    };
+    return [...interfaces].sort((a, b) => {
+      const ds = score(a.type) - score(b.type);
+      return ds !== 0 ? ds : a.name.localeCompare(b.name);
+    });
+  }, [interfaces]);
+  // If the current value isn't in the list (renamed / hidden iface),
+  // keep it as an option so the operator can still see + clear it.
+  const hasCurrent = value === "" || sorted.some((i) => i.name === value);
+
+  return (
+    <select
+      required={required}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`${input} font-mono text-xs`}
+    >
+      <option value="">— pick an interface —</option>
+      {!hasCurrent && (
+        <option value={value}>{value} (not in current list)</option>
+      )}
+      {sorted.map((i) => (
+        <option key={i.id ?? i.name} value={i.name}>
+          {i.name} ({i.type}){i.disabled ? " · disabled" : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function ServerForm({
   deviceId,
   pools,
+  interfaces,
   onCreated,
 }: {
   deviceId: string;
   pools: DhcpPool[];
+  interfaces: Interface[];
   onCreated: () => void;
 }) {
   const toast = useToast();
@@ -630,6 +851,7 @@ function ServerForm({
   const [iface, setIface] = useState("");
   const [pool, setPool] = useState("");
   const [leaseTime, setLeaseTime] = useState("1d");
+  const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const m = useMutation({
@@ -639,6 +861,7 @@ function ServerForm({
         interface: iface,
         address_pool: pool || null,
         lease_time: leaseTime || null,
+        comment: comment || null,
       }),
     onSuccess: () => {
       toast.success("Server created");
@@ -652,6 +875,10 @@ function ServerForm({
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         setError(null);
+        if (!iface) {
+          setError("Interface is required.");
+          return;
+        }
         m.mutate();
       }}
       className="mt-4 rounded-lg border border-border bg-card p-5"
@@ -672,12 +899,11 @@ function ServerForm({
           />
         </FormLabel>
         <FormLabel label="Interface">
-          <input
-            required
+          <InterfaceSelect
             value={iface}
-            onChange={(e) => setIface(e.target.value)}
-            className={`${input} font-mono`}
-            placeholder="bridge-lan"
+            onChange={setIface}
+            interfaces={interfaces}
+            required
           />
         </FormLabel>
         <FormLabel label="Address pool">
@@ -700,6 +926,13 @@ function ServerForm({
             onChange={(e) => setLeaseTime(e.target.value)}
             className={input}
             placeholder="1d, 30m, 12h"
+          />
+        </FormLabel>
+        <FormLabel label="Comment">
+          <input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            className={input}
           />
         </FormLabel>
       </div>
@@ -1282,7 +1515,6 @@ function ipToInt(s: string): number {
 
 // Silence unused-import warnings until the edit forms come online.
 void updateDhcpNetwork;
-void updateDhcpServer;
 
 const input =
   "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring";
