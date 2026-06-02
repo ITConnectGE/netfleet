@@ -136,10 +136,40 @@ export default function DevicesPage() {
             )}
             {!isLoading && filtered && filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
-                  {activeFilter
-                    ? `No devices match the ${activeFilter} filter.`
-                    : "No devices yet."}
+                <td colSpan={7} className="px-4 py-10">
+                  {activeFilter ? (
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-foreground">
+                        No devices match the {activeFilter} filter.
+                      </p>
+                      <Link
+                        href="/dashboard/devices"
+                        className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
+                      >
+                        Clear filter
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <p className="text-base font-medium text-foreground">
+                        No devices yet
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {sites && sites.length > 0
+                          ? "Add a MikroTik router or other supported device to start monitoring."
+                          : "Create a site first, then add devices under it."}
+                      </p>
+                      {sites && sites.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowForm(true)}
+                          className="mt-3 inline-flex items-center rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+                        >
+                          + New device
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             )}

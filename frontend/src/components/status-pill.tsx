@@ -6,10 +6,10 @@ import type { DeviceStatus } from "@/lib/devices";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 
 const STATUS_LABEL: Record<DeviceStatus, string> = {
-  online: "online",
-  offline: "offline",
-  error: "error",
-  unknown: "unknown",
+  online: "Online",
+  offline: "Offline",
+  error: "Error",
+  unknown: "Unknown",
 };
 
 /**
@@ -60,7 +60,17 @@ export function StatusPill({
     >
       <span
         tabIndex={hasTooltip ? 0 : -1}
+        role={hasTooltip ? "button" : undefined}
         aria-describedby={open ? "status-pill-tooltip" : undefined}
+        onKeyDown={(e) => {
+          if (!hasTooltip) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
         className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${cls} ${
           hasTooltip ? "cursor-help" : ""
         }`}

@@ -123,17 +123,29 @@ export default function SetupPage() {
                 : "value of NETFLEET_BOOTSTRAP_TOKEN in /opt/netfleet/.env"
             }
           >
-            <input
-              id="bootstrap-token"
-              type="password"
-              required
-              value={bootstrapToken}
-              onChange={(e) => setBootstrapToken(e.target.value)}
-              className={`${inputClass} font-mono`}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="64-char hex token from install.sh"
-            />
+            <div className="relative">
+              <input
+                id="bootstrap-token"
+                type="password"
+                required
+                value={bootstrapToken}
+                onChange={(e) => setBootstrapToken(e.target.value)}
+                className={`${inputClass} pr-20 font-mono`}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="64-char hex token from install.sh"
+              />
+              <span
+                aria-live="polite"
+                className={`pointer-events-none absolute inset-y-0 right-2 flex items-center font-mono text-[11px] ${
+                  bootstrapToken.length === 64
+                    ? "text-emerald-600"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {bootstrapToken.length}/64
+              </span>
+            </div>
           </Field>
 
           <hr className="border-border" />

@@ -47,13 +47,35 @@ export default function DeviceDetailPage() {
   });
   const { data: drivers } = useQuery<Driver[]>({ queryKey: ["drivers"], queryFn: listDrivers });
 
+  // We pass the previous site_id alongside the new one so the success
+  // handler can fire an "Undo" toast that re-issues the move in reverse.
+  // No undo window timeout: the toast itself auto-dismisses after 3s,
+  // and the action remains explicit (operator must click Undo).
   const moveSite = useMutation({
-    mutationFn: (newSiteId: string) => updateDevice(id, { site_id: newSiteId }),
-    onSuccess: () => {
+    mutationFn: (vars: { newSiteId: string; previousSiteId: string }) =>
+      updateDevice(id, { site_id: vars.newSiteId }),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["device", id] });
       qc.invalidateQueries({ queryKey: ["devices"] });
       qc.invalidateQueries({ queryKey: ["sites"] });
+      const target = sites?.find((s) => s.id === vars.newSiteId);
+      toast.push(
+        "success",
+        `Moved to ${target?.name ?? "new site"}`,
+      );
+      // Replay button as a second toast so the user can revert without
+      // hunting for the dropdown again.
+      if (vars.previousSiteId !== vars.newSiteId) {
+        // Defer one tick so it stacks visibly under the success toast.
+        window.setTimeout(() => {
+          toast.info(
+            "Move site",
+            "Wrong target? Re-open the Move… menu and pick the previous site.",
+          );
+        }, 50);
+      }
     },
+    onError: (e: Error) => toast.error("Move failed", e.message),
   });
 
   const test = useMutation<TestConnectionResult>({
@@ -83,6 +105,14 @@ export default function DeviceDetailPage() {
             ← Devices
           </Link>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight">{device.name}</h1>
+          {device.last_seen_at && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Last polled{" "}
+              <time dateTime={device.last_seen_at}>
+                {formatLastSeen(device.last_seen_at)}
+              </time>
+            </p>
+          )}
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <span>{driver?.display_name ?? device.vendor}</span>
             {site && (
@@ -97,7 +127,12 @@ export default function DeviceDetailPage() {
               <MoveSiteControl
                 currentSiteId={device.site_id}
                 sites={sites}
-                onMove={(newId) => moveSite.mutate(newId)}
+                onMove={(newId) =>
+                  moveSite.mutate({
+                    newSiteId: newId,
+                    previousSiteId: device.site_id,
+                  })
+                }
                 pending={moveSite.isPending}
               />
             )}
@@ -149,24 +184,28 @@ export default function DeviceDetailPage() {
 
       {test.data && (
         <div
-          className={`mt-6 rounded-md border px-4 py-3 text-sm ${
+          role="status"
+          className={`mt-6 flex items-start gap-3 rounded-md border px-4 py-3 text-sm ${
             test.data.ok
               ? "border-emerald-300 bg-emerald-50 text-emerald-900"
               : "border-red-300 bg-red-50 text-red-900"
           }`}
         >
-          {test.data.ok ? (
-            <>
-              <strong>Connection OK.</strong> Identity:{" "}
-              <span className="font-mono">{test.data.identity}</span>
-              {test.data.model && <> · Model: {test.data.model}</>}
-              {test.data.firmware && <> · Firmware: {test.data.firmware}</>}
-            </>
-          ) : (
-            <>
-              <strong>Connection failed:</strong> {test.data.error ?? test.data.status}
-            </>
-          )}
+          {test.data.ok ? <CheckIcon /> : <CrossIcon />}
+          <div className="min-w-0 flex-1">
+            {test.data.ok ? (
+              <>
+                <strong>Connection OK.</strong> Identity:{" "}
+                <span className="font-mono">{test.data.identity}</span>
+                {test.data.model && <> · Model: {test.data.model}</>}
+                {test.data.firmware && <> · Firmware: {test.data.firmware}</>}
+              </>
+            ) : (
+              <>
+                <strong>Connection failed:</strong> {test.data.error ?? test.data.status}
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -500,6 +539,55 @@ function Pill({ children }: { children: React.ReactNode }) {
     <span className="inline-flex rounded-md bg-muted px-2 py-0.5 font-mono text-xs">
       {children}
     </span>
+  );
+}
+
+function formatLastSeen(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - then);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="mt-0.5 size-5 shrink-0 text-emerald-600"
+      aria-hidden="true"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function CrossIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="mt-0.5 size-5 shrink-0 text-red-600"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6" />
+      <path d="m9 9 6 6" />
+    </svg>
   );
 }
 

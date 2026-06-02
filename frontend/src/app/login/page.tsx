@@ -203,7 +203,10 @@ function LoginPageInner() {
           </p>
 
           {error && (
-            <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div
+              role="alert"
+              className="mt-4 rounded-md border border-destructive bg-destructive/15 px-3 py-2 text-sm font-medium text-destructive"
+            >
               {error}
             </div>
           )}
@@ -312,7 +315,7 @@ function LoginPageInner() {
                   required
                   autoFocus
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   className={`${inputClass} text-center text-lg tracking-[0.5em]`}
                   placeholder="000000"
                 />
@@ -353,7 +356,7 @@ function LoginPageInner() {
                   required
                   autoFocus
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   className={`${inputClass} text-center text-lg tracking-[0.5em]`}
                   placeholder="000000"
                   autoComplete="one-time-code"

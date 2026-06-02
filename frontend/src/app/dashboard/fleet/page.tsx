@@ -155,7 +155,7 @@ export default function FleetPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Fleet</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -163,7 +163,7 @@ export default function FleetPage() {
             its detail page.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-xs text-muted-foreground">
             {totalTenants} tenant{totalTenants === 1 ? "" : "s"} · {totalSites}{" "}
             site{totalSites === 1 ? "" : "s"} · {totalDevices} device
@@ -185,7 +185,11 @@ export default function FleetPage() {
         </div>
       </div>
 
+      <label htmlFor="fleet-search" className="sr-only">
+        Filter fleet by tenant, site, device, host or model
+      </label>
       <input
+        id="fleet-search"
         type="search"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
@@ -194,22 +198,20 @@ export default function FleetPage() {
       />
 
       {filtered.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          {filter ? "Nothing matches that filter." : "No tenants yet."}
-        </div>
+        <EmptyFleetState hasFilter={Boolean(filter)} />
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
+        <div className="relative mt-4 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-muted/70 text-left text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/60">
+            <thead className="sticky top-14 z-10 bg-muted/80 text-left text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/70">
               <tr className="border-b border-border">
-                <th className="px-3 py-2.5 font-medium">Tenant</th>
-                <th className="px-3 py-2.5 font-medium">Site</th>
-                <th className="px-3 py-2.5 font-medium">Device</th>
-                <th className="px-3 py-2.5 font-medium">IP / Host</th>
-                <th className="px-3 py-2.5 font-medium">Model</th>
-                <th className="px-3 py-2.5 font-medium">Firmware</th>
-                <th className="px-3 py-2.5 font-medium">Status</th>
-                <th className="px-3 py-2.5 font-medium text-right">Details</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Tenant</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Site</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Device</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">IP / Host</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Model</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Firmware</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Status</th>
+                <th scope="col" className="px-3 py-2.5 font-medium text-right">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -218,8 +220,44 @@ export default function FleetPage() {
               ))}
             </tbody>
           </table>
+          {/* Right-edge fade hint that the table scrolls horizontally on
+              narrow viewports. pointer-events-none so it doesn't intercept
+              clicks on the rightmost column. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute right-0 top-0 hidden h-full w-8 bg-gradient-to-l from-card to-transparent md:max-lg:block"
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+function EmptyFleetState({ hasFilter }: { hasFilter: boolean }) {
+  if (hasFilter) {
+    return (
+      <div className="mt-6 rounded-lg border-2 border-dashed border-border/60 bg-card/50 p-10 text-center">
+        <p className="text-sm font-medium text-foreground">
+          Nothing matches that filter.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Try a shorter term, or clear the search box.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-6 rounded-lg border-2 border-dashed border-border/60 bg-card/50 p-10 text-center">
+      <p className="text-base font-medium text-foreground">No tenants yet</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Create your first tenant, then add sites and devices under it.
+      </p>
+      <Link
+        href="/dashboard/fleet/new"
+        className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+      >
+        + Add tenant
+      </Link>
     </div>
   );
 }
@@ -230,11 +268,11 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
     device?.firmware_available &&
     device?.firmware &&
     normFw(device.firmware_available) !== normFw(device.firmware);
-  // Heavier accent line at tenant boundaries; thinner divider between
-  // sites within a tenant. Makes the visual hierarchy readable at a
-  // glance without forcing a separator row.
+  // Tenant boundary now gets a subtle background tint in addition to the
+  // heavier top border — background change is far more scannable than a
+  // 2px line. Site rows inside a tenant keep a thin divider.
   const groupBorder = tenantFirst
-    ? "border-t-2 border-border"
+    ? "border-t-2 border-border bg-muted/30"
     : siteFirst
       ? "border-t border-border/60"
       : "";
@@ -284,12 +322,12 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
           </Link>
         )}
       </td>
-      <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-xs text-muted-foreground">
+      <td className="whitespace-nowrap px-3 py-2 align-top font-mono text-xs">
         {device ? (
-          <Highlighted
-            text={`${device.host}:${device.port}`}
-            needle={highlight}
-          />
+          <span className="text-foreground">
+            <Highlighted text={device.host} needle={highlight} />
+            <span className="text-muted-foreground">:{device.port}</span>
+          </span>
         ) : (
           <span className="text-muted-foreground/40">—</span>
         )}
@@ -303,14 +341,15 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
       </td>
       <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">
         {device?.firmware ? (
-          <span className="inline-flex items-baseline gap-1">
+          <span className="inline-flex items-baseline gap-1.5">
             <Highlighted text={device.firmware} needle={highlight} />
             {fwUpgrade && (
               <span
-                className="rounded-md bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-900"
+                className="rounded-md bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-900"
                 title={`Update available: ${device.firmware_available}`}
+                aria-label={`Update available to ${device.firmware_available}`}
               >
-                ↑
+                ↑ {device.firmware_available}
               </span>
             )}
           </span>

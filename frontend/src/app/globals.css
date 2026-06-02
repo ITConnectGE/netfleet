@@ -40,6 +40,7 @@
 
     /* Tabular numerals + balanced kerning for tables and forms */
     font-feature-settings: "tnum", "ss01", "cv01";
+    font-variant-numeric: tabular-nums;
   }
 
   .dark {
@@ -125,17 +126,31 @@
 
   /* Selection in brand colour */
   ::selection {
-    background-color: hsl(var(--primary) / 0.18);
+    background-color: hsl(var(--primary) / 0.25);
     color: hsl(var(--foreground));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
   /* Card lift — applied wherever we use bg-card; subtle elevation so the
-     UI doesn't read as a flat wireframe. */
+     UI doesn't read as a flat wireframe. The 1px border catches the eye
+     even on a near-white background, because the shadow alone disappears
+     into --background = 210 20% 98%. */
   .bg-card {
-    box-shadow: 0 1px 2px 0 hsl(222 47% 11% / 0.04),
-                0 1px 1px 0 hsl(222 47% 11% / 0.03);
+    box-shadow:
+      0 1px 2px 0 hsl(222 47% 11% / 0.05),
+      0 1px 1px 0 hsl(222 47% 11% / 0.03);
   }
   .dark .bg-card {
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.4);
