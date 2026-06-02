@@ -55,41 +55,94 @@ def _summed_net_io() -> tuple[int, int]:
     return rx, tx
 
 
-def collect_snapshot() -> dict[str, Any]:
-    """Live point-in-time numbers — no DB hit."""
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
-    cpu_pct = psutil.cpu_percent(interval=None)
-    rx, tx = _summed_net_io()
-    boot_ts = psutil.boot_time()
+def _zero_snapshot() -> dict[str, Any]:
     return {
-        "cpu_percent": float(cpu_pct),
-        "cpu_count": int(psutil.cpu_count() or 0),
-        "memory_used_bytes": int(mem.used),
-        "memory_total_bytes": int(mem.total),
-        "memory_percent": float(mem.percent),
-        "disk_used_bytes": int(disk.used),
-        "disk_total_bytes": int(disk.total),
-        "disk_percent": float(disk.percent),
-        "net_rx_bytes": rx,
-        "net_tx_bytes": tx,
-        "boot_at_unix": float(boot_ts),
+        "cpu_percent": 0.0,
+        "cpu_count": 0,
+        "memory_used_bytes": 0,
+        "memory_total_bytes": 0,
+        "memory_percent": 0.0,
+        "disk_used_bytes": 0,
+        "disk_total_bytes": 0,
+        "disk_percent": 0.0,
+        "net_rx_bytes": 0,
+        "net_tx_bytes": 0,
+        "boot_at_unix": 0.0,
     }
+
+
+def collect_snapshot() -> dict[str, Any]:
+    """Live point-in-time numbers — no DB hit. Each psutil call is
+    wrapped so a single failure (typically `disk_usage('/')` on a
+    container with a stripped root mount, or `net_connections` denied
+    by AppArmor) degrades gracefully to zero rather than 500-ing the
+    whole endpoint."""
+    out = _zero_snapshot()
+    try:
+        out["cpu_percent"] = float(psutil.cpu_percent(interval=None))
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.cpu_percent.failed", error=str(e))
+    try:
+        out["cpu_count"] = int(psutil.cpu_count() or 0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.cpu_count.failed", error=str(e))
+    try:
+        mem = psutil.virtual_memory()
+        out["memory_used_bytes"] = int(mem.used)
+        out["memory_total_bytes"] = int(mem.total)
+        out["memory_percent"] = float(mem.percent)
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.memory.failed", error=str(e))
+    try:
+        disk = psutil.disk_usage("/")
+        out["disk_used_bytes"] = int(disk.used)
+        out["disk_total_bytes"] = int(disk.total)
+        out["disk_percent"] = float(disk.percent)
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.disk.failed", error=str(e))
+    try:
+        rx, tx = _summed_net_io()
+        out["net_rx_bytes"] = rx
+        out["net_tx_bytes"] = tx
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.net_io.failed", error=str(e))
+    try:
+        out["boot_at_unix"] = float(psutil.boot_time())
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.boot_time.failed", error=str(e))
+    return out
 
 
 def collect_per_nic() -> list[dict[str, Any]]:
     """Per-interface cumulative byte counters + link status. Loopback
     is included so the operator can see container-internal chatter,
     but the aggregate summary skips it (see _summed_net_io)."""
-    pernic = psutil.net_io_counters(pernic=True)
-    addrs = psutil.net_if_addrs()
-    stats = psutil.net_if_stats()
+    try:
+        pernic = psutil.net_io_counters(pernic=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.pernic.failed", error=str(e))
+        return []
+    try:
+        addrs = psutil.net_if_addrs()
+    except Exception:  # noqa: BLE001
+        addrs = {}
+    try:
+        stats = psutil.net_if_stats()
+    except Exception:  # noqa: BLE001
+        stats = {}
     out: list[dict[str, Any]] = []
     for name, c in pernic.items():
-        ipv4 = next(
-            (a.address for a in addrs.get(name, []) if a.family.name == "AF_INET"),
-            None,
-        )
+        try:
+            ipv4 = next(
+                (
+                    a.address
+                    for a in addrs.get(name, [])
+                    if getattr(a.family, "name", "") == "AF_INET"
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001
+            ipv4 = None
         s = stats.get(name)
         out.append(
             {
@@ -114,29 +167,56 @@ def collect_peer_connections() -> list[dict[str, Any]]:
     state — enough to answer "what is the box talking to right now"
     without trying to invent per-IP byte history (kernel doesn't
     expose that without iptables-side counters, which we don't have
-    in the unprivileged container)."""
+    in the unprivileged container).
+
+    Failure modes are all degraded to "empty list" because the host-
+    health endpoint shouldn't 500 just because the API container is
+    forbidden from reading /proc/<other-pid>/net."""
+    conns: list = []
     try:
-        conns = psutil.net_connections(kind="tcp")
+        conns = list(psutil.net_connections(kind="tcp"))
     except (psutil.AccessDenied, PermissionError):
-        # Non-root containers without CAP_SYS_PTRACE can't see other
-        # processes' sockets; we still surface our own.
         try:
-            conns = psutil.Process().net_connections(kind="tcp")
-        except Exception as e:
+            # `net_connections` was renamed from `connections` in psutil
+            # 6; keep a getattr fallback so 5.x still works if it ever
+            # gets pinned that way.
+            proc = psutil.Process()
+            fn = getattr(proc, "net_connections", None) or getattr(
+                proc, "connections", None
+            )
+            if fn:
+                conns = list(fn(kind="tcp"))
+        except Exception as e:  # noqa: BLE001
             log.warning("host_metrics.peers.deny", error=str(e))
             return []
+    except Exception as e:  # noqa: BLE001
+        log.warning("host_metrics.peers.failed", error=str(e))
+        return []
+
     by_ip: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"remote": "", "count": 0, "by_state": defaultdict(int)}
     )
     for c in conns:
-        if c.raddr is None or not c.raddr.ip:
+        try:
+            # raddr is `()` (empty tuple) for listening sockets, not
+            # None — so `c.raddr is None` is False and the later
+            # `.ip` access raises AttributeError. Truthy check handles
+            # both cases.
+            raddr = getattr(c, "raddr", None)
+            if not raddr:
+                continue
+            ip = getattr(raddr, "ip", None)
+            if not ip:
+                continue
+            ip_str = str(ip)
+            rec = by_ip[ip_str]
+            rec["remote"] = ip_str
+            rec["count"] += 1
+            state = getattr(c, "status", "UNKNOWN") or "UNKNOWN"
+            rec["by_state"][state] = rec["by_state"][state] + 1
+        except Exception:  # noqa: BLE001
             continue
-        ip = str(c.raddr.ip)
-        rec = by_ip[ip]
-        rec["remote"] = ip
-        rec["count"] += 1
-        rec["by_state"][c.status] = rec["by_state"][c.status] + 1
-    # Flatten for JSON
+
     out: list[dict[str, Any]] = []
     for rec in by_ip.values():
         out.append(

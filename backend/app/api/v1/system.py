@@ -1,9 +1,10 @@
 import os
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from app.api.dependencies import db_session, get_current_user
 from app.models.user import User
 from app.services import host_metrics as host_metrics_svc
 
+log = structlog.get_logger(__name__)
 router = APIRouter()
 
 _started_at = time.monotonic()
@@ -97,9 +99,22 @@ class HostHistoryResponse(BaseModel):
 async def host_health(
     _: User = Depends(get_current_user),
 ) -> HostHealthResponse:
-    snap = host_metrics_svc.collect_snapshot()
+    # Any unexpected psutil hiccup should land here as a 503 with a
+    # readable message rather than a generic 500 — the page polls this
+    # every 5 s, so we want the failure mode visible in the UI, not
+    # buried in Sentry.
+    try:
+        snap = host_metrics_svc.collect_snapshot()
+        nics = host_metrics_svc.collect_per_nic()
+        peers = host_metrics_svc.collect_peer_connections()
+    except Exception as e:  # noqa: BLE001
+        log.error("host_health.collect_failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"host metrics unavailable: {e}",
+        ) from e
     return HostHealthResponse(
-        sampled_at=datetime.now().astimezone(),
+        sampled_at=datetime.now(UTC),
         cpu_percent=snap["cpu_percent"],
         cpu_count=snap["cpu_count"],
         memory_used_bytes=snap["memory_used_bytes"],
@@ -111,8 +126,8 @@ async def host_health(
         net_rx_bytes=snap["net_rx_bytes"],
         net_tx_bytes=snap["net_tx_bytes"],
         boot_at_unix=snap["boot_at_unix"],
-        nics=host_metrics_svc.collect_per_nic(),
-        peers=host_metrics_svc.collect_peer_connections(),
+        nics=nics,
+        peers=peers,
     )
 
 
