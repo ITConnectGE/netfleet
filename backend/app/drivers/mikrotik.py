@@ -1204,11 +1204,24 @@ class MikrotikDriver:
         limit: int = 200,
     ) -> list[LogEntry]:
         rows = await self._call(creds, "/log/print")
+        # `topics` is a comma-separated "any-of" filter — historically
+        # we compared the whole filter string against each row's
+        # topics, which essentially never matched because RouterOS
+        # writes rows like "system,info" not "critical,error,warning".
+        # Split it into a set and keep any row that mentions at least
+        # one of them.
+        wanted = (
+            {t.strip().lower() for t in topics.split(",") if t.strip()}
+            if topics
+            else None
+        )
         out: list[LogEntry] = []
         for r in rows:
             row_topics = str(r.get("topics", ""))
-            if topics and topics.lower() not in row_topics.lower():
-                continue
+            if wanted is not None:
+                row_set = {t.strip().lower() for t in row_topics.split(",")}
+                if wanted.isdisjoint(row_set):
+                    continue
             out.append(
                 LogEntry(
                     time=str(r.get("time", "")),

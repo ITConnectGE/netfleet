@@ -35,28 +35,37 @@ log = structlog.get_logger(__name__)
 
 
 # Topics RouterOS exposes that mark the line's severity. Order matters —
-# critical wins if both `critical` and `warning` appear.
+# critical wins if both `critical` and `warning` appear. Lines that
+# don't carry any of these explicit markers fall through to INFO so the
+# unified inbox still picks them up (DHCP leases, IPsec key changes,
+# system clock adjustments — useful when triaging "what was the box
+# doing right before X").
 _SEVERITY_TOPICS: list[tuple[str, EventSeverity]] = [
     ("critical", EventSeverity.CRITICAL),
     ("error", EventSeverity.ERROR),
     ("warning", EventSeverity.WARNING),
+    ("info", EventSeverity.INFO),
 ]
 
-# What we ask the device for. info is intentionally excluded — info lines are
-# noisy and not what an MSP wants to wake up to. If we ever need info we'll
-# add it as an org setting.
-DEFAULT_POLL_TOPICS = "critical,error,warning"
+# Empty default — pull every log line, then `_classify` decides the
+# severity bucket. Previously we asked the device for
+# "critical,error,warning" and the driver's broken substring filter
+# combined with that to silently drop everything; the events page
+# stayed empty even on noisy boxes. The five-minute poll cadence
+# plus the 500-line per-device cap keeps the volume bounded.
+DEFAULT_POLL_TOPICS = ""
 
 
 def _classify(topics: str) -> EventSeverity | None:
-    """Map a comma-separated topics string from RouterOS to our severity enum.
-    Returns None for lines that aren't critical/error/warning (we don't persist
-    those — they're not what the central inbox is for)."""
-    parts = {t.strip().lower() for t in topics.split(",")}
+    """Map a comma-separated topics string from RouterOS to our
+    severity enum. The unified inbox keeps every log line — even
+    unlabelled ones land in INFO — so an operator can review
+    "everything the box said in the last hour" from one page."""
+    parts = {t.strip().lower() for t in topics.split(",") if t.strip()}
     for keyword, severity in _SEVERITY_TOPICS:
         if keyword in parts:
             return severity
-    return None
+    return EventSeverity.INFO
 
 
 def _dedup_key(device_time: str, topics: str, message: str) -> str:

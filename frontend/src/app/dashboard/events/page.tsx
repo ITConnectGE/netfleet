@@ -40,7 +40,15 @@ export default function EventsPage() {
   const qc = useQueryClient();
   const router = useRouter();
 
-  const [severity, setSeverity] = useState<Severity[]>(["critical", "error", "warning"]);
+  // Default to "show everything" — events page is a unified log inbox,
+  // not just an alert console. Operators who only want red flags can
+  // un-tick info / warning; we don't want a fresh visit to look empty.
+  const [severity, setSeverity] = useState<Severity[]>([
+    "critical",
+    "error",
+    "warning",
+    "info",
+  ]);
   const [showAcked, setShowAcked] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -166,8 +174,9 @@ export default function EventsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Events</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Central inbox of critical / error / warning lines pulled from every
-            enabled device. The worker scans on a 5-minute cycle.
+            Unified log feed — every line every enabled device emits, pulled
+            into one inbox. Severity, device and free-text filters narrow it
+            down; the worker scans on a 5-minute cycle.
           </p>
         </div>
         {data && (
@@ -175,6 +184,7 @@ export default function EventsPage() {
             <SummaryPill label="Critical" count={severityCounts?.critical ?? 0} sev="critical" />
             <SummaryPill label="Error" count={severityCounts?.error ?? 0} sev="error" />
             <SummaryPill label="Warning" count={severityCounts?.warning ?? 0} sev="warning" />
+            <SummaryPill label="Info" count={severityCounts?.info ?? 0} sev="info" />
             <span className="text-muted-foreground">
               · {data.unacknowledged_total} unack
             </span>
