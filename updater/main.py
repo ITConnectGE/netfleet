@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     UPDATE_CHANNEL: str = "stable"
     GITHUB_REPO: str = "ITConnectGE/netfleet"
     AUTO_BACKUP_ON_UPDATE: bool = True
+    # Optional. Unauthenticated requests to api.github.com share a single
+    # 60/hr bucket per source IP, which a deployment behind office NAT
+    # exhausts in a few polls (the worker also queries the same host
+    # under user actions). A classic PAT with NO scopes (public repo) or
+    # a fine-grained token with read-only "Contents" + "Metadata" scopes
+    # raises the limit to 5,000/hr and is enough for this updater.
+    GITHUB_TOKEN: str = ""
 
 
 settings = Settings()
@@ -164,6 +171,11 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
          string so we cut both.
     """
     headers = {"Accept": "application/vnd.github+json"}
+    if settings.GITHUB_TOKEN:
+        # GitHub accepts both "token <pat>" (classic) and "Bearer <pat>"
+        # (fine-grained). Bearer is the documented form for both today.
+        headers["Authorization"] = f"Bearer {settings.GITHUB_TOKEN}"
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
     if force:
         headers["Cache-Control"] = "no-cache"
 
