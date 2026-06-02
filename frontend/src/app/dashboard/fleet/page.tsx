@@ -202,7 +202,7 @@ export default function FleetPage() {
       ) : (
         <div className="relative mt-4 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
           <table className="w-full text-sm">
-            <thead className="sticky top-14 z-10 bg-muted/80 text-left text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/70">
+            <thead className="bg-muted/80 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr className="border-b border-border">
                 <th scope="col" className="px-3 py-2.5 font-medium">Tenant</th>
                 <th scope="col" className="px-3 py-2.5 font-medium">Site</th>
