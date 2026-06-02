@@ -24,6 +24,7 @@ from app.models.organization import Organization
 from app.services import backups as backup_svc
 from app.services import events as events_svc
 from app.services import firmware as firmware_svc
+from app.services import host_metrics as host_metrics_svc
 
 log = structlog.get_logger("netfleet.scheduler")
 
@@ -109,6 +110,22 @@ async def job_firmware_auto_upgrade(session: AsyncSession) -> None:
             )
 
 
+async def job_host_metrics_sample(session: AsyncSession) -> None:
+    """Snapshot the API host's own CPU / memory / disk / network into
+    the host_metric_samples table, then prune to the byte cap so the
+    table never outgrows ~5 MB. The query plan is cheap — one INSERT
+    plus, only when we're over cap, one COUNT and one DELETE."""
+    try:
+        await host_metrics_svc.persist_snapshot(session)
+        removed = await host_metrics_svc.prune_history(session)
+        await session.commit()
+        if removed:
+            log.info("scheduler.host_metrics.pruned", removed=removed)
+    except Exception as e:
+        log.warning("scheduler.host_metrics.failed", error=str(e))
+        await session.rollback()
+
+
 async def job_event_retention(session: AsyncSession) -> None:
     """Drop events older than EVENT_RETENTION_DAYS plus everything past
     EVENT_MAX_ROWS_PER_ORG (newest kept). Runs hourly; both passes are
@@ -177,6 +194,16 @@ JOBS: list[ScheduledJob] = [
         # quickly, long enough that 100 devices is a manageable rate.
         interval_seconds=int(os.environ.get("NETFLEET_EVENT_SCAN_INTERVAL_SECONDS", str(300))),
         handler=job_scan_log_events,
+    ),
+    ScheduledJob(
+        name="host-metrics-sample",
+        # 60s is the sweet spot — fine-grained enough to spot a CPU
+        # spike, coarse enough that a year of history fits in the
+        # 5 MB envelope.
+        interval_seconds=int(
+            os.environ.get("NETFLEET_HOST_METRIC_INTERVAL_SECONDS", str(60))
+        ),
+        handler=job_host_metrics_sample,
     ),
     ScheduledJob(
         name="event-retention",
