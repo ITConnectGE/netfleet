@@ -149,19 +149,25 @@ class MikrotikDriver:
 
     async def dhcp_leases(self, creds: DeviceCredentials) -> list[DhcpLease]:
         rows = await self._call(creds, "/ip/dhcp-server/lease/print")
+        # Most string-shaped fields are coerced via `_to_str` because
+        # RouterOS hands them back as int when the user happens to name
+        # a host "611" or sets a numeric comment — and our schemas
+        # type them as `str | None`. host-name and client-id are the
+        # two we hit most in the wild, but it's cheap to be defensive
+        # on every textual lease attribute.
         return [
             DhcpLease(
                 id=r.get(".id"),
                 address=str(r.get("address", "")),
                 mac_address=str(r.get("mac-address", "")),
-                host_name=r.get("host-name"),
-                client_id=r.get("client-id"),
-                status=r.get("status"),
-                server=r.get("server"),
-                expires_at_iso=r.get("expires-after"),
+                host_name=_to_str(r.get("host-name")),
+                client_id=_to_str(r.get("client-id")),
+                status=_to_str(r.get("status")),
+                server=_to_str(r.get("server")),
+                expires_at_iso=_to_str(r.get("expires-after")),
                 dynamic=_to_bool(r.get("dynamic")),
                 blocked=_to_bool(r.get("blocked")),
-                comment=r.get("comment"),
+                comment=_to_str(r.get("comment")),
                 raw=r,
             )
             for r in rows
