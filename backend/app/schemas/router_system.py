@@ -105,3 +105,59 @@ class SnmpCommunityUpdate(BaseModel):
     read_access: bool | None = None
     write_access: bool | None = None
     disabled: bool | None = None
+
+
+# ---------------- /system/logging ----------------
+
+
+class LoggingRulePublic(BaseModel):
+    id: str | None
+    topics: str
+    action: str
+    prefix: str | None = None
+    disabled: bool
+    invalid: bool = False
+    default: bool = False
+
+
+class LoggingRuleCreate(BaseModel):
+    topics: str = Field(min_length=1, max_length=255)
+    action: str = Field(min_length=1, max_length=64)
+    prefix: str | None = Field(default=None, max_length=64)
+    disabled: bool = False
+
+
+class LoggingRuleUpdate(BaseModel):
+    topics: str | None = Field(default=None, max_length=255)
+    action: str | None = Field(default=None, max_length=64)
+    prefix: str | None = Field(default=None, max_length=64)
+    disabled: bool | None = None
+
+
+class LoggingActionPublic(BaseModel):
+    id: str | None
+    name: str
+    target: str
+    remote: str | None = None
+    remote_port: int | None = None
+    src_address: str | None = None
+    bsd_syslog: bool | None = None
+    syslog_facility: str | None = None
+    syslog_severity: str | None = None
+    memory_lines: int | None = None
+    disk_lines_per_file: int | None = None
+    disk_file_count: int | None = None
+    default: bool = False
+
+
+class LoggingActionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    target: Literal["memory", "disk", "echo", "remote"]
+    # Remote syslog config — required when target=remote
+    remote: str | None = Field(default=None, max_length=64)
+    remote_port: int | None = Field(default=None, ge=1, le=65535)
+    src_address: str | None = Field(default=None, max_length=64)
+    bsd_syslog: bool | None = None
+    syslog_facility: str | None = Field(default=None, max_length=32)
+    syslog_severity: str | None = Field(default=None, max_length=16)
+    memory_lines: int | None = Field(default=None, ge=10, le=100000)

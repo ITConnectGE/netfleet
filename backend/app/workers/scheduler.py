@@ -109,6 +109,29 @@ async def job_firmware_auto_upgrade(session: AsyncSession) -> None:
             )
 
 
+async def job_event_retention(session: AsyncSession) -> None:
+    """Drop events older than EVENT_RETENTION_DAYS plus everything past
+    EVENT_MAX_ROWS_PER_ORG (newest kept). Runs hourly; both passes are
+    cheap relative to the table because the discriminator is the
+    indexed observed_at column."""
+    orgs = list((await session.execute(select(Organization))).scalars())
+    for org in orgs:
+        aged, capped = await events_svc.prune_events(
+            session,
+            org.id,
+            max_age_days=settings.EVENT_RETENTION_DAYS,
+            max_rows=settings.EVENT_MAX_ROWS_PER_ORG,
+        )
+        await session.commit()
+        if aged or capped:
+            log.info(
+                "scheduler.event_retention.done",
+                organization_id=str(org.id),
+                aged_out=aged,
+                row_capped=capped,
+            )
+
+
 async def job_backup_retention(session: AsyncSession) -> None:
     """Apply retention to every org's backup history."""
     keep_days = int(os.environ.get("NETFLEET_BACKUP_RETENTION_DAYS", "30"))
@@ -154,6 +177,16 @@ JOBS: list[ScheduledJob] = [
         # quickly, long enough that 100 devices is a manageable rate.
         interval_seconds=int(os.environ.get("NETFLEET_EVENT_SCAN_INTERVAL_SECONDS", str(300))),
         handler=job_scan_log_events,
+    ),
+    ScheduledJob(
+        name="event-retention",
+        # Hourly. The cap query is `count + DELETE ... NOT IN` which
+        # is fine at 500k rows but not free, so we don't run it more
+        # often than we have to.
+        interval_seconds=int(
+            os.environ.get("NETFLEET_EVENT_RETENTION_INTERVAL_SECONDS", str(3600))
+        ),
+        handler=job_event_retention,
     ),
 ]
 

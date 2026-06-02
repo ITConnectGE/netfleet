@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # --- Event-inbox retention ---
+    # Hourly prune job drops device-log events that are either older
+    # than EVENT_RETENTION_DAYS or beyond EVENT_MAX_ROWS_PER_ORG. The
+    # cap is the dominant factor for chatty fleets — at ~200 bytes per
+    # row the default of 500 000 caps the table at ~100 MB / org, which
+    # matches the "10 MB / 100 MB" envelope operators reason about.
+    EVENT_RETENTION_DAYS: int = 30
+    EVENT_MAX_ROWS_PER_ORG: int = 500_000
+
     # --- Tokens ---
     # Access token kept short-ish but long enough that an operator who
     # alt-tabs away mid-investigation isn't bounced every 15 min. The

@@ -15,7 +15,9 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import and_, func, select, update
+from datetime import timedelta
+
+from sqlalchemy import and_, delete, desc, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -304,3 +306,53 @@ async def acknowledge_events(
     )
     result = await session.execute(stmt)
     return int(result.rowcount or 0)
+
+
+# ---------------- Retention ----------------
+
+
+async def prune_events(
+    session: AsyncSession,
+    organization_id: UUID,
+    *,
+    max_age_days: int,
+    max_rows: int,
+) -> tuple[int, int]:
+    """Drop events that are either too old or beyond the per-org row cap.
+
+    Returns (rows_aged_out, rows_capped). Acknowledged rows are deleted
+    just like unacknowledged ones — the events page is a rolling log
+    feed, not a long-term archive (the per-device backup / audit log
+    is). Both passes are cheap relative to the table size because the
+    discriminator is the indexed `observed_at` column.
+    """
+
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    aged_stmt = delete(DeviceLogEvent).where(
+        DeviceLogEvent.organization_id == organization_id,
+        DeviceLogEvent.observed_at < cutoff,
+    )
+    aged = int((await session.execute(aged_stmt)).rowcount or 0)
+
+    # Row-cap pass: count what's left, and if we're still over keep
+    # only the newest `max_rows`. Implemented as a NOT IN subquery
+    # rather than a CTE so it works on every Postgres ≥ 12.
+    count_stmt = select(func.count()).where(
+        DeviceLogEvent.organization_id == organization_id
+    )
+    total = int((await session.execute(count_stmt)).scalar_one())
+    capped = 0
+    if total > max_rows:
+        keep_ids_stmt = (
+            select(DeviceLogEvent.id)
+            .where(DeviceLogEvent.organization_id == organization_id)
+            .order_by(desc(DeviceLogEvent.observed_at))
+            .limit(max_rows)
+        )
+        cap_stmt = delete(DeviceLogEvent).where(
+            DeviceLogEvent.organization_id == organization_id,
+            DeviceLogEvent.id.not_in(keep_ids_stmt),
+        )
+        capped = int((await session.execute(cap_stmt)).rowcount or 0)
+
+    return aged, capped

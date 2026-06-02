@@ -179,6 +179,40 @@ class LogEntry:
 
 
 @dataclass(slots=True)
+class LoggingRule:
+    """A /system/logging rule — what topics get logged where."""
+
+    id: str | None
+    topics: str                             # comma list; supports `!info` style negation
+    action: str                             # name of a logging action (memory | disk | echo | remote_x)
+    prefix: str | None = None               # optional string prepended to every line
+    disabled: bool = False
+    invalid: bool = False
+    default: bool = False                   # RouterOS marks the seed rules with "default=yes"
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class LoggingAction:
+    """A /system/logging/action target — where matched lines are sent."""
+
+    id: str | None
+    name: str
+    target: str                             # memory | disk | echo | remote | email
+    remote: str | None = None               # syslog server IP (only when target=remote)
+    remote_port: int | None = None
+    src_address: str | None = None
+    bsd_syslog: bool | None = None
+    syslog_facility: str | None = None
+    syslog_severity: str | None = None
+    memory_lines: int | None = None
+    disk_lines_per_file: int | None = None
+    disk_file_count: int | None = None
+    default: bool = False                   # built-in (memory/disk/echo) shouldn't be deleted
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class IpRoute:
     id: str | None
     dst_address: str                       # "0.0.0.0/0", "192.168.1.0/24", ...

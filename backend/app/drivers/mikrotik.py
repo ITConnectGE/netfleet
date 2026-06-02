@@ -36,6 +36,8 @@ from app.drivers.base import (
     IpRoute,
     IpService,
     LogEntry,
+    LoggingAction,
+    LoggingRule,
     NatRule,
     Neighbor,
     NeighborDiscoverySettings,
@@ -1236,6 +1238,136 @@ class MikrotikDriver:
         # of fresh ones. The frontend's auto-scroll-to-bottom then lands on
         # the latest line by default.
         return out[-limit:]
+
+    # ============== System / logging rules ==============
+
+    async def system_logging_list(
+        self, creds: DeviceCredentials
+    ) -> list[LoggingRule]:
+        rows = await self._call(creds, "/system/logging/print")
+        return [
+            LoggingRule(
+                id=r.get(".id"),
+                topics=str(r.get("topics", "")),
+                action=str(r.get("action", "")),
+                prefix=_to_str(r.get("prefix")),
+                disabled=_to_bool(r.get("disabled")),
+                invalid=_to_bool(r.get("invalid")),
+                default=_to_bool(r.get("default")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def system_logging_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        topics: str,
+        action: str,
+        prefix: str | None = None,
+        disabled: bool = False,
+    ) -> str:
+        params: dict[str, Any] = {"topics": topics, "action": action}
+        if prefix is not None:
+            params["prefix"] = prefix
+        if disabled:
+            params["disabled"] = "yes"
+        rows = await self._call(creds, "/system/logging/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def system_logging_set(
+        self,
+        creds: DeviceCredentials,
+        rule_id: str,
+        *,
+        topics: str | None = None,
+        action: str | None = None,
+        prefix: str | None = None,
+        disabled: bool | None = None,
+    ) -> None:
+        params: dict[str, Any] = {".id": rule_id}
+        if topics is not None:
+            params["topics"] = topics
+        if action is not None:
+            params["action"] = action
+        if prefix is not None:
+            params["prefix"] = prefix
+        if disabled is not None:
+            params["disabled"] = "yes" if disabled else "no"
+        await self._call(creds, "/system/logging/set", **params)
+
+    async def system_logging_remove(
+        self, creds: DeviceCredentials, rule_id: str
+    ) -> None:
+        await self._call(creds, "/system/logging/remove", **{".id": rule_id})
+
+    # ============== System / logging actions ==============
+
+    async def system_logging_actions_list(
+        self, creds: DeviceCredentials
+    ) -> list[LoggingAction]:
+        rows = await self._call(creds, "/system/logging/action/print")
+        return [
+            LoggingAction(
+                id=r.get(".id"),
+                name=str(r.get("name", "")),
+                target=str(r.get("target", "")),
+                remote=_to_str(r.get("remote")),
+                remote_port=_int_or_none(r.get("remote-port")),
+                src_address=_to_str(r.get("src-address")),
+                bsd_syslog=_to_bool(r.get("bsd-syslog"))
+                if r.get("bsd-syslog") is not None
+                else None,
+                syslog_facility=_to_str(r.get("syslog-facility")),
+                syslog_severity=_to_str(r.get("syslog-severity")),
+                memory_lines=_int_or_none(r.get("memory-lines")),
+                disk_lines_per_file=_int_or_none(r.get("disk-lines-per-file")),
+                disk_file_count=_int_or_none(r.get("disk-file-count")),
+                default=_to_bool(r.get("default")),
+                raw=r,
+            )
+            for r in rows
+        ]
+
+    async def system_logging_action_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        name: str,
+        target: str,
+        remote: str | None = None,
+        remote_port: int | None = None,
+        src_address: str | None = None,
+        bsd_syslog: bool | None = None,
+        syslog_facility: str | None = None,
+        syslog_severity: str | None = None,
+        memory_lines: int | None = None,
+    ) -> str:
+        params: dict[str, Any] = {"name": name, "target": target}
+        if remote is not None:
+            params["remote"] = remote
+        if remote_port is not None:
+            params["remote-port"] = remote_port
+        if src_address is not None:
+            params["src-address"] = src_address
+        if bsd_syslog is not None:
+            params["bsd-syslog"] = "yes" if bsd_syslog else "no"
+        if syslog_facility is not None:
+            params["syslog-facility"] = syslog_facility
+        if syslog_severity is not None:
+            params["syslog-severity"] = syslog_severity
+        if memory_lines is not None:
+            params["memory-lines"] = memory_lines
+        rows = await self._call(creds, "/system/logging/action/add", **params)
+        return str(rows[0].get("ret", "")) if rows else ""
+
+    async def system_logging_action_remove(
+        self, creds: DeviceCredentials, action_id: str
+    ) -> None:
+        await self._call(
+            creds, "/system/logging/action/remove", **{".id": action_id}
+        )
 
     # ============== IP services ==============
 

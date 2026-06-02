@@ -25,11 +25,26 @@ import {
   type SnmpCommunity,
   type SnmpSettings,
 } from "@/lib/router-system";
+import {
+  LOGGING_TEMPLATES,
+  createLoggingAction,
+  createLoggingRule,
+  deleteLoggingAction,
+  deleteLoggingRule,
+  listLoggingActions,
+  listLoggingRules,
+  updateLoggingRule,
+  type LoggingAction,
+  type LoggingActionTarget,
+  type LoggingRule,
+  type LoggingTemplate,
+} from "@/lib/system-logging";
 
 const TABS = [
   { id: "clock", label: "Clock & time zone" },
   { id: "ntp", label: "NTP" },
   { id: "snmp", label: "SNMP" },
+  { id: "logging", label: "Logging" },
   { id: "reboot", label: "Reboot" },
 ] as const;
 
@@ -113,6 +128,7 @@ export default function SystemPage() {
             <SnmpCommunitiesSection deviceId={deviceId} />
           </>
         )}
+        {activeTab === "logging" && <LoggingSection deviceId={deviceId} />}
         {activeTab === "reboot" && <RebootSection deviceId={deviceId} />}
       </div>
     </div>
@@ -1194,5 +1210,570 @@ function NtpServerSection({ deviceId }: { deviceId: string }) {
         </div>
       </form>
     </section>
+  );
+}
+
+// ---------------- Logging ----------------
+
+function LoggingSection({ deviceId }: { deviceId: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const { data: rules, isLoading: rulesLoading, error: rulesError } = useQuery<
+    LoggingRule[]
+  >({
+    queryKey: ["logging-rules", deviceId],
+    queryFn: () => listLoggingRules(deviceId),
+  });
+  const { data: actions, isLoading: actionsLoading } = useQuery<LoggingAction[]>({
+    queryKey: ["logging-actions", deviceId],
+    queryFn: () => listLoggingActions(deviceId),
+  });
+
+  const refreshAll = () => {
+    qc.invalidateQueries({ queryKey: ["logging-rules", deviceId] });
+    qc.invalidateQueries({ queryKey: ["logging-actions", deviceId] });
+  };
+
+  const applyTemplate = useMutation({
+    mutationFn: (tpl: LoggingTemplate) =>
+      createLoggingRule(deviceId, {
+        topics: tpl.topics,
+        action: tpl.action,
+        prefix: tpl.prefix ?? null,
+        disabled: false,
+      }),
+    onSuccess: (_data, tpl) => {
+      toast.success("Logging rule added", tpl.label);
+      refreshAll();
+    },
+    onError: (e: Error) => toast.error("Apply failed", e.message),
+  });
+
+  const toggleRule = useMutation({
+    mutationFn: ({ id, disabled }: { id: string; disabled: boolean }) =>
+      updateLoggingRule(deviceId, id, { disabled }),
+    onSuccess: refreshAll,
+    onError: (e: Error) => toast.error("Update failed", e.message),
+  });
+
+  const removeRule = useMutation({
+    mutationFn: (id: string) => deleteLoggingRule(deviceId, id),
+    onSuccess: refreshAll,
+    onError: (e: Error) => toast.error("Delete failed", e.message),
+  });
+
+  const removeAction = useMutation({
+    mutationFn: (id: string) => deleteLoggingAction(deviceId, id),
+    onSuccess: refreshAll,
+    onError: (e: Error) => toast.error("Delete failed", e.message),
+  });
+
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [showAddAction, setShowAddAction] = useState(false);
+
+  return (
+    <>
+      <section className="rounded-lg border border-border bg-card p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">Templates</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              One-click rules for common scenarios. Each template appends a
+              new entry to <code>/system logging</code> on the device; you can
+              tweak topics or action afterwards from the table below.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {LOGGING_TEMPLATES.map((tpl) => (
+            <div
+              key={tpl.key}
+              className="rounded-md border border-border bg-background p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold">{tpl.label}</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {tpl.description}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate.mutate(tpl)}
+                  disabled={applyTemplate.isPending}
+                  className="shrink-0 rounded-md border border-input bg-card px-2 py-1 text-xs font-medium transition hover:bg-accent disabled:opacity-50"
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1 font-mono text-[10px] text-muted-foreground">
+                <span className="rounded bg-muted px-1.5 py-0.5">
+                  topics={tpl.topics}
+                </span>
+                <span className="rounded bg-muted px-1.5 py-0.5">
+                  action={tpl.action}
+                </span>
+                {tpl.prefix && (
+                  <span className="rounded bg-muted px-1.5 py-0.5">
+                    prefix=&quot;{tpl.prefix}&quot;
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">Rules</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Each rule maps a comma-separated topic filter to a logging
+              action. The default seed rules (info → memory, etc.) are kept
+              read-only.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddRule((s) => !s)}
+            className="shrink-0 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+          >
+            {showAddRule ? "Cancel" : "+ Custom rule"}
+          </button>
+        </div>
+
+        {showAddRule && (
+          <AddRuleForm
+            deviceId={deviceId}
+            actions={actions ?? []}
+            onDone={() => {
+              setShowAddRule(false);
+              refreshAll();
+            }}
+          />
+        )}
+
+        {rulesError && (
+          <p className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {(rulesError as Error).message}
+          </p>
+        )}
+
+        <div className="mt-4 overflow-hidden rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Topics</th>
+                <th className="px-3 py-2 font-medium">Action</th>
+                <th className="px-3 py-2 font-medium">Prefix</th>
+                <th className="px-3 py-2 font-medium">State</th>
+                <th className="px-3 py-2 font-medium text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rulesLoading && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    Loading…
+                  </td>
+                </tr>
+              )}
+              {!rulesLoading && (rules?.length ?? 0) === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No logging rules on this device.
+                  </td>
+                </tr>
+              )}
+              {rules?.map((r) => (
+                <tr key={r.id ?? `${r.topics}-${r.action}`} className="hover:bg-accent/30">
+                  <td className="px-3 py-2 font-mono text-xs">{r.topics}</td>
+                  <td className="px-3 py-2 text-xs">
+                    <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      {r.action}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
+                    {r.prefix ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {r.default && (
+                      <span className="mr-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
+                        default
+                      </span>
+                    )}
+                    {r.invalid && (
+                      <span className="mr-1 rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] text-red-800">
+                        invalid
+                      </span>
+                    )}
+                    {r.disabled ? (
+                      <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700">
+                        disabled
+                      </span>
+                    ) : (
+                      <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800">
+                        active
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right text-xs">
+                    {!r.default && r.id && (
+                      <>
+                        <button
+                          onClick={() =>
+                            toggleRule.mutate({ id: r.id!, disabled: !r.disabled })
+                          }
+                          className="mr-3 text-muted-foreground hover:underline"
+                        >
+                          {r.disabled ? "Enable" : "Disable"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete this rule? (topics=${r.topics})`)) {
+                              removeRule.mutate(r.id!);
+                            }
+                          }}
+                          className="text-destructive hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">Actions</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Where matched lines land. <code>memory</code> / <code>disk</code> /{" "}
+              <code>echo</code> are built in; add a <code>remote</code> action
+              to forward to a central syslog (e.g. Graylog, Wazuh,
+              Logstash).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddAction((s) => !s)}
+            className="shrink-0 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
+          >
+            {showAddAction ? "Cancel" : "+ Remote syslog"}
+          </button>
+        </div>
+
+        {showAddAction && (
+          <AddActionForm
+            deviceId={deviceId}
+            onDone={() => {
+              setShowAddAction(false);
+              refreshAll();
+            }}
+          />
+        )}
+
+        <div className="mt-4 overflow-hidden rounded-md border border-border">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border bg-muted/40 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Target</th>
+                <th className="px-3 py-2 font-medium">Details</th>
+                <th className="px-3 py-2 font-medium text-right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {actionsLoading && (
+                <tr>
+                  <td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    Loading…
+                  </td>
+                </tr>
+              )}
+              {actions?.map((a) => (
+                <tr key={a.id ?? a.name} className="hover:bg-accent/30">
+                  <td className="px-3 py-2 font-mono text-xs">{a.name}</td>
+                  <td className="px-3 py-2 text-xs">
+                    <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      {a.target}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-[11px] text-muted-foreground">
+                    {a.target === "remote" && (
+                      <span className="font-mono">
+                        {a.remote}:{a.remote_port ?? 514}
+                        {a.syslog_severity && ` · severity ≥ ${a.syslog_severity}`}
+                      </span>
+                    )}
+                    {a.target === "memory" && a.memory_lines != null && (
+                      <span className="font-mono">{a.memory_lines} lines</span>
+                    )}
+                    {a.target === "disk" && a.disk_lines_per_file != null && (
+                      <span className="font-mono">
+                        {a.disk_lines_per_file} lines × {a.disk_file_count ?? 0} files
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right text-xs">
+                    {!a.default && a.id && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete action "${a.name}"?`)) {
+                            removeAction.mutate(a.id!);
+                          }
+                        }}
+                        className="text-destructive hover:underline"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AddRuleForm({
+  deviceId,
+  actions,
+  onDone,
+}: {
+  deviceId: string;
+  actions: LoggingAction[];
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [topics, setTopics] = useState("");
+  const [action, setAction] = useState("memory");
+  const [prefix, setPrefix] = useState("");
+  const [disabled, setDisabled] = useState(false);
+
+  const m = useMutation({
+    mutationFn: () =>
+      createLoggingRule(deviceId, {
+        topics,
+        action,
+        prefix: prefix || null,
+        disabled,
+      }),
+    onSuccess: () => {
+      toast.success("Rule added");
+      onDone();
+    },
+    onError: (e: Error) => toast.error("Add failed", e.message),
+  });
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!topics.trim()) {
+      toast.error("Topics required");
+      return;
+    }
+    m.mutate();
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="mt-4 grid gap-3 rounded-md border border-border bg-background p-4 md:grid-cols-4"
+    >
+      <label className="md:col-span-2 space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">Topics</span>
+        <input
+          value={topics}
+          onChange={(e) => setTopics(e.target.value)}
+          placeholder="firewall,!info"
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 font-mono text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </label>
+      <label className="space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">Action</span>
+        <select
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {actions.length === 0 && <option value="memory">memory</option>}
+          {actions.map((a) => (
+            <option key={a.id ?? a.name} value={a.name}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">Prefix (optional)</span>
+        <input
+          value={prefix}
+          onChange={(e) => setPrefix(e.target.value)}
+          placeholder="fw-drop"
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </label>
+      <div className="md:col-span-4 flex items-center justify-between">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={disabled}
+            onChange={(e) => setDisabled(e.target.checked)}
+            className="size-4 rounded"
+          />
+          Create disabled (toggle on later)
+        </label>
+        <button
+          type="submit"
+          disabled={m.isPending}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {m.isPending ? "Adding…" : "Add rule"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AddActionForm({
+  deviceId,
+  onDone,
+}: {
+  deviceId: string;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState<LoggingActionTarget>("remote");
+  const [remote, setRemote] = useState("");
+  const [remotePort, setRemotePort] = useState<number>(514);
+  const [severity, setSeverity] = useState("warning");
+  const [bsdSyslog, setBsdSyslog] = useState(true);
+
+  const m = useMutation({
+    mutationFn: () =>
+      createLoggingAction(deviceId, {
+        name,
+        target,
+        remote: target === "remote" ? remote : null,
+        remote_port: target === "remote" ? remotePort : null,
+        syslog_severity: target === "remote" ? severity : null,
+        bsd_syslog: target === "remote" ? bsdSyslog : null,
+      }),
+    onSuccess: () => {
+      toast.success("Action added");
+      onDone();
+    },
+    onError: (e: Error) => toast.error("Add failed", e.message),
+  });
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      toast.error("Name required");
+      return;
+    }
+    if (target === "remote" && !remote.trim()) {
+      toast.error("Remote syslog server required");
+      return;
+    }
+    m.mutate();
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="mt-4 grid gap-3 rounded-md border border-border bg-background p-4 md:grid-cols-4"
+    >
+      <label className="space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">Name</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="graylog"
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </label>
+      <label className="space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">Target</span>
+        <select
+          value={target}
+          onChange={(e) => setTarget(e.target.value as LoggingActionTarget)}
+          className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="remote">remote (syslog)</option>
+          <option value="memory">memory</option>
+          <option value="disk">disk</option>
+          <option value="echo">echo</option>
+        </select>
+      </label>
+      {target === "remote" && (
+        <>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Server</span>
+            <input
+              value={remote}
+              onChange={(e) => setRemote(e.target.value)}
+              placeholder="10.0.0.10"
+              className="block w-full rounded-md border border-input bg-card px-3 py-1.5 font-mono text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Port</span>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={remotePort}
+              onChange={(e) => setRemotePort(Number(e.target.value))}
+              className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Min severity</span>
+            <select
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value)}
+              className="block w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="debug">debug</option>
+              <option value="info">info</option>
+              <option value="notice">notice</option>
+              <option value="warning">warning</option>
+              <option value="error">error</option>
+              <option value="critical">critical</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground md:col-span-2">
+            <input
+              type="checkbox"
+              checked={bsdSyslog}
+              onChange={(e) => setBsdSyslog(e.target.checked)}
+              className="size-4 rounded"
+            />
+            BSD syslog framing (RFC 3164) — turn off only for RFC 5424 collectors
+          </label>
+        </>
+      )}
+      <div className="md:col-span-4 flex items-center justify-end">
+        <button
+          type="submit"
+          disabled={m.isPending}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+        >
+          {m.isPending ? "Adding…" : "Add action"}
+        </button>
+      </div>
+    </form>
   );
 }
