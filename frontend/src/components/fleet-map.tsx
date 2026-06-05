@@ -1,14 +1,18 @@
 "use client";
 
 // Dashboard-level "where are my sites?" map. Renders one marker per site
-// that has lat/lon, colour-coded by the status of its devices:
-//   green  — every device is online
-//   amber  — some online, some offline (or status=unknown)
-//   red    — at least one device is offline or in error
-//   grey   — no devices have been added yet
+// that has lat/lon, colour-coded by both the device status of the site
+// and whether any unacknowledged critical events are sitting on those
+// devices:
+//   critical (dark red) — at least one unack critical-severity event
+//   red                 — a device is offline or errored
+//   amber               — some online, some offline / unknown
+//   green               — every device online + no unack criticals
+//   grey                — no devices have been added yet
 //
-// Click a marker for a popup with the device list and quick links into
-// the device detail pages.
+// Critical wins over every device-status colour because that's the
+// "wake me up at 3 AM" tier — an operator scanning the map should
+// always see those first.
 
 import L from "leaflet";
 import Link from "next/link";
@@ -16,23 +20,38 @@ import { useMemo } from "react";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 
 import type { Device } from "@/lib/devices";
+import type { Severity } from "@/lib/events";
 import type { Site } from "@/lib/sites";
 
-type Health = "green" | "amber" | "red" | "grey";
+type Health = "green" | "amber" | "red" | "grey" | "critical";
 
-function siteHealth(devices: Device[]): Health {
+function siteHealth(
+  devices: Device[],
+  unackBySeverity: Record<Severity, number> | undefined,
+): Health {
+  // Critical-severity events are the highest priority tier — they
+  // override device status colouring so an operator can't miss them
+  // even when every device on the site happens to be polling green.
+  if (unackBySeverity && unackBySeverity.critical > 0) return "critical";
   if (devices.length === 0) return "grey";
   const online = devices.filter((d) => d.status === "online").length;
-  const offline = devices.filter((d) => d.status === "offline" || d.status === "error").length;
+  const offline = devices.filter(
+    (d) => d.status === "offline" || d.status === "error",
+  ).length;
   if (offline > 0) return "red";
   if (online < devices.length) return "amber";
   return "green";
 }
 
 const COLOURS: Record<Health, { fill: string; stroke: string }> = {
-  green: { fill: "#10b981", stroke: "#064e3b" },
-  amber: { fill: "#f59e0b", stroke: "#78350f" },
+  // Stroke is one shade darker than fill so the silhouette stays
+  // readable at every zoom level. Critical uses a deep wine-red so
+  // it pops against the plain red "device down" marker without
+  // looking like an opaque black box on dark map tiles.
+  critical: { fill: "#7f1d1d", stroke: "#450a0a" },
   red: { fill: "#ef4444", stroke: "#7f1d1d" },
+  amber: { fill: "#f59e0b", stroke: "#78350f" },
+  green: { fill: "#10b981", stroke: "#064e3b" },
   grey: { fill: "#9ca3af", stroke: "#374151" },
 };
 
@@ -42,33 +61,59 @@ const COLOURS: Record<Health, { fill: string; stroke: string }> = {
 // "everything fine" marker can hide a red "something's down" marker
 // directly beneath it — exactly what we don't want.
 const Z_INDEX_BY_HEALTH: Record<Health, number> = {
+  critical: 4000,
   red: 3000,
   amber: 2000,
   grey: 500,
   green: 0,
 };
 
+/** Cleaner, taller pin SVG with a soft ground shadow so the marker
+ *  reads as a 3D pin instead of a flat blob — earlier rounder shape
+ *  could look like a box when the browser anti-aliased the curves
+ *  away at low zoom. The viewBox is taller to give the point room
+ *  without scaling the head down. */
 function pin(health: Health): L.DivIcon {
   const c = COLOURS[health];
+  const isCritical = health === "critical";
   return L.divIcon({
-    html: `<svg viewBox="0 0 32 40" width="32" height="40" xmlns="http://www.w3.org/2000/svg">
-      <path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 24 16 24s16-12 16-24C32 7.16 24.84 0 16 0z"
-            fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5"/>
-      <circle cx="16" cy="16" r="6" fill="white"/>
+    html: `<svg viewBox="0 0 30 44" width="30" height="44" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="pin-shadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="1.5" stdDeviation="1.2" flood-opacity="0.35"/>
+        </filter>
+      </defs>
+      <ellipse cx="15" cy="41" rx="5" ry="1.6" fill="rgba(0,0,0,0.35)"/>
+      <path
+        d="M15 1.5 C7.5 1.5 1.5 7.5 1.5 15 C1.5 22 7 28 15 41 C23 28 28.5 22 28.5 15 C28.5 7.5 22.5 1.5 15 1.5 Z"
+        fill="${c.fill}"
+        stroke="${c.stroke}"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        filter="url(#pin-shadow)"
+      />
+      <circle cx="15" cy="15" r="5" fill="white"/>
+      ${
+        isCritical
+          ? `<text x="15" y="18.3" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="8" font-weight="700" fill="${c.fill}">!</text>`
+          : ""
+      }
     </svg>`,
     className: "",
-    iconSize: [32, 40],
-    iconAnchor: [16, 40],
-    popupAnchor: [0, -40],
+    iconSize: [30, 44],
+    iconAnchor: [15, 44],
+    popupAnchor: [0, -42],
   });
 }
 
 export default function FleetMap({
   sites,
   devices,
+  unackBySite,
 }: {
   sites: Site[];
   devices: Device[];
+  unackBySite?: Record<string, Record<Severity, number>>;
 }) {
   const located = sites.filter(
     (s): s is Site & { latitude: number; longitude: number } =>
@@ -121,7 +166,8 @@ export default function FleetMap({
         />
         {located.map((s) => {
           const siteDevices = devicesPerSite.get(s.id) ?? [];
-          const health = siteHealth(siteDevices);
+          const siteUnack = unackBySite?.[s.id];
+          const health = siteHealth(siteDevices, siteUnack);
           return (
             <Marker
               key={s.id}
@@ -137,6 +183,12 @@ export default function FleetMap({
                   </div>
                   {s.address && (
                     <p className="mt-1 text-xs text-zinc-500">{s.address}</p>
+                  )}
+                  {siteUnack && siteUnack.critical > 0 && (
+                    <p className="mt-1 text-xs font-medium text-red-700">
+                      {siteUnack.critical} unacknowledged critical event
+                      {siteUnack.critical === 1 ? "" : "s"}
+                    </p>
                   )}
                   <div className="mt-2 space-y-0.5 text-xs">
                     {siteDevices.length === 0 && (
@@ -172,10 +224,12 @@ export default function FleetMap({
 
 function HealthChip({ health }: { health: Health }) {
   const label =
+    health === "critical" ? "critical" :
     health === "green" ? "all online" :
     health === "amber" ? "mixed" :
     health === "red" ? "issue" : "empty";
   const cls =
+    health === "critical" ? "bg-red-900 text-red-50" :
     health === "green" ? "bg-emerald-100 text-emerald-800" :
     health === "amber" ? "bg-amber-100 text-amber-800" :
     health === "red" ? "bg-red-100 text-red-800" :

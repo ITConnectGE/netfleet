@@ -5,7 +5,11 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 
 import { listDevices, type Device } from "@/lib/devices";
-import { eventsSummary, type Severity } from "@/lib/events";
+import {
+  eventsPerSiteSummary,
+  eventsSummary,
+  type Severity,
+} from "@/lib/events";
 import { getFleetFirmwareSummary, type FleetFirmwareSummary } from "@/lib/firmware";
 import { listSites, type Site } from "@/lib/sites";
 
@@ -32,6 +36,13 @@ export default function DashboardPage() {
   const { data: events } = useQuery<EventsSummary>({
     queryKey: ["events-summary"],
     queryFn: eventsSummary,
+    refetchInterval: 30_000,
+  });
+  const { data: perSite } = useQuery<
+    Record<string, Record<Severity, number>>
+  >({
+    queryKey: ["events-per-site-summary"],
+    queryFn: eventsPerSiteSummary,
     refetchInterval: 30_000,
   });
 
@@ -123,7 +134,11 @@ export default function DashboardPage() {
             Add a location →
           </Link>
         </div>
-        <FleetMap sites={sites ?? []} devices={devices ?? []} />
+        <FleetMap
+          sites={sites ?? []}
+          devices={devices ?? []}
+          unackBySite={perSite}
+        />
       </section>
 
       {total === 0 && (

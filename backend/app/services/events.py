@@ -308,6 +308,34 @@ async def acknowledge_events(
     return int(result.rowcount or 0)
 
 
+async def per_site_unack_summary(
+    session: AsyncSession, organization_id: UUID
+) -> dict[str, dict[str, int]]:
+    """Return {site_id: {severity: count}} for unack events. Each
+    severity is reported even when zero so the UI doesn't have to
+    guess what severities are possible — keeps the response shape
+    stable as we add tiers (info was added in v0.38, etc.)."""
+    stmt = (
+        select(
+            DeviceLogEvent.site_id,
+            DeviceLogEvent.severity,
+            func.count(),
+        )
+        .where(
+            DeviceLogEvent.organization_id == organization_id,
+            DeviceLogEvent.acknowledged_at.is_(None),
+            DeviceLogEvent.site_id.is_not(None),
+        )
+        .group_by(DeviceLogEvent.site_id, DeviceLogEvent.severity)
+    )
+    out: dict[str, dict[str, int]] = {}
+    for site_id, severity, count in (await session.execute(stmt)).all():
+        key = str(site_id)
+        entry = out.setdefault(key, {s.value: 0 for s in EventSeverity})
+        entry[severity.value] = int(count)
+    return out
+
+
 # ---------------- Retention ----------------
 
 

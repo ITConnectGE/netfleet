@@ -103,3 +103,16 @@ async def events_summary(
         session, user.organization_id, limit=1, offset=0
     )
     return {"unacknowledged_total": unack, "by_severity": by_severity}
+
+
+@router.get("/per-site-summary")
+async def events_per_site_summary(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> dict[str, dict[str, int]]:
+    """Unacknowledged severity counts grouped by site_id. Used by the
+    fleet map to colour a site's pin dark-red when there's any
+    critical-severity unacknowledged event hanging on a device that
+    belongs to it. Returns `{site_id_str: {severity: count}}`."""
+    rows = await events_svc.per_site_unack_summary(session, user.organization_id)
+    return rows

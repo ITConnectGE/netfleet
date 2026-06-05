@@ -90,3 +90,14 @@ export async function acknowledgeEvents(ids: string[]): Promise<void> {
     throw new Error(await readErrorMessage(e));
   }
 }
+
+/** Unacknowledged-event count per site, broken down by severity. The
+ *  fleet map calls this to flip a site's pin to dark red whenever the
+ *  `critical` slot is > 0. */
+export async function eventsPerSiteSummary(): Promise<
+  Record<string, Record<Severity, number>>
+> {
+  return api
+    .get("events/per-site-summary")
+    .json<Record<string, Record<Severity, number>>>();
+}
