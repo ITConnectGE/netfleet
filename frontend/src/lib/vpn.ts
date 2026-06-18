@@ -110,7 +110,9 @@ export interface WgPeer {
 
 export interface WgPeerCreate {
   interface: string;
-  public_key: string;
+  // Optional: leave null/undefined to have the server mint the keypair and
+  // return its private half once (see createWgPeer's return type).
+  public_key?: string | null;
   preshared_key?: string | null;
   allowed_address?: string | null;
   endpoint_address?: string | null;
@@ -126,6 +128,10 @@ export interface WgConfigRequest {
   client_dns?: string | null;
   allowed_ips: string;
   persistent_keepalive?: number | null;
+  // Private half of the peer's keypair when NetFleet minted it; makes the
+  // .conf's PrivateKey match the router peer's public key. Omit for
+  // client-owned keypairs (the .conf gets a placeholder instead).
+  client_private_key?: string | null;
 }
 
 export async function listWgInterfaces(deviceId: string): Promise<WgInterface[]> {
@@ -161,11 +167,23 @@ export async function listWgPeers(deviceId: string, ifaceName?: string): Promise
 export async function createWgPeer(
   deviceId: string,
   payload: WgPeerCreate,
-): Promise<{ id: string; preshared_key: string | null }> {
+): Promise<{
+  id: string;
+  preshared_key: string | null;
+  public_key: string | null;
+  // Non-null only when the server minted the keypair (public_key omitted in
+  // the request). Shown once — never stored server-side.
+  private_key: string | null;
+}> {
   try {
     return await api
       .post(`devices/${deviceId}/wireguard/peers`, { json: payload })
-      .json<{ id: string; preshared_key: string | null }>();
+      .json<{
+        id: string;
+        preshared_key: string | null;
+        public_key: string | null;
+        private_key: string | null;
+      }>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }

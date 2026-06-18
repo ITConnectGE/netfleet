@@ -66,7 +66,10 @@ class WireguardPeerPublic(BaseModel):
 
 class WireguardPeerCreate(BaseModel):
     interface: str = Field(min_length=1, max_length=64)
-    public_key: str = Field(min_length=1, max_length=512)
+    # Optional: when omitted NetFleet mints the keypair server-side, puts the
+    # public half on the router peer and returns the private half once so the
+    # caller can assemble a working client .conf.
+    public_key: str | None = Field(default=None, max_length=512)
     preshared_key: str | None = Field(default=None, max_length=512)
     allowed_address: str | None = Field(default=None, max_length=255)
     endpoint_address: str | None = Field(default=None, max_length=255)
@@ -83,6 +86,10 @@ class WireguardPeerConfigRequest(BaseModel):
 
     server_endpoint: str = Field(min_length=1, max_length=255, description="DNS or IP of the WG server")
     server_endpoint_port: int = Field(ge=1, le=65535)
+    # Private half of the peer's keypair, when NetFleet minted it at create
+    # time. Passing it here makes the .conf's PrivateKey match the public key
+    # on the router. Omit for client-owned keypairs (a placeholder is emitted).
+    client_private_key: str | None = Field(default=None, max_length=512)
     client_address: str = Field(description="The IP/subnet the client will use, e.g. 10.10.10.5/24")
     client_dns: str | None = Field(default="1.1.1.1", max_length=128)
     allowed_ips: str = Field(default="0.0.0.0/0", description="What traffic to tunnel; usually 0.0.0.0/0")

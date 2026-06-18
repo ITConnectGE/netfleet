@@ -45,7 +45,7 @@ def generate_preshared_key() -> str:
 
 def build_client_config(
     *,
-    client_private_key: str,
+    client_private_key: str | None,
     client_address: str,
     client_dns: str | None,
     server_public_key: str,
@@ -56,12 +56,27 @@ def build_client_config(
     persistent_keepalive: int | None = 25,
     mtu: int | None = None,
 ) -> str:
-    """Produce a wg-quick(8) compatible .conf file as text."""
-    iface_lines = [
-        "[Interface]",
-        f"PrivateKey = {client_private_key}",
-        f"Address = {client_address}",
-    ]
+    """Produce a wg-quick(8) compatible .conf file as text.
+
+    ``client_private_key`` is the private half of the SAME keypair whose public
+    half is configured on the router peer — that pairing is what lets the
+    handshake succeed. When it is ``None`` the peer's keypair is client-owned
+    (NetFleet never saw the private key), so we emit a placeholder for the
+    client to paste their own key into rather than a mismatched one.
+    """
+    iface_lines = ["[Interface]"]
+    if client_private_key:
+        iface_lines.append(f"PrivateKey = {client_private_key}")
+    else:
+        iface_lines.append(
+            "# NetFleet did not generate this peer's keypair, so it cannot fill"
+        )
+        iface_lines.append(
+            "# in the private key. Paste the client's own private key below"
+        )
+        iface_lines.append("# (the value from `wg genkey`).")
+        iface_lines.append("PrivateKey =")
+    iface_lines.append(f"Address = {client_address}")
     if client_dns:
         iface_lines.append(f"DNS = {client_dns}")
     if mtu:

@@ -459,6 +459,20 @@ async def create_wg_peer(
         psk = wg.generate_preshared_key()
         psk_generated = True
 
+    # Resolve the peer's keypair. If the operator didn't paste a public key,
+    # NetFleet mints the keypair: the public half is configured on the router
+    # peer and the private half is returned ONCE below so the caller can build
+    # a client .conf whose PrivateKey actually matches. The private key is
+    # never stored — WireGuard only ever needs the public key on the router.
+    public_key = payload.public_key
+    client_private_key: str | None = None
+    key_source = "user-provided"
+    if not public_key:
+        kp = wg.generate_keypair()
+        public_key = kp.public_b64
+        client_private_key = kp.private_b64
+        key_source = "generated"
+
     try:
         new_id = await vpn_svc.add_wg_peer(
             session,
@@ -466,7 +480,7 @@ async def create_wg_peer(
             device_id,
             user.id,
             interface=payload.interface,
-            public_key=payload.public_key,
+            public_key=public_key,
             preshared_key=psk,
             allowed_address=payload.allowed_address,
             endpoint_address=payload.endpoint_address,
@@ -493,12 +507,19 @@ async def create_wg_peer(
             "interface": payload.interface,
             "allowed_address": payload.allowed_address,
             "psk_source": "generated" if psk_generated else "user-provided",
+            "key_source": key_source,
         },
-        response_meta={"peer_id": new_id},
+        response_meta={"peer_id": new_id, "public_key": public_key},
     )
     await session.commit()
-    # Return the (possibly generated) PSK so the admin can save it once.
-    return {"id": new_id, "preshared_key": psk}
+    # Return the (possibly generated) PSK and keypair so the admin can save
+    # them once. private_key is non-null only when NetFleet minted the keypair.
+    return {
+        "id": new_id,
+        "preshared_key": psk,
+        "public_key": public_key,
+        "private_key": client_private_key,
+    }
 
 
 @router.delete(
@@ -636,11 +657,15 @@ async def generate_wg_client_config(
     except vpn_svc.OperationError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
-    # Server-side client key generation: the private key is shown once to admin.
-    client_kp = wg.generate_keypair()
+    # Use the private key the caller minted for this peer (the wizard passes
+    # back the key NetFleet generated at peer-create) so the .conf's PrivateKey
+    # matches the public key on the router. When absent, the peer's keypair was
+    # client-owned — NetFleet never had the private half — so build_client_config
+    # emits a placeholder rather than a bogus key that can't complete a handshake.
+    client_private_key = payload.client_private_key
 
     conf = wg.build_client_config(
-        client_private_key=client_kp.private_b64,
+        client_private_key=client_private_key,
         client_address=payload.client_address,
         client_dns=payload.client_dns,
         server_public_key=iface.public_key,
@@ -661,8 +686,11 @@ async def generate_wg_client_config(
         device_id=device_id,
         ip_address=client_ip(request),
         user_agent=request.headers.get("user-agent"),
-        request_payload=payload.model_dump(),
-        response_meta={"peer_id": peer_id, "client_pubkey": client_kp.public_b64},
+        request_payload=payload.model_dump(exclude={"client_private_key"}),
+        response_meta={
+            "peer_id": peer_id,
+            "client_key_source": "caller-supplied" if client_private_key else "client-owned",
+        },
     )
     await session.commit()
 

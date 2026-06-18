@@ -476,7 +476,6 @@ function PeersStep({
   tunnelCidr: string | null;
   onBack: () => void;
 }) {
-  const toast = useToast();
   const router = useMemo(() => {
     // Suggest the next host bit after the router IP. If tunnelCidr is
     // 10.10.10.1/24 the next peer goes to 10.10.10.2/32, then .3/32, …
@@ -508,6 +507,11 @@ function PeersStep({
     privateKey: "",
     allowedAddress: router.nextHost(),
   }));
+  // Default flow: NetFleet mints the keypair, puts the public key on the
+  // router peer and bakes the matching private key into the .conf. Operators
+  // who already hold a client-generated public key can flip this off — then
+  // the .conf ships a placeholder for the client to fill in their own key.
+  const [generateKeys, setGenerateKeys] = useState(true);
   const [issued, setIssued] = useState<IssuedConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [endpoint, setEndpoint] = useState(
@@ -531,56 +535,39 @@ function PeersStep({
     });
   }
 
-  async function generateKeypair() {
-    // The Web Crypto Curve25519 is not in browsers yet, so we shell out to
-    // the existing wg helper on the server when creating the peer — we
-    // just leave both fields blank in the draft and let the server fill
-    // them. Until then there's nothing to do here.
-    toast.info?.("Keys are generated on the server when you submit");
-  }
-
   const create = useMutation({
     mutationFn: async () => {
-      // Step A: ask the server to mint a server-side keypair for the
-      // peer's "client" by hitting the existing config endpoint after
-      // create. But the peer ADD needs the client's public key. To
-      // keep things simple, we generate a placeholder keypair on the
-      // server before adding — by reusing the /config endpoint after
-      // adding the peer. For Stage 9.3 we use this minimal flow:
-      //
-      //   1. Ask the operator to paste a public key OR check
-      //      "generate".
-      //   2. If generate, generate keypair via the existing
-      //      /config endpoint, which embeds a fresh PrivateKey in the
-      //      returned wg-quick file (matches the existing UI).
-      //
-      // The simplest path that keeps Stage 9.3 small: require the
-      // operator to paste a public key, because the client config
-      // endpoint already generates the private side for "this
-      // dialog".
-      if (!draft.publicKey) {
+      const pastedKey = draft.publicKey.trim();
+      if (!generateKeys && !pastedKey) {
         throw new Error(
-          "Public key is required. Paste the peer's WireGuard public key.",
+          "Paste the peer's public key, or switch key generation back on.",
         );
       }
-      const psk = await createWgPeer(deviceId, {
+
+      // Create the peer. When generating, we send no public key — the server
+      // mints the keypair, configures the public half on the router peer and
+      // returns the private half once. When pasting, the client owns the
+      // private key and the server only stores the public half.
+      const res = await createWgPeer(deviceId, {
         interface: iface.name,
-        public_key: draft.publicKey,
+        public_key: generateKeys ? null : pastedKey,
         allowed_address: draft.allowedAddress,
         comment: draft.comment || null,
       });
-      if (!psk.id) throw new Error("No peer id returned");
+      if (!res.id) throw new Error("No peer id returned");
 
-      // Now ask the server to assemble a client config. The server
-      // returns the .conf text including the assigned PSK.
+      // Assemble the client config. Passing the minted private key makes the
+      // .conf's PrivateKey match the public key now on the router; omit it
+      // (client-owned key) and the .conf carries a placeholder instead.
       const allowedIps = Array.from(allowedIpsPicks).join(", ");
-      const cfg = await downloadWgClientConfig(deviceId, psk.id, {
+      const cfg = await downloadWgClientConfig(deviceId, res.id, {
         server_endpoint: endpoint,
         server_endpoint_port: iface.listen_port ?? 51820,
         client_address: draft.allowedAddress,
         client_dns: null,
         allowed_ips: allowedIps,
         persistent_keepalive: 25,
+        client_private_key: res.private_key,
       });
       return { ...cfg, comment: draft.comment } satisfies IssuedConfig;
     },
@@ -618,10 +605,12 @@ function PeersStep({
               Add peers on <span className="font-mono">{iface.name}</span>
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              For each peer, paste their WireGuard public key (the value next
-              to <span className="font-mono">PublicKey =</span> in their
-              client&apos;s key file). NetFleet picks the next free /32 in
-              the tunnel range automatically.
+              By default NetFleet generates the keypair for each peer: the
+              public key goes on the router, the matching private key is baked
+              into the downloadable <span className="font-mono">.conf</span>.
+              NetFleet picks the next free /32 in the tunnel range
+              automatically. Already hold a client-generated public key? Switch
+              off generation below and paste it instead.
             </p>
           </div>
           <button
@@ -669,22 +658,48 @@ function PeersStep({
                 placeholder="10.10.10.2/32"
               />
             </label>
-            <label className="block space-y-1 text-sm font-medium md:col-span-2">
-              Peer public key
+            <label className="md:col-span-2 flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
               <input
-                required
-                value={draft.publicKey}
-                onChange={(e) =>
-                  setDraft({ ...draft, publicKey: e.target.value })
-                }
-                className={`${input} font-mono`}
-                placeholder="base64-encoded public key from the peer"
+                type="checkbox"
+                checked={generateKeys}
+                onChange={(e) => setGenerateKeys(e.target.checked)}
+                className="mt-0.5 size-4 rounded"
               />
-              <span className="block text-[11px] italic font-normal text-muted-foreground">
-                The client&apos;s side generates this; on Linux/macOS it&apos;s
-                <span className="ml-1 font-mono">wg pubkey &lt; client.key</span>.
+              <span className="text-sm">
+                <span className="font-medium">
+                  Generate the keypair for me (recommended)
+                </span>
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  NetFleet mints a fresh keypair, configures the public key on
+                  the router and ships the private key in the{" "}
+                  <span className="font-mono">.conf</span>. Uncheck only if the
+                  client already generated its own key.
+                </span>
               </span>
             </label>
+            {!generateKeys && (
+              <label className="block space-y-1 text-sm font-medium md:col-span-2">
+                Peer public key
+                <input
+                  required
+                  value={draft.publicKey}
+                  onChange={(e) =>
+                    setDraft({ ...draft, publicKey: e.target.value })
+                  }
+                  className={`${input} font-mono`}
+                  placeholder="base64-encoded public key from the peer"
+                />
+                <span className="block text-[11px] italic font-normal text-muted-foreground">
+                  The client&apos;s side generates this; on Linux/macOS it&apos;s
+                  <span className="ml-1 font-mono">
+                    wg pubkey &lt; client.key
+                  </span>
+                  . The downloaded .conf will leave{" "}
+                  <span className="font-mono">PrivateKey</span> blank for the
+                  client to fill in.
+                </span>
+              </label>
+            )}
             <label className="block space-y-1 text-sm font-medium">
               Server endpoint (for the .conf)
               <input
@@ -704,13 +719,6 @@ function PeersStep({
                 </datalist>
               )}
             </label>
-            <button
-              type="button"
-              onClick={generateKeypair}
-              className="self-end text-xs text-primary hover:underline"
-            >
-              How do I get a public key?
-            </button>
           </div>
 
           <div className="text-sm font-medium">Allowed IPs (split tunnel)</div>

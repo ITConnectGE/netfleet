@@ -573,9 +573,11 @@ function ConfigModal({
   return (
     <Modal title="Generate WireGuard client config" onClose={onClose}>
       <p className="mt-1 text-xs text-muted-foreground">
-        Server generates a fresh client private key for this config. Showing the file
-        records a reveal in the audit log and counts against the offboarding risk report
-        until you rotate this peer.
+        NetFleet doesn&apos;t store peer private keys, so this config leaves{" "}
+        <span className="font-mono">PrivateKey</span> blank for the client to
+        paste in their own key. To get a ready-to-use config with the key
+        baked in, create the peer through the WireGuard wizard with key
+        generation on. Showing this file records a reveal in the audit log.
       </p>
 
       {error && (
@@ -587,8 +589,9 @@ function ConfigModal({
       {confText ? (
         <div className="mt-4 space-y-3">
           <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            Save this file now. Closing this dialog throws away the client private key —
-            we don&apos;t store it on the server.
+            The <span className="font-mono">PrivateKey</span> line is blank —
+            paste the client&apos;s own private key into it before use. NetFleet
+            never stores peer private keys.
           </div>
           <pre className="max-h-72 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs">
             {confText}
