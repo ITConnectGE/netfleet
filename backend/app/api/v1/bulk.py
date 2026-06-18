@@ -226,7 +226,6 @@ async def bulk_zabbix_snmp_setup(
         snmp_port=payload.snmp_port,
         community_name=payload.community_name,
         configure_community=payload.configure_community,
-        lock_service_address=payload.lock_service_address,
         comment_tag=payload.comment_tag,
     )
     succeeded = sum(1 for r in results if r.status == "ok")
@@ -246,7 +245,6 @@ async def bulk_zabbix_snmp_setup(
             "address_list_name": payload.address_list_name,
             "community_name": payload.community_name if payload.configure_community else None,
             "snmp_port": payload.snmp_port,
-            "lock_service_address": payload.lock_service_address,
             "device_count": len(payload.device_ids),
         },
         response_meta={

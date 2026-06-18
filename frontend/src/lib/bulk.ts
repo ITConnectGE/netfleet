@@ -129,7 +129,6 @@ export interface BulkZabbixSnmpSetupRequest {
   snmp_port?: number;
   community_name?: string;
   configure_community?: boolean;
-  lock_service_address?: boolean;
   comment_tag?: string;
 }
 

@@ -244,7 +244,6 @@ async def bulk_zabbix_snmp_setup(
     snmp_port: int,
     community_name: str,
     configure_community: bool,
-    lock_service_address: bool,
     comment_tag: str,
 ) -> list[BulkOperationResult]:
     """Provision SNMP-for-Zabbix across many devices in one parallel pass.
@@ -255,12 +254,14 @@ async def bulk_zabbix_snmp_setup(
          UDP/``snmp_port`` sourced from that list, moved to the top of the
          chain so it wins over any catch-all drop below,
       3. (optional) point the SNMP community at the Zabbix IPs, read-only,
-      4. enable SNMP globally and the ``/ip/service snmp`` entry, optionally
-         locking its address whitelist to the Zabbix IPs.
+      4. enable SNMP via ``/snmp set enabled=yes``.
+
+    On RouterOS SNMP is not an ``/ip/service`` entry — it lives entirely under
+    ``/snmp``. Access is restricted by the community ``addresses`` (step 3) and
+    the firewall rule (step 2), so there is no separate service ACL to set.
 
     Re-running is safe: duplicate address-list entries are swallowed, the
-    firewall rule is matched by comment, and the community/service are updated
-    in place.
+    firewall rule is matched by comment, and the community is updated in place.
     """
     devices = list(
         (
@@ -393,17 +394,12 @@ async def bulk_zabbix_snmp_setup(
                         )
                         done.append("community(new)")
 
-                # 4. Enable SNMP globally + the /ip/service snmp entry.
-                step = "service"
+                # 4. Enable SNMP. On RouterOS this is /snmp set enabled=yes —
+                # SNMP is not an /ip/service entry, and access is already
+                # scoped by the community addresses + firewall rule above.
+                step = "snmp-enable"
                 await driver.snmp_set(creds, enabled=True)
-                await driver.ip_service_set(
-                    creds,
-                    "snmp",
-                    enabled=True,
-                    port=snmp_port,
-                    address=acl_csv if lock_service_address else None,
-                )
-                done.append("service")
+                done.append("snmp-enable")
 
                 return BulkOperationResult(
                     device_id=device_id,

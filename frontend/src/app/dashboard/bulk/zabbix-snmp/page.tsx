@@ -25,7 +25,6 @@ export default function ZabbixSnmpWizardPage() {
   const [community, setCommunity] = useState("public");
   const [snmpPort, setSnmpPort] = useState(161);
   const [configureCommunity, setConfigureCommunity] = useState(true);
-  const [lockService, setLockService] = useState(true);
 
   const addrList = useMemo(
     () =>
@@ -50,8 +49,8 @@ export default function ZabbixSnmpWizardPage() {
       <p className="mt-1 text-sm text-muted-foreground">
         Pick MikroTiks, then in one pass NetFleet adds the Zabbix IP to a
         firewall address-list, opens an accept rule for SNMP, points the
-        community at Zabbix, and enables the SNMP service — on every selected
-        device in parallel.
+        community at Zabbix, and enables SNMP — on every selected device in
+        parallel.
       </p>
 
       <ol className="mt-6 flex flex-wrap gap-1 text-xs">
@@ -104,8 +103,6 @@ export default function ZabbixSnmpWizardPage() {
             setSnmpPort={setSnmpPort}
             configureCommunity={configureCommunity}
             setConfigureCommunity={setConfigureCommunity}
-            lockService={lockService}
-            setLockService={setLockService}
             addrCount={addrList.length}
             onBack={() => setStep("devices")}
             onNext={() => setStep("apply")}
@@ -119,7 +116,6 @@ export default function ZabbixSnmpWizardPage() {
             communityName={community}
             snmpPort={snmpPort}
             configureCommunity={configureCommunity}
-            lockServiceAddress={lockService}
             onBack={() => setStep("settings")}
           />
         )}
@@ -176,8 +172,6 @@ function SettingsStep({
   setSnmpPort,
   configureCommunity,
   setConfigureCommunity,
-  lockService,
-  setLockService,
   addrCount,
   onBack,
   onNext,
@@ -192,8 +186,6 @@ function SettingsStep({
   setSnmpPort: (v: number) => void;
   configureCommunity: boolean;
   setConfigureCommunity: (v: boolean) => void;
-  lockService: boolean;
-  setLockService: (v: boolean) => void;
   addrCount: number;
   onBack: () => void;
   onNext: () => void;
@@ -312,23 +304,12 @@ function SettingsStep({
           </span>
         </label>
 
-        <label className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-          <input
-            type="checkbox"
-            checked={lockService}
-            onChange={(e) => setLockService(e.target.checked)}
-            className="mt-0.5 size-4 rounded"
-          />
-          <span className="text-sm">
-            <span className="font-medium">
-              Lock the /ip/service snmp address to Zabbix
-            </span>
-            <span className="ml-1 text-xs font-normal text-muted-foreground">
-              Defense in depth on top of the firewall rule — the service only
-              answers the Zabbix IP(s).
-            </span>
-          </span>
-        </label>
+        <p className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          SNMP is enabled via <span className="font-mono">/snmp</span> — on
+          RouterOS it isn&apos;t an <span className="font-mono">/ip/service</span>{" "}
+          entry. Access is restricted by the community addresses above plus the
+          firewall rule, so there&apos;s no separate service ACL.
+        </p>
 
         <div className="flex justify-end">
           <button
@@ -352,7 +333,6 @@ function ApplyStep({
   communityName,
   snmpPort,
   configureCommunity,
-  lockServiceAddress,
   onBack,
 }: {
   deviceIds: string[];
@@ -361,7 +341,6 @@ function ApplyStep({
   communityName: string;
   snmpPort: number;
   configureCommunity: boolean;
-  lockServiceAddress: boolean;
   onBack: () => void;
 }) {
   const toast = useToast();
@@ -376,7 +355,6 @@ function ApplyStep({
         snmp_port: snmpPort,
         community_name: communityName,
         configure_community: configureCommunity,
-        lock_service_address: lockServiceAddress,
       }),
     onSuccess: (res) => {
       setResult(res);
@@ -427,12 +405,8 @@ function ApplyStep({
             mono={configureCommunity}
           />
           <Row
-            label="SNMP service"
-            value={
-              lockServiceAddress
-                ? `enabled, address locked to Zabbix`
-                : "enabled (firewall-only)"
-            }
+            label="SNMP"
+            value="enabled via /snmp (restricted by community + firewall)"
           />
         </dl>
 

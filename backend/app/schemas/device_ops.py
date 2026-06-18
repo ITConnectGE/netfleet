@@ -133,8 +133,8 @@ class BulkZabbixSnmpSetupRequest(BaseModel):
 
     Per device it adds the Zabbix source IP(s) to a firewall address-list,
     opens an accept rule for UDP/<snmp_port> from that list, optionally points
-    the SNMP community at the Zabbix IPs (read-only), and enables SNMP + the
-    /ip/service snmp entry (optionally locked to the Zabbix IPs).
+    the SNMP community at the Zabbix IPs (read-only), and enables SNMP via
+    /snmp set enabled=yes (SNMP is not an /ip/service entry on RouterOS).
     """
 
     device_ids: list[UUID] = Field(min_length=1, max_length=500)
@@ -144,7 +144,6 @@ class BulkZabbixSnmpSetupRequest(BaseModel):
     snmp_port: int = Field(default=161, ge=1, le=65535)
     community_name: str = Field(default="public", min_length=1, max_length=64)
     configure_community: bool = True
-    lock_service_address: bool = True
     comment_tag: str = Field(default="netfleet zabbix snmp", min_length=1, max_length=255)
 
     @field_validator("zabbix_addresses")
