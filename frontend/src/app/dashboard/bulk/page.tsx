@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useMemo, useState, type FormEvent } from "react";
 
 import {
@@ -45,6 +46,22 @@ export default function BulkPage() {
         Run an action across many devices at once. Each device is contacted in
         parallel and reported individually.
       </p>
+
+      <Link
+        href="/dashboard/bulk/zabbix-snmp"
+        className="mt-4 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 transition hover:bg-accent/40"
+      >
+        <span className="text-sm">
+          <span className="font-medium">SNMP for Zabbix wizard</span>
+          <span className="ml-2 text-xs text-muted-foreground">
+            firewall + address-list + community + service, guided across many
+            MikroTiks
+          </span>
+        </span>
+        <span aria-hidden className="text-muted-foreground">
+          →
+        </span>
+      </Link>
 
       <div className="mt-6 inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
         {TABS.map((t) => (

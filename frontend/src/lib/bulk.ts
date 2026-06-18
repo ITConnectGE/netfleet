@@ -5,6 +5,7 @@ export interface BulkResult {
   device_name: string | null;
   status: "ok" | "failed" | "skipped";
   error: string | null;
+  detail?: string | null;
 }
 
 export interface BulkPasswordResetResponse {
@@ -113,6 +114,43 @@ export async function bulkFirewallFilterAdd(
         timeout: 120_000,
       })
       .json<BulkFirewallFilterResponse>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+// ---------------- Zabbix SNMP setup (wizard) ----------------
+
+export interface BulkZabbixSnmpSetupRequest {
+  device_ids: string[];
+  zabbix_addresses: string[];
+  address_list_name?: string;
+  firewall_chain?: string;
+  snmp_port?: number;
+  community_name?: string;
+  configure_community?: boolean;
+  lock_service_address?: boolean;
+  comment_tag?: string;
+}
+
+export interface BulkZabbixSnmpSetupResponse {
+  total: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  results: BulkResult[];
+}
+
+export async function bulkZabbixSnmpSetup(
+  payload: BulkZabbixSnmpSetupRequest,
+): Promise<BulkZabbixSnmpSetupResponse> {
+  try {
+    return await api
+      .post("bulk/zabbix-snmp/setup", {
+        json: payload,
+        timeout: 180_000,
+      })
+      .json<BulkZabbixSnmpSetupResponse>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));
   }
