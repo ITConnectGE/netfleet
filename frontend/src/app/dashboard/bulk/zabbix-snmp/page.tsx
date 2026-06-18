@@ -251,8 +251,11 @@ function SettingsStep({
           />
           <span className="block text-[11px] font-normal text-muted-foreground">
             The source address(es) Zabbix polls from. Comma- or
-            space-separated. These go into the address-list and (optionally)
-            lock the community and service.
+            space-separated. Use a bare IP for a single host
+            (e.g. <span className="font-mono">188.93.89.220</span>); a CIDR is
+            treated as a whole subnet and snapped to its network address
+            (<span className="font-mono">188.93.89.220/28</span> →{" "}
+            <span className="font-mono">188.93.89.208/28</span>).
           </span>
         </label>
 

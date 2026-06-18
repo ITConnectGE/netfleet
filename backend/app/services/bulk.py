@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 from uuid import UUID
 
 import structlog
@@ -17,6 +18,28 @@ from app.schemas.device_ops import BulkOperationResult
 from app.services.device import _to_driver_creds
 
 log = structlog.get_logger(__name__)
+
+
+def _normalize_acl_address(addr: str) -> str:
+    """Coerce one address into a form RouterOS ACL fields accept.
+
+    ``/ip/service address=`` and ``/snmp/community addresses=`` reject CIDRs
+    with host bits set ("value of ip must have all host bits zero"). Bare host
+    IPs are fine as-is; CIDRs are normalized to their network address
+    (e.g. ``188.93.89.220/28`` -> ``188.93.89.208/28``) and a /32/128 collapses
+    to the bare host. Anything unparseable is passed through so RouterOS can
+    surface its own error.
+    """
+    addr = addr.strip()
+    if "/" not in addr:
+        return addr
+    try:
+        net = ipaddress.ip_network(addr, strict=False)
+    except ValueError:
+        return addr
+    if net.prefixlen in (32, 128):
+        return str(net.network_address)
+    return str(net)
 
 
 async def bulk_password_reset(
@@ -250,7 +273,11 @@ async def bulk_zabbix_snmp_setup(
         ).scalars()
     )
     found = {d.id: d for d in devices}
-    addr_csv = ",".join(zabbix_addresses)
+    # RouterOS ACL fields (service address / community addresses) want CIDRs in
+    # network form; normalize once. The address-list is lenient but accepts the
+    # same normalized values, so we use them everywhere for consistency.
+    normalized = [_normalize_acl_address(a) for a in zabbix_addresses]
+    acl_csv = ",".join(normalized)
 
     semaphore = asyncio.Semaphore(settings.POLLER_CONCURRENCY)
 
@@ -272,12 +299,13 @@ async def bulk_zabbix_snmp_setup(
             )
 
         done: list[str] = []
+        step = "address-list"
         async with semaphore:
             driver = get_driver(d.vendor)
             creds = _to_driver_creds(d)
             try:
                 # 1. Zabbix IP(s) -> address-list (idempotent: ignore dupes).
-                for addr in zabbix_addresses:
+                for addr in normalized:
                     try:
                         await driver.firewall_address_list_add(
                             creds,
@@ -289,9 +317,10 @@ async def bulk_zabbix_snmp_setup(
                     except Exception as e:  # noqa: BLE001
                         if "already have such entry" not in str(e).lower():
                             raise
-                done.append(f"address-list({len(zabbix_addresses)})")
+                done.append(f"address-list({len(normalized)})")
 
                 # 2. Accept rule for SNMP, matched/owned by comment_tag.
+                step = "firewall"
                 rules = await driver.firewall_filter_list(creds)
                 existing = next(
                     (
@@ -338,13 +367,14 @@ async def bulk_zabbix_snmp_setup(
 
                 # 3. SNMP community pointed at Zabbix, read-only.
                 if configure_community:
+                    step = "community"
                     comms = await driver.snmp_community_list(creds)
                     match = next((c for c in comms if c.name == community_name), None)
                     if match and match.id:
                         await driver.snmp_community_update(
                             creds,
                             match.id,
-                            addresses=addr_csv,
+                            addresses=acl_csv,
                             read_access=True,
                             write_access=False,
                             disabled=False,
@@ -356,7 +386,7 @@ async def bulk_zabbix_snmp_setup(
                             SnmpCommunity(
                                 id=None,
                                 name=community_name,
-                                addresses=addr_csv,
+                                addresses=acl_csv,
                                 read_access=True,
                                 write_access=False,
                             ),
@@ -364,13 +394,14 @@ async def bulk_zabbix_snmp_setup(
                         done.append("community(new)")
 
                 # 4. Enable SNMP globally + the /ip/service snmp entry.
+                step = "service"
                 await driver.snmp_set(creds, enabled=True)
                 await driver.ip_service_set(
                     creds,
                     "snmp",
                     enabled=True,
                     port=snmp_port,
-                    address=addr_csv if lock_service_address else None,
+                    address=acl_csv if lock_service_address else None,
                 )
                 done.append("service")
 
@@ -384,15 +415,19 @@ async def bulk_zabbix_snmp_setup(
                 log.warning(
                     "bulk.zabbix_snmp_setup.failed",
                     device_id=str(device_id),
+                    step=step,
                     error=str(e),
                     done=done,
                 )
+                detail = f"step: {step}"
+                if done:
+                    detail += " · done: " + ", ".join(done)
                 return BulkOperationResult(
                     device_id=device_id,
                     device_name=d.name,
                     status="failed",
-                    error=str(e),
-                    detail=("done: " + ", ".join(done)) if done else None,
+                    error=f"{step}: {e}",
+                    detail=detail,
                 )
 
     return await asyncio.gather(*(run_one(did) for did in device_ids))
