@@ -32,6 +32,10 @@ class S2SCreateRequest(BaseModel):
 
     open_firewall_on_a: bool = True
     create_forward_rules: bool = True
+    # Add /ip/route entries for each side's exposed subnets via the remote
+    # tunnel IP. RouterOS doesn't route allowed-address automatically, so
+    # this is what actually makes the remote LANs reachable.
+    create_routes: bool = True
     persistent_keepalive: int = Field(default=25, ge=0, le=65535)
 
 

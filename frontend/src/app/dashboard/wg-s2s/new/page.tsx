@@ -58,6 +58,7 @@ export default function S2SWizardPage() {
 
   const [openFirewallA, setOpenFirewallA] = useState(true);
   const [createForwardRules, setCreateForwardRules] = useState(true);
+  const [createRoutes, setCreateRoutes] = useState(true);
 
   const deviceA = devices?.find((d) => d.id === deviceAId);
   const deviceB = devices?.find((d) => d.id === deviceBId);
@@ -113,6 +114,7 @@ export default function S2SWizardPage() {
         comment_tag: commentTag,
         open_firewall_on_a: openFirewallA,
         create_forward_rules: createForwardRules,
+        create_routes: createRoutes,
         persistent_keepalive: keepalive,
       }),
     onSuccess: () => {
@@ -151,8 +153,8 @@ export default function S2SWizardPage() {
       </h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Connect two MikroTik routers so each can reach the LAN behind the
-        other. The wizard provisions the interfaces, addresses, peers and the
-        firewall rules in one apply.
+        other. The wizard provisions the interfaces, addresses, peers, routes
+        and the firewall rules in one apply.
       </p>
 
       <ol className="mt-6 flex flex-wrap gap-1 text-xs">
@@ -385,8 +387,27 @@ export default function S2SWizardPage() {
                 </span>
                 <span className="ml-1 text-xs text-muted-foreground">
                   Two rules per side (in-interface / out-interface = the wg
-                  interface). Required when the forward chain has a catch-all
-                  drop at the bottom.
+                  interface), lifted to the top of the forward chain so a
+                  catch-all drop at the bottom can&apos;t shadow them.
+                </span>
+              </span>
+            </label>
+            <label className="mt-3 flex items-start gap-2 rounded-md border border-border bg-muted/30 p-3">
+              <input
+                type="checkbox"
+                checked={createRoutes}
+                onChange={(e) => setCreateRoutes(e.target.checked)}
+                className="mt-0.5 size-4 rounded"
+              />
+              <span className="text-sm">
+                <span className="font-medium">
+                  Add IP routes for the exposed subnets
+                </span>
+                <span className="ml-1 text-xs text-muted-foreground">
+                  One <span className="font-mono">/ip/route</span> per exposed
+                  subnet, via the remote tunnel IP. RouterOS doesn&apos;t route
+                  a peer&apos;s allowed-address automatically, so without this
+                  the tunnel is up but the remote LANs stay unreachable.
                 </span>
               </span>
             </label>
@@ -427,7 +448,13 @@ export default function S2SWizardPage() {
               </div>
               <div>
                 <span className="font-semibold">Forward accept rules:</span>{" "}
-                {createForwardRules ? "yes (2 per side)" : "no"}
+                {createForwardRules ? "yes (2 per side, top of chain)" : "no"}
+              </div>
+              <div>
+                <span className="font-semibold">IP routes:</span>{" "}
+                {createRoutes
+                  ? `yes (${finalExposeA.length + finalExposeB.length} total)`
+                  : "no"}
               </div>
               <div>
                 <span className="font-semibold">Comment tag:</span>{" "}

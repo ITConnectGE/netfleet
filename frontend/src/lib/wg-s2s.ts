@@ -15,12 +15,13 @@ export interface S2SCreateRequest {
   comment_tag: string;
   open_firewall_on_a: boolean;
   create_forward_rules: boolean;
+  create_routes: boolean;
   persistent_keepalive: number;
 }
 
 export interface S2SCreatedArtifact {
   side: "a" | "b";
-  kind: "interface" | "address" | "peer" | "filter";
+  kind: "interface" | "address" | "peer" | "filter" | "route";
   id: string | null;
   detail: string | null;
 }

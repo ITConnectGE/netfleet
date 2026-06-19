@@ -27,6 +27,7 @@ from app.drivers import get_driver
 from app.drivers.base import (
     DeviceCredentials,
     FilterRule,
+    IpRoute,
     WireguardInterface,
     WireguardPeer,
 )
@@ -284,10 +285,76 @@ async def create_site_to_site(
                     ),
                 )
                 add(side, "filter", rid_out, "forward out")
+                # Lift both above the first pre-existing forward rule so a
+                # catch-all drop at the bottom of the chain can't shadow
+                # them. Moving each before the same anchor leaves them on
+                # top in [in, out, …existing] order. Best-effort.
+                try:
+                    rules = await driver.firewall_filter_list(creds)
+                    first_fwd = next(
+                        (
+                            r
+                            for r in rules
+                            if r.chain == "forward"
+                            and r.id
+                            and r.id not in (rid_in, rid_out)
+                        ),
+                        None,
+                    )
+                    if first_fwd and first_fwd.id:
+                        await driver.firewall_filter_move(
+                            creds, rid_in, before_id=first_fwd.id
+                        )
+                        await driver.firewall_filter_move(
+                            creds, rid_out, before_id=first_fwd.id
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "wg_s2s.forward_rule_move_failed",
+                        tag=tag,
+                        side=side,
+                        error=str(e),
+                    )
             except Exception as e:
                 raise fail(
                     f"Add forward accept on {side.upper()}", e
                 ) from e
+
+    # 6. Static routes for each side's exposed subnets, via the remote
+    # tunnel IP. RouterOS does NOT derive /ip routes from a peer's
+    # allowed-address (that field is only the crypto-key ACL), so without
+    # these the tunnel comes up but the remote LANs stay unreachable.
+    if payload.create_routes:
+        gw_b = _bare_host(payload.b.tunnel_cidr)  # A reaches B's LANs via B
+        gw_a = _bare_host(payload.a.tunnel_cidr)  # B reaches A's LANs via A
+        for subnet in payload.b.expose_subnets:
+            try:
+                rid = await driver_a.ip_route_add(
+                    creds_a,
+                    IpRoute(
+                        id=None,
+                        dst_address=subnet,
+                        gateway=gw_b,
+                        comment=tag_comment,
+                    ),
+                )
+                add("a", "route", rid, f"{subnet} via {gw_b}")
+            except Exception as e:
+                raise fail(f"Add route to {subnet} on A", e) from e
+        for subnet in payload.a.expose_subnets:
+            try:
+                rid = await driver_b.ip_route_add(
+                    creds_b,
+                    IpRoute(
+                        id=None,
+                        dst_address=subnet,
+                        gateway=gw_a,
+                        comment=tag_comment,
+                    ),
+                )
+                add("b", "route", rid, f"{subnet} via {gw_a}")
+            except Exception as e:
+                raise fail(f"Add route to {subnet} on B", e) from e
 
     # Track when the tunnel was provisioned for any future "list tunnels"
     # endpoint. Lightweight — we don't persist a row in the DB yet; the
@@ -317,6 +384,12 @@ def _host_cidr(cidr: str) -> str:
         return f"{cidr}/32"
     host = cidr.split("/", 1)[0]
     return f"{host}/32"
+
+
+def _bare_host(cidr: str) -> str:
+    """The bare tunnel IP (no /prefix) — used as the route gateway so each
+    side reaches the other's LANs via the remote tunnel endpoint."""
+    return cidr.split("/", 1)[0].strip()
 
 
 def _join_cidrs(items: list[str]) -> str:
