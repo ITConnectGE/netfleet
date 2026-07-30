@@ -10,9 +10,9 @@
 devices **and Linux servers** - with granular RBAC, delegated IT-support access,
 real-time monitoring, in-app updates, and one-command Ubuntu install.
 
-> **Shipping now**: MikroTik RouterOS driver (RouterOS 6.x and 7.x).
-> **In development**: [Linux server driver](docs/LINUX-PLAN.md) - agentless SSH, for
-> cloud VPS fleets.
+> **Shipping now**: MikroTik RouterOS driver (RouterOS 6.x and 7.x), and the
+> [Linux server driver](docs/LINUX-PLAN.md) - agentless SSH, onboarding and
+> read-only management; write operations are landing stage by stage.
 > **Roadmap**: FortiGate, Cisco IOS-XE, Ubiquiti UISP, Aruba, MIST.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -113,7 +113,7 @@ That's what **NetFleet** does.
 - Firmware: nightly fleet-wide update check, per-device upgrade trigger,
   per-device auto-upgrade window (UTC hour range)
 
-### Linux and cloud VPS fleet (in development - see [LINUX-PLAN.md](docs/LINUX-PLAN.md))
+### Linux and cloud VPS fleet
 
 Your servers do not live in one place. Some are scattered across Hetzner, DigitalOcean,
 Contabo, AWS and that one VPS nobody remembers paying for. The rest sit **inside your
@@ -122,7 +122,9 @@ appliances with no public IP at all. Today that means N SSH sessions, N tmux pan
 no idea which box is three kernel CVEs behind.
 
 NetFleet treats a Linux host as just another device in the same fleet as your routers -
-same tenant/site hierarchy, same RBAC, same audit log:
+same tenant/site hierarchy, same RBAC, same audit log.
+
+**Working today** (v0.44):
 
 - **Agentless.** Nothing is installed on your servers. Pure SSH, key or password auth,
   unprivileged user + `sudo`. Works on any host the moment you can SSH into it -
@@ -131,6 +133,19 @@ same tenant/site hierarchy, same RBAC, same audit log:
   client's router are the same kind of device here. Internal hosts need no public IP
   and no inbound port-forward - NetFleet reaches them the same way you already do,
   over your management network or the WireGuard tunnel it set up on the router.
+- **One-script onboarding**, the same flow as RouterOS. NetFleet generates the
+  keypair; you run one idempotent script as root. It creates the management user,
+  installs the public key, writes a `visudo`-validated sudoers drop-in and opens the
+  SSH port for NetFleet's egress IPs. It never edits `AllowUsers`/`AllowGroups` and
+  never enables an inactive firewall - both are reliable ways to lock yourself out.
+- **Host key pinning.** The first successful connection pins the server's SSH host
+  key; until then nothing else will talk to the device, and a changed key afterwards
+  fails loudly instead of being accepted silently.
+- **Read-only management.** Distro, kernel, uptime, CPU and memory, interfaces with
+  RX/TX, IP addresses, routes, ARP, ping and traceroute.
+
+**Landing stage by stage** - see [LINUX-PLAN.md](docs/LINUX-PLAN.md):
+
 - **One command, every server, at once.** Select 40 hosts across 6 providers, run the
   command, get per-host exit codes and output in one view. Free-form execution is
   behind its own permission that no default role holds; a curated safe-command
@@ -152,7 +167,8 @@ same tenant/site hierarchy, same RBAC, same audit log:
   Linux <-> MikroTik tunnels are built from the same UI.
 
 Because it is the same RBAC engine, a role like *"restart services and read logs on
-Client A's web servers only"* works exactly like *"edit NAT on Client A's routers only"*.
+Client A's web servers only"* will work exactly like *"edit NAT on Client A's routers
+only"* does today.
 
 ### Platform
 
@@ -266,7 +282,7 @@ auto-hides sections that the active device's driver does not expose.
 |---|---|---|
 | **MikroTik (RouterOS 7.x)** | shipped | `librouteros` (API) + paramiko (SFTP) |
 | **MikroTik (RouterOS 6.x)** | shipped | same driver, both ROS majors |
-| **Linux (Debian / Ubuntu / RHEL / Rocky)** | in development | agentless SSH (paramiko), `ip -j` / systemd / nftables |
+| **Linux (Debian / Ubuntu / RHEL / Rocky)** | shipped (read-only; writes in progress) | agentless SSH (paramiko), `ip -j` / systemd / nftables |
 | **FortiGate (FortiOS)**     | roadmap | FortiOS REST API |
 | **Cisco (IOS-XE / NX-OS)**  | roadmap | RESTCONF / NETCONF |
 | **Ubiquiti (UISP / UniFi)** | roadmap | UISP API |
@@ -336,13 +352,16 @@ Shipped:
 - Phase 10 - Tenant hierarchy (multi-client MSP layer)
 - Phase 11 - In-app self-update with pre-update `pg_dump`; observability
   (request-id middleware, global 500 handler)
+- Phase 12 (L1-L3) - **Linux servers, agentless**: SSH transport with host-key
+  pinning, one-script onboarding, read-only management (system info, interfaces,
+  addresses, routes, ARP)
 - CDP / LLDP / MNDP neighbour discovery
 
 Up next:
 
-- Phase 12 - **Linux servers, agentless** (cloud VPS fleets): SSH driver, systemd /
-  packages / storage / journald, fleet-wide command runner, nftables with rollback
-  guard, `/etc` backups - full plan in [docs/LINUX-PLAN.md](docs/LINUX-PLAN.md)
+- Phase 12 (L4-L9) - Linux write operations: systemd / packages / storage /
+  journald, fleet-wide command runner, nftables with rollback guard, `/etc`
+  backups, WireGuard - full plan in [docs/LINUX-PLAN.md](docs/LINUX-PLAN.md)
 - Phase 9 - i18n (ka/ru/en) + email notifications (failed backups, leaked
   secrets unrotated past N days, firmware updates available)
 - FortiGate driver (FortiOS REST)

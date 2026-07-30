@@ -84,6 +84,18 @@ export default function UpdatesPage() {
         <Card title="Available">
           {data.available ? (
             <p className="mt-1 font-mono text-2xl text-amber-700">{data.available}</p>
+          ) : data.check_error ? (
+            // A failed check is not the same as being current. Rendering
+            // both as "up to date" is how an instance sits unpatched for
+            // months without anyone noticing the poll had been failing.
+            <>
+              <p className="mt-1 text-sm font-medium text-destructive">
+                check failed
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {data.check_error}
+              </p>
+            </>
           ) : (
             <p className="mt-1 text-sm text-emerald-700">up to date</p>
           )}

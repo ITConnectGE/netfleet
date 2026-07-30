@@ -19,6 +19,10 @@ export interface UpdateStatus {
   state: UpdateState;
   last_checked_iso: string | null;
   last_error: string | null;
+  /** Set when the release check itself failed. `available: null` on its own
+   *  is ambiguous — it means both "newest release already" and "could not
+   *  find out". Older updater containers omit this field. */
+  check_error?: string | null;
   started_at_iso: string | null;
   finished_at_iso: string | null;
   log_tail: string[];

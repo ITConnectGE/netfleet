@@ -118,6 +118,11 @@ class _State:
         self.available: str | None = None
         self.last_checked_iso: str | None = None
         self.last_error: str | None = None
+        # Kept apart from `last_error`, which belongs to update *runs*. A
+        # failed release poll and a failed upgrade are different problems,
+        # and sharing one field means whichever happened last hides the
+        # other. This one is cleared on every successful poll.
+        self.check_error: str | None = None
         self.started_at_iso: str | None = None
         self.finished_at_iso: str | None = None
         self.log_lines: deque[str] = deque(maxlen=200)
@@ -145,6 +150,10 @@ class StatusResponse(BaseModel):
     state: UpdateState
     last_checked_iso: str | None = None
     last_error: str | None = None
+    # Set when the release poll itself failed. `available: null` alone is
+    # ambiguous — it means both "you are on the newest release" and "we
+    # could not find out", and the UI used to render both as "up to date".
+    check_error: str | None = None
     started_at_iso: str | None = None
     finished_at_iso: str | None = None
     log_tail: list[str]
@@ -156,6 +165,34 @@ class UpdateRequest(BaseModel):
 
 
 # ---------------- GitHub poll ----------------
+
+
+def _describe(e: Exception) -> str:
+    """Turn a poll failure into something an operator can act on.
+
+    The rate-limit case is worth naming: unauthenticated GitHub API calls
+    are capped at 60/hour per IP, which a busy instance can exhaust, and
+    the generic 403 text gives no hint that a token fixes it.
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        resp = e.response
+        if resp.status_code in (403, 429) and resp.headers.get("x-ratelimit-remaining") == "0":
+            reset = resp.headers.get("x-ratelimit-reset")
+            when = ""
+            if reset and reset.isdigit():
+                when = datetime.fromtimestamp(int(reset), UTC).strftime(" (resets %H:%M UTC)")
+            return (
+                f"GitHub API rate limit reached{when} — set NETFLEET_GITHUB_TOKEN "
+                "to raise the limit"
+            )
+        if resp.status_code == 401:
+            return "GitHub rejected NETFLEET_GITHUB_TOKEN (401)"
+        return f"GitHub returned HTTP {resp.status_code}"
+    if isinstance(e, httpx.TimeoutException):
+        return "timed out talking to GitHub"
+    if isinstance(e, httpx.RequestError):
+        return f"network error reaching GitHub ({type(e).__name__})"
+    return str(e)
 
 
 async def _check_latest_release(*, force: bool = False) -> str | None:
@@ -185,11 +222,20 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.get(url, headers=headers)
                 if r.status_code == 404:
+                    # Either the repo has no releases yet or GITHUB_REPO is
+                    # wrong. Both are worth saying out loud — silently
+                    # reporting "up to date" forever is how a misconfigured
+                    # instance goes years without an upgrade.
+                    _state.check_error = (
+                        f"no published releases found for '{settings.GITHUB_REPO}' "
+                        "(check NETFLEET_GITHUB_REPO)"
+                    )
                     return None
                 r.raise_for_status()
+                _state.check_error = None
                 return r.json().get("tag_name")
         except Exception as e:
-            _state.last_error = f"github poll: {e}"
+            _state.check_error = f"could not reach GitHub: {_describe(e)}"
             return None
 
     # Forced path: list mode + cache buster.
@@ -199,11 +245,15 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(url, headers=headers)
             if r.status_code == 404:
+                _state.check_error = (
+                    f"no published releases found for '{settings.GITHUB_REPO}' "
+                    "(check NETFLEET_GITHUB_REPO)"
+                )
                 return None
             r.raise_for_status()
             releases = r.json()
     except Exception as e:
-        _state.last_error = f"github force poll: {e}"
+        _state.check_error = f"could not reach GitHub: {_describe(e)}"
         return None
 
     def _key(rel: dict) -> tuple[int, ...]:
@@ -223,8 +273,13 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
         if not rel.get("draft") and not rel.get("prerelease") and rel.get("tag_name")
     ]
     if not candidates:
+        _state.check_error = (
+            f"'{settings.GITHUB_REPO}' has no published release "
+            "(only drafts or pre-releases)"
+        )
         return None
     candidates.sort(key=_key, reverse=True)
+    _state.check_error = None
     return candidates[0].get("tag_name")
 
 
@@ -436,6 +491,7 @@ async def status(force: bool = False) -> StatusResponse:
         state=_state.state,
         last_checked_iso=_state.last_checked_iso,
         last_error=_state.last_error,
+        check_error=_state.check_error,
         started_at_iso=_state.started_at_iso,
         finished_at_iso=_state.finished_at_iso,
         log_tail=list(_state.log_lines),
