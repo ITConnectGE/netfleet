@@ -15,11 +15,13 @@ from app.api.dependencies import (
 )
 from app.drivers import get_driver
 from app.drivers.base import SnmpCommunity as DriverSnmpCommunity
+from app.drivers.base import UnsupportedOperation
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.router_system import (
     DeviceClockPublic,
     DeviceClockUpdate,
+    DiskUsagePublic,
     LoggingActionCreate,
     LoggingActionPublic,
     LoggingRuleCreate,
@@ -34,10 +36,11 @@ from app.schemas.router_system import (
     SnmpCommunityUpdate,
     SnmpPublic,
     SnmpUpdate,
+    SystemResourcesPublic,
 )
 from app.services import audit as audit_svc
 from app.services import device as device_svc
-from app.services.device import _to_driver_creds, get_device
+from app.services.device import HostKeyNotPinned, _to_driver_creds, get_device
 
 router = APIRouter()
 
@@ -722,3 +725,77 @@ async def delete_logging_action(
         request_payload={"action_id": action_id},
     )
     await session.commit()
+
+
+# ---------------- Live resources + disks ----------------
+
+
+@router.get("/{device_id}/resources", response_model=SystemResourcesPublic)
+async def get_resources(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> SystemResourcesPublic:
+    """Live CPU / memory / uptime, read from the device on request.
+
+    Deliberately not cached: the value of this screen is that it reflects
+    the box right now. History belongs in Zabbix, not here.
+    """
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        info = await get_driver(device.vendor).system_info(_to_driver_creds(device))
+    # These two say something specific about the request, so they must not
+    # be flattened into "bad gateway" by the catch-all below.
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return SystemResourcesPublic(
+        identity=info.identity,
+        model=info.model,
+        serial=info.serial,
+        firmware=info.firmware,
+        os_family=info.os_family,
+        os_version=info.os_version,
+        uptime_seconds=info.uptime_seconds,
+        cpu_count=info.cpu_count,
+        cpu_load_pct=info.cpu_load_pct,
+        load_avg_1=info.load_avg_1,
+        load_avg_5=info.load_avg_5,
+        load_avg_15=info.load_avg_15,
+        memory_used_pct=info.memory_used_pct,
+        memory_total_bytes=info.memory_total_bytes,
+        memory_used_bytes=info.memory_used_bytes,
+        swap_total_bytes=info.swap_total_bytes,
+        swap_used_bytes=info.swap_used_bytes,
+    )
+
+
+@router.get("/{device_id}/disks", response_model=list[DiskUsagePublic])
+async def get_disks(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[DiskUsagePublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        disks = await get_driver(device.vendor).disk_usage_list(_to_driver_creds(device))
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        DiskUsagePublic(
+            filesystem=d.filesystem,
+            mount_point=d.mount_point,
+            fs_type=d.fs_type,
+            total_bytes=d.total_bytes,
+            used_bytes=d.used_bytes,
+            available_bytes=d.available_bytes,
+            used_pct=d.used_pct,
+            inodes_total=d.inodes_total,
+            inodes_used=d.inodes_used,
+            inodes_used_pct=d.inodes_used_pct,
+        )
+        for d in disks
+    ]

@@ -209,13 +209,61 @@ Isolated from the driver so it can be tested and reused.
 - [x] Capabilities declared: `SYSTEM_INFO`, `SYSTEM_REBOOT`, `INTERFACE_LIST`,
       `IP_ADDRESS`, `IP_ROUTE`, `IP_NEIGHBOR`, `TOOL_PING`, `TOOL_TRACEROUTE`
 - [x] Registered in `drivers/registry.py`
-- [ ] Fleet list + device detail: `device_class` filter, distinct icon, distro
-      badge instead of RouterOS version
+- [x] Fleet list + device detail: vendor / distro icons, distro + version in the
+      "Model / OS" column, kernel in "Firmware / Kernel", SSH port instead of the
+      RouterOS API port
+- [x] Capability-gated tabs — the device tab strip and the System sub-tabs are
+      both filtered by the driver's capability set, so a Linux host no longer
+      offers DHCP, Queues or a RouterOS log viewer
+- [x] `UnsupportedOperation` → HTTP 501. A missing driver method used to surface
+      as `AttributeError: 'LinuxDriver' object has no attribute 'log_list'`
 - [ ] Poller (`workers/poller.py`) — expected to need no change, not yet verified
       against a live host
 
+### L3b — Clock, NTP, resources, storage — **done**
+
+- [x] `system.clock` capability; `clock_get` / `clock_set` via `timedatectl`,
+      `ntp_client_get` / `ntp_client_set`. Reads cover systemd-timesyncd and
+      chrony; **writes cover timesyncd only** (Ubuntu/Debian default) and refuse
+      clearly on a chrony host rather than silently doing nothing.
+- [x] Setting the wall clock by hand is refused while NTP is on, with the reason,
+      instead of passing through a raw `timedatectl` error
+- [x] `disk.usage` capability + `GET /devices/{id}/disks`; `df -PT -B1` plus
+      `df -Pi`, pseudo-filesystems filtered out, inodes reported alongside bytes
+- [x] `GET /devices/{id}/resources` — `system_info` was never exposed by any
+      endpoint, so live CPU/RAM was unreachable from the UI. Now carries
+      absolute figures too: core count, 1/5/15 load, memory and swap totals.
+- [x] UI: Resources card (CPU / memory / swap / uptime) on the overview for
+      servers in place of the RouterOS firmware card, and a Storage tab
+
 **Ships:** add a Linux host, see it online, view system info, interfaces,
 addresses, routes, ARP. RouterOS-only pages stay hidden by capability gating.
+
+---
+
+## Why one `linux` driver and not one per distribution
+
+`vendor` selects **how to talk to a device**, not what it runs. Ubuntu, Debian,
+Rocky and Alpine all speak plain SSH — the transport, onboarding, host-key
+pinning and capability plumbing are byte-for-byte identical. What actually
+differs is a short list of commands: the package manager, a few unit names,
+the firewall front-end. Those branch on `os_family`, detected from
+`/etc/os-release` on connect.
+
+Splitting into `ubuntu`, `centos`, … would:
+
+- duplicate the entire transport and onboarding layer per distro, so every
+  fix (the paramiko 4 `DSSKey` removal, say) needs applying N times;
+- require the operator to declare the distro in advance and be right — pick
+  "Ubuntu" for a Rocky box and every command fails, where detection simply
+  reads the truth;
+- break on re-provisioning: a host rebuilt from CentOS to Rocky would need
+  the device deleted and recreated rather than just reconnecting.
+
+Development order is Ubuntu/Debian first — that is what the deployment
+actually runs. RHEL-family paths land as the command table grows, and
+anything not yet covered fails with a clear "this host uses X, which NetFleet
+cannot edit yet" rather than guessing.
 
 ---
 

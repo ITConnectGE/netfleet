@@ -47,6 +47,7 @@ from app.drivers.base import (
     SimpleQueue,
     SnmpCommunity,
     SnmpSettings,
+    SupportsCapabilityFallback,
     SystemInfo,
     VendorDriver,
     VlanInterface,
@@ -57,7 +58,7 @@ from app.drivers.base import (
 log = structlog.get_logger(__name__)
 
 
-class MikrotikDriver:
+class MikrotikDriver(SupportsCapabilityFallback):
     vendor: str = "mikrotik"
     display_name: str = "MikroTik RouterOS 7.x / 6.x"
     capabilities: set[Capability] = {
@@ -65,6 +66,9 @@ class MikrotikDriver:
         Capability.SYSTEM_REBOOT,
         Capability.SYSTEM_BACKUP,
         Capability.SYSTEM_USER,
+        Capability.SYSTEM_CLOCK,
+        Capability.SYSTEM_LOG,
+        Capability.SYSTEM_SNMP,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
         Capability.IP_ROUTE,

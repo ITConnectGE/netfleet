@@ -22,6 +22,9 @@ class Capability(StrEnum):
     SYSTEM_REBOOT = "system.reboot"
     SYSTEM_BACKUP = "system.backup"
     SYSTEM_USER = "system.user"        # device users (router-local accounts)
+    SYSTEM_CLOCK = "system.clock"      # timezone + NTP client
+    SYSTEM_LOG = "system.log"          # on-device log / journal viewer
+    SYSTEM_SNMP = "system.snmp"
     # IP
     INTERFACE_LIST = "interface.list"
     IP_ADDRESS = "ip.address"
@@ -38,6 +41,8 @@ class Capability(StrEnum):
     # QoS
     QUEUE_SIMPLE = "queue.simple"
     QUEUE_TREE = "queue.tree"
+    # Host resources (servers)
+    DISK_USAGE = "disk.usage"
     # PPP / VPN
     PPP_SECRET = "ppp.secret"
     VPN_L2TP = "vpn.l2tp"
@@ -70,6 +75,35 @@ class SystemInfo:
     # more useful than "6.8.0-generic".
     os_family: str | None = None
     os_version: str | None = None
+    # Absolute figures alongside the percentages. "84% of what?" is the
+    # first question anyone asks of a memory bar, and RouterOS reports
+    # these too — they were simply never carried through.
+    cpu_count: int | None = None
+    load_avg_1: float | None = None
+    load_avg_5: float | None = None
+    load_avg_15: float | None = None
+    memory_total_bytes: int | None = None
+    memory_used_bytes: int | None = None
+    swap_total_bytes: int | None = None
+    swap_used_bytes: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DiskUsage:
+    """One mounted filesystem. Inodes matter as much as bytes — a box can
+    be at 30% of its capacity and still fail every write."""
+
+    filesystem: str
+    mount_point: str
+    fs_type: str | None = None
+    total_bytes: int | None = None
+    used_bytes: int | None = None
+    available_bytes: int | None = None
+    used_pct: float | None = None
+    inodes_total: int | None = None
+    inodes_used: int | None = None
+    inodes_used_pct: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -559,6 +593,38 @@ class DeviceCredentials:
     host_key_fingerprint: str | None = None  # pinned value; None = pin on first connect
 
 
+class UnsupportedOperation(Exception):
+    """The active driver does not implement the requested operation.
+
+    A driver only implements the sections its platform actually has, so
+    reaching for a missing one is expected rather than exceptional — the UI
+    hides those sections, but a stale tab, a bookmark or a direct API call
+    can still get through. Without this, the miss surfaces as
+    `AttributeError: 'LinuxDriver' object has no attribute 'log_list'` and a
+    500, which reads as a crash rather than "not applicable here".
+    """
+
+
+class SupportsCapabilityFallback:
+    """Mixin turning a missing driver method into `UnsupportedOperation`.
+
+    `__getattr__` runs only after normal attribute lookup fails, so an
+    implemented method is untouched and there is no per-call cost.
+    """
+
+    vendor: str
+    display_name: str
+
+    def __getattr__(self, name: str) -> Any:
+        # Dunder lookups must keep failing as AttributeError, or copy,
+        # pickle and inspect start behaving strangely.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        raise UnsupportedOperation(
+            f"{type(self).display_name} does not support '{name}'"
+        )
+
+
 @runtime_checkable
 class VendorDriver(Protocol):
     """All vendor drivers conform to this interface."""
@@ -570,6 +636,7 @@ class VendorDriver(Protocol):
     # core
     async def test_connection(self, creds: DeviceCredentials) -> bool: ...
     async def system_info(self, creds: DeviceCredentials) -> SystemInfo: ...
+    async def disk_usage_list(self, creds: DeviceCredentials) -> list[DiskUsage]: ...
     async def system_reboot(self, creds: DeviceCredentials) -> None:
         """Trigger a clean reboot of the device. Implementations should
         swallow the connection-drop that follows because the router

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { StatusPill } from "@/components/status-pill";
+import { VendorIcon } from "@/components/vendor-icon";
 import { listDevices, type Device } from "@/lib/devices";
 import { listSites, type Site } from "@/lib/sites";
 import { listTenants, type Tenant } from "@/lib/tenants";
@@ -120,6 +121,8 @@ export default function FleetPage() {
         r.device?.model,
         r.device?.firmware,
         r.device?.vendor,
+        r.device?.os_version,
+        r.device?.os_family,
       ]
         .filter(Boolean)
         .join(" ")
@@ -208,8 +211,10 @@ export default function FleetPage() {
                 <th scope="col" className="px-3 py-2.5 font-medium">Site</th>
                 <th scope="col" className="px-3 py-2.5 font-medium">Device</th>
                 <th scope="col" className="px-3 py-2.5 font-medium">IP / Host</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Model</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Firmware</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Model / OS</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">
+                  Firmware / Kernel
+                </th>
                 <th scope="col" className="px-3 py-2.5 font-medium">Status</th>
                 <th scope="col" className="px-3 py-2.5 font-medium text-right">Details</th>
               </tr>
@@ -316,8 +321,15 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
         ) : (
           <Link
             href={`/dashboard/devices/${device.id}`}
-            className="font-medium text-foreground hover:underline"
+            className="inline-flex items-center gap-2 font-medium text-foreground hover:underline"
           >
+            <VendorIcon
+              vendor={device.vendor}
+              deviceClass={device.device_class}
+              osFamily={device.os_family}
+              osVersion={device.os_version}
+              className="size-4 shrink-0 text-muted-foreground"
+            />
             <Highlighted text={device.name} needle={highlight} />
           </Link>
         )}
@@ -326,14 +338,30 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
         {device ? (
           <span className="text-foreground">
             <Highlighted text={device.host} needle={highlight} />
-            <span className="text-muted-foreground">:{device.port}</span>
+            <span className="text-muted-foreground">
+              {/* Servers are reached over SSH; `port` is the RouterOS API
+                  port and means nothing for them. */}
+              :{device.device_class === "server" ? device.ssh_port : device.port}
+            </span>
           </span>
         ) : (
           <span className="text-muted-foreground/40">—</span>
         )}
       </td>
       <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">
-        {device?.model ? (
+        {/* One column, two meanings: hardware model for network gear, the
+            distro for a server. They answer the same question — "what is
+            this thing?" — so they share a column rather than each having
+            one that is empty for half the fleet. */}
+        {device?.device_class === "server" ? (
+          device.os_version ? (
+            <Highlighted text={device.os_version} needle={highlight} />
+          ) : (
+            <span className="text-muted-foreground/40">
+              {device.status === "unknown" ? "not yet detected" : "—"}
+            </span>
+          )
+        ) : device?.model ? (
           <Highlighted text={device.model} needle={highlight} />
         ) : (
           <span className="text-muted-foreground/40">—</span>
@@ -343,7 +371,10 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
         {device?.firmware ? (
           <span className="inline-flex items-baseline gap-1.5">
             <Highlighted text={device.firmware} needle={highlight} />
-            {fwUpgrade && (
+            {/* `firmware` holds the kernel release on a server. The upgrade
+                badge is RouterOS-only — a pending kernel is a package
+                update, which is a different mechanism entirely. */}
+            {fwUpgrade && device.device_class !== "server" && (
               <span
                 className="rounded-md bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-900"
                 title={`Update available: ${device.firmware_available}`}

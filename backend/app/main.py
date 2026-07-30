@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, unhandled_exception_handler
+from app.drivers.base import UnsupportedOperation
 from app.services.device import HostKeyNotPinned
 
 configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
@@ -65,6 +66,16 @@ app.add_middleware(RequestIdMiddleware)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(v1_router, prefix="/api/v1")
+
+
+@app.exception_handler(UnsupportedOperation)
+async def _unsupported_operation(
+    request: Request, exc: UnsupportedOperation
+) -> JSONResponse:
+    # A driver only implements what its platform has. Asking for the rest is
+    # a 501, not a crash — the UI hides those sections, but a stale tab or a
+    # direct API call can still arrive.
+    return JSONResponse(status_code=501, content={"detail": str(exc)})
 
 
 @app.exception_handler(HostKeyNotPinned)

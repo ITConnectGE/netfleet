@@ -120,12 +120,20 @@ def _load_private_key(pem: str, passphrase: str | None) -> paramiko.PKey:
 
     # NetFleet generates Ed25519, but an operator may paste in an existing
     # key of any type, so try each until one parses.
-    candidates = (
-        paramiko.Ed25519Key,
-        paramiko.ECDSAKey,
-        paramiko.RSAKey,
-        paramiko.DSSKey,
-    )
+    #
+    # Resolved by name rather than by attribute: paramiko 4.0 dropped DSA and
+    # removed `DSSKey` outright, so naming it directly turns every SSH
+    # connection into an AttributeError the moment the image picks up 4.x.
+    # DSA is long dead anyway — it stays in the list only so an operator with
+    # an ancient key gets a parse error rather than a missing-attribute one.
+    candidates = [
+        cls
+        for cls in (
+            getattr(paramiko, name, None)
+            for name in ("Ed25519Key", "ECDSAKey", "RSAKey", "DSSKey")
+        )
+        if cls is not None
+    ]
     last_error: Exception | None = None
     for cls in candidates:
         try:

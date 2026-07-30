@@ -6,6 +6,13 @@ import { usePathname, useParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { StatusPill } from "@/components/status-pill";
+import { VendorIcon } from "@/components/vendor-icon";
+import {
+  capabilitiesFor,
+  DRIVERS_QUERY_KEY,
+  listDrivers,
+  type Driver,
+} from "@/lib/drivers";
 import { getDevice, type Device } from "@/lib/devices";
 import { getSite, type Site } from "@/lib/sites";
 import { getTenant, type Tenant } from "@/lib/tenants";
@@ -32,19 +39,49 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
     enabled: Boolean(site?.tenant_id),
   });
 
-  const tabs = [
-    { href: base, label: "Overview" },
-    { href: `${base}/services`, label: "IP services" },
-    { href: `${base}/system-users`, label: "Device users" },
-    { href: `${base}/vpn`, label: "VPN" },
-    { href: `${base}/firewall`, label: "Firewall" },
-    { href: `${base}/network`, label: "Network" },
-    { href: `${base}/dhcp`, label: "DHCP" },
-    { href: `${base}/queues`, label: "Queues" },
-    { href: `${base}/logs`, label: "Logs" },
-    { href: `${base}/system`, label: "System" },
-    { href: `${base}/backups`, label: "Backups" },
-  ] as const;
+  const { data: drivers } = useQuery<Driver[]>({
+    queryKey: DRIVERS_QUERY_KEY,
+    queryFn: listDrivers,
+    staleTime: 5 * 60_000,
+  });
+  const caps = capabilitiesFor(drivers, device?.vendor);
+
+  // Each tab names the capability that makes it meaningful. A driver that
+  // lacks it gets no tab — which is the whole point of the capability set,
+  // and stops a Linux host offering DHCP or a RouterOS log viewer.
+  // `needs: null` means "always relevant".
+  const ALL_TABS: { href: string; label: string; needs: string[] | null }[] = [
+    { href: base, label: "Overview", needs: null },
+    { href: `${base}/services`, label: "IP services", needs: ["ip.service"] },
+    { href: `${base}/system-users`, label: "Device users", needs: ["system.user"] },
+    {
+      href: `${base}/vpn`,
+      label: "VPN",
+      needs: ["ppp.secret", "vpn.wireguard.interface", "vpn.l2tp"],
+    },
+    {
+      href: `${base}/firewall`,
+      label: "Firewall",
+      needs: ["firewall.filter", "firewall.nat"],
+    },
+    {
+      href: `${base}/network`,
+      label: "Network",
+      needs: ["interface.list", "ip.address", "ip.route"],
+    },
+    { href: `${base}/dhcp`, label: "DHCP", needs: ["dhcp.server", "dhcp.lease"] },
+    { href: `${base}/queues`, label: "Queues", needs: ["queue.simple"] },
+    { href: `${base}/storage`, label: "Storage", needs: ["disk.usage"] },
+    { href: `${base}/logs`, label: "Logs", needs: ["system.log"] },
+    { href: `${base}/system`, label: "System", needs: ["system.info"] },
+    { href: `${base}/backups`, label: "Backups", needs: ["system.backup"] },
+  ];
+
+  // Until the driver list lands, show everything rather than flashing an
+  // empty strip and then filling it in.
+  const tabs = caps
+    ? ALL_TABS.filter((t) => !t.needs || t.needs.some((c) => caps.has(c)))
+    : ALL_TABS;
 
   return (
     <div>
@@ -90,9 +127,21 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
             <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
               <StatusPill status={device.status} />
               <span className="font-mono">
-                {device.host}:{device.port}
+                {device.host}:{device.device_class === "server" ? device.ssh_port : device.port}
               </span>
-              <span>· {device.vendor}</span>
+              <span className="flex items-center gap-1.5">
+                ·
+                <VendorIcon
+                  vendor={device.vendor}
+                  deviceClass={device.device_class}
+                  osFamily={device.os_family}
+                  osVersion={device.os_version}
+                  className="size-4"
+                />
+                {device.device_class === "server"
+                  ? (device.os_version ?? "Linux")
+                  : device.vendor}
+              </span>
             </div>
           )}
         </div>

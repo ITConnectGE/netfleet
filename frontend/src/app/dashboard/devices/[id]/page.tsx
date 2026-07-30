@@ -8,7 +8,9 @@ import { useState } from "react";
 import { AccessPanel } from "@/components/access-panel";
 import { FirmwareCard } from "@/components/firmware-card";
 import { RequestAccessButton } from "@/components/request-access-button";
+import { ResourcesCard } from "@/components/resources-card";
 import { StatusPill } from "@/components/status-pill";
+import { VendorIcon } from "@/components/vendor-icon";
 import { useToast } from "@/components/toast";
 import { downloadAuthed } from "@/lib/api";
 import {
@@ -96,6 +98,7 @@ export default function DeviceDetailPage() {
   }
 
   const driver = drivers?.find((d) => d.vendor === device.vendor);
+  const isServer = device.device_class === "server";
 
   return (
     <div>
@@ -214,9 +217,17 @@ export default function DeviceDetailPage() {
         </div>
       )}
 
-      <div className="mt-6">
-        <FirmwareCard deviceId={device.id} />
-      </div>
+      {/* RouterOS firmware upgrades do not apply to a server — a pending
+          kernel there is a package update, an entirely different mechanism. */}
+      {isServer ? (
+        <div className="mt-6">
+          <ResourcesCard deviceId={device.id} pinned={device.ssh_host_key_fingerprint} />
+        </div>
+      ) : (
+        <div className="mt-6">
+          <FirmwareCard deviceId={device.id} />
+        </div>
+      )}
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Section title="Connection">
@@ -225,7 +236,7 @@ export default function DeviceDetailPage() {
           </Row>
           <Row label="Host">
             <span className="font-mono">
-              {device.host}:{device.port}
+              {device.host}:{isServer ? device.ssh_port : device.port}
             </span>
           </Row>
           <Row label="Transport">{device.transport}</Row>
@@ -235,17 +246,67 @@ export default function DeviceDetailPage() {
           <Row label="Credentials">
             {device.has_password && <Pill>password</Pill>}
             {device.has_api_key && <Pill>api_key</Pill>}
-            {!device.has_password && !device.has_api_key && (
+            {device.has_ssh_key && <Pill>ssh key</Pill>}
+            {!device.has_password && !device.has_api_key && !device.has_ssh_key && (
               <span className="text-muted-foreground">none</span>
             )}
           </Row>
-          <Row label="Verify TLS">{device.verify_tls ? "Yes" : "No"}</Row>
+          {isServer ? (
+            <>
+              <Row label="Privilege">
+                {device.become_method === "sudo" ? "sudo" : "direct root"}
+              </Row>
+              <Row label="Host key">
+                {device.ssh_host_key_fingerprint ? (
+                  <span
+                    className="font-mono text-xs"
+                    title={device.ssh_host_key_fingerprint}
+                  >
+                    {device.ssh_host_key_fingerprint.slice(0, 26)}…
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    not pinned — run Test connection
+                  </span>
+                )}
+              </Row>
+            </>
+          ) : (
+            <Row label="Verify TLS">{device.verify_tls ? "Yes" : "No"}</Row>
+          )}
           <Row label="Enabled">{device.is_enabled ? "Yes" : "No"}</Row>
         </Section>
 
         <Section title="Discovered">
-          <Row label="Model">{device.model ?? "—"}</Row>
-          <Row label="Firmware">{device.firmware ?? "—"}</Row>
+          {isServer ? (
+            <>
+              <Row label="Operating system">
+                {device.os_version ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <VendorIcon
+                      vendor={device.vendor}
+                      deviceClass={device.device_class}
+                      osFamily={device.os_family}
+                      osVersion={device.os_version}
+                      className="size-4 text-muted-foreground"
+                    />
+                    {device.os_version}
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </Row>
+              <Row label="Kernel">
+                <span className="font-mono text-xs">{device.firmware ?? "—"}</span>
+              </Row>
+              <Row label="Hardware">{device.model ?? "—"}</Row>
+            </>
+          ) : (
+            <>
+              <Row label="Model">{device.model ?? "—"}</Row>
+              <Row label="Firmware">{device.firmware ?? "—"}</Row>
+            </>
+          )}
           <Row label="Serial">{device.serial ?? "—"}</Row>
           <Row label="Last seen">
             {device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : "—"}

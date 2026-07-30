@@ -7,6 +7,12 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useToast } from "@/components/toast";
 import { getDevice, rebootDevice, type Device } from "@/lib/devices";
 import {
+  capabilitiesFor,
+  DRIVERS_QUERY_KEY,
+  listDrivers,
+  type Driver,
+} from "@/lib/drivers";
+import {
   createSnmpCommunity,
   deleteSnmpCommunity,
   getDeviceClock,
@@ -40,12 +46,14 @@ import {
   type LoggingTemplate,
 } from "@/lib/system-logging";
 
+// Same capability gating as the outer device tabs: a Linux host has a clock
+// and can reboot, but has no SNMP agent or RouterOS logging rules to show.
 const TABS = [
-  { id: "clock", label: "Clock & time zone" },
-  { id: "ntp", label: "NTP" },
-  { id: "snmp", label: "SNMP" },
-  { id: "logging", label: "Logging" },
-  { id: "reboot", label: "Reboot" },
+  { id: "clock", label: "Clock & time zone", needs: "system.clock" },
+  { id: "ntp", label: "NTP", needs: "system.clock" },
+  { id: "snmp", label: "SNMP", needs: "system.snmp" },
+  { id: "logging", label: "Logging", needs: "system.log" },
+  { id: "reboot", label: "Reboot", needs: "system.reboot" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -61,8 +69,27 @@ export default function SystemPage() {
   const router = useRouter();
   const pathname = usePathname();
 
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+    enabled: Boolean(deviceId),
+  });
+  const { data: drivers } = useQuery<Driver[]>({
+    queryKey: DRIVERS_QUERY_KEY,
+    queryFn: listDrivers,
+    staleTime: 5 * 60_000,
+  });
+  const caps = capabilitiesFor(drivers, device?.vendor);
+  const tabs = caps ? TABS.filter((t) => caps.has(t.needs)) : TABS;
+
   const rawTab = searchParams.get("tab");
-  const activeTab: TabId = isTabId(rawTab) ? rawTab : "clock";
+  const requested: TabId = isTabId(rawTab) ? rawTab : "clock";
+  // A deep link to a tab this device does not have (a bookmark, or a link
+  // shared from a RouterOS device) falls back to the first one it does.
+  const activeTab: TabId =
+    tabs.some((t) => t.id === requested) || tabs.length === 0
+      ? requested
+      : tabs[0].id;
 
   // Build href once per tab so the buttons render as real anchors —
   // keeps deep-linking + back-button behaviour the way users expect.
@@ -88,7 +115,7 @@ export default function SystemPage() {
 
       <div className="mt-4 border-b border-border">
         <nav className="-mb-px flex flex-wrap gap-1" aria-label="System sub-pages">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const active = t.id === activeTab;
             return (
               <button

@@ -161,3 +161,44 @@ class LoggingActionCreate(BaseModel):
     syslog_facility: str | None = Field(default=None, max_length=32)
     syslog_severity: str | None = Field(default=None, max_length=16)
     memory_lines: int | None = Field(default=None, ge=10, le=100000)
+
+
+class SystemResourcesPublic(BaseModel):
+    """Live resource snapshot read from the device on request.
+
+    Vendor-neutral: RouterOS fills the percentages, a Linux host fills the
+    absolute figures too. Everything is optional because a field the
+    platform cannot report should be absent rather than zero — "0 GiB of
+    RAM" is a lie, "—" is the truth.
+    """
+
+    identity: str
+    model: str | None = None
+    serial: str | None = None
+    firmware: str | None = None
+    os_family: str | None = None
+    os_version: str | None = None
+    uptime_seconds: int | None = None
+    cpu_count: int | None = None
+    cpu_load_pct: float | None = None
+    load_avg_1: float | None = None
+    load_avg_5: float | None = None
+    load_avg_15: float | None = None
+    memory_used_pct: float | None = None
+    memory_total_bytes: int | None = None
+    memory_used_bytes: int | None = None
+    swap_total_bytes: int | None = None
+    swap_used_bytes: int | None = None
+
+
+class DiskUsagePublic(BaseModel):
+    filesystem: str
+    mount_point: str
+    fs_type: str | None = None
+    total_bytes: int | None = None
+    used_bytes: int | None = None
+    available_bytes: int | None = None
+    used_pct: float | None = None
+    inodes_total: int | None = None
+    inodes_used: int | None = None
+    inodes_used_pct: float | None = None
