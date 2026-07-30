@@ -30,11 +30,14 @@ from app.drivers.base import (
     Capability,
     DeviceClock,
     DeviceCredentials,
+    DirEntryUsage,
     DiskUsage,
     Interface,
+    InterfaceConfig,
     IpAddress,
     IpRoute,
     NtpClient,
+    ProcessInfo,
     SupportsCapabilityFallback,
     SystemInfo,
     UnsupportedOperation,
@@ -133,10 +136,14 @@ class LinuxDriver(SupportsCapabilityFallback):
         Capability.SYSTEM_REBOOT,
         Capability.SYSTEM_CLOCK,
         Capability.DISK_USAGE,
+        Capability.PROC_LIST,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
+        Capability.IP_ADDRESS_CONFIG,
         Capability.IP_ROUTE,
-        Capability.IP_NEIGHBOR,
+        # The kernel's ARP/NDP cache — not CDP/LLDP discovery, which a
+        # server does not speak.
+        Capability.IP_ARP,
         Capability.TOOL_PING,
         Capability.TOOL_TRACEROUTE,
     }
@@ -481,7 +488,224 @@ class LinuxDriver(SupportsCapabilityFallback):
                 return name
         return "timesyncd"
 
+    async def ntp_sync_now(self, creds: DeviceCredentials) -> str:
+        """Force an immediate time sync and report what happened.
+
+        There is no one command for this: timesyncd only re-syncs when the
+        unit restarts, chrony has `makestep` for a one-shot correction, and
+        neither exists on the other kind of host.
+        """
+        provider = await self._timesync_provider(creds)
+        if provider == "chrony":
+            r = await ssh.run(creds, ["chronyc", "makestep"], become=True, timeout=30)
+            r.check("forcing a chrony step")
+            return "chrony: requested an immediate step"
+
+        batch = await ssh.run_many(
+            creds,
+            [
+                # Toggling NTP off/on makes timesyncd re-poll straight away;
+                # a plain restart can otherwise sit on its existing backoff.
+                ssh.Command(argv=["timedatectl", "set-ntp", "false"], become=True, timeout=20),
+                ssh.Command(argv=["timedatectl", "set-ntp", "true"], become=True, timeout=20),
+            ],
+        )
+        for r in batch.results:
+            r.check("restarting time synchronisation")
+        return "systemd-timesyncd: re-synchronisation requested"
+
+    # --------------------------------------------------------- processes
+
+    async def processes_top(
+        self, creds: DeviceCredentials, *, limit: int = 40
+    ) -> list[ProcessInfo]:
+        """The `htop` view: what is running and what it is costing.
+
+        `ps` rather than `top -b`, because top's batch output changes shape
+        with terminal width and locale while ps with an explicit format is
+        a stable contract. `%cpu` from ps is an average over the process
+        lifetime rather than an instantaneous sample — noted in the UI, and
+        the reason the list is sorted by it rather than presented as live.
+        """
+        n = max(1, min(limit, 200))
+        result = await ssh.run(
+            creds,
+            [
+                "ps", "-eo",
+                "pid=,user:32=,pcpu=,pmem=,rss=,stat=,lstart=,time=,nlwp=,args=",
+                "--sort=-pcpu",
+            ],
+            timeout=30,
+        )
+        if not result.ok:
+            raise ssh.SshError(
+                f"listing processes failed: {(result.stderr or result.stdout).strip()[:200]}"
+            )
+
+        out: list[ProcessInfo] = []
+        for line in result.stdout.splitlines():
+            # Field layout: pid user pcpu pmem rss stat + lstart (five
+            # fields of its own) + time nlwp, then args — which keeps its
+            # spaces, so the split stops at 13 and takes the rest whole.
+            parts = line.split(maxsplit=13)
+            if len(parts) < 14:
+                continue
+            try:
+                pid = int(parts[0])
+                rss_kb = int(parts[4])
+            except ValueError:
+                continue
+            out.append(
+                ProcessInfo(
+                    pid=pid,
+                    user=parts[1],
+                    cpu_pct=_maybe_float(parts[2]),
+                    mem_pct=_maybe_float(parts[3]),
+                    rss_bytes=rss_kb * 1024,
+                    state=parts[5],
+                    started=" ".join(parts[6:11]),
+                    cpu_time=parts[11],
+                    threads=_maybe_int(parts[12]),
+                    command=parts[13],
+                )
+            )
+            if len(out) >= n:
+                break
+        return out
+
+    # ------------------------------------------------------- disk detail
+
+    async def disk_tree(
+        self, creds: DeviceCredentials, path: str, *, depth: int = 1
+    ) -> list[DirEntryUsage]:
+        """Recursive sizes of a directory's immediate children.
+
+        `du -x` stays on one filesystem: without it, expanding `/` walks
+        every mount including network shares, and a single click can hang
+        for minutes on an NFS server that is not answering.
+        """
+        _assert_safe_path(path)
+        result = await ssh.run(
+            creds,
+            ["du", "-x", "-b", "--max-depth", str(max(1, min(depth, 3))), "--", path],
+            become=True,
+            # Walking a large tree is slow, and this is user-initiated, so
+            # a generous ceiling beats a spurious timeout.
+            timeout=120,
+        )
+        if not result.ok and not result.stdout.strip():
+            raise ssh.SshError(
+                f"reading directory sizes failed: "
+                f"{(result.stderr or result.stdout).strip()[:200]}"
+            )
+
+        base = path.rstrip("/") or "/"
+        out: list[DirEntryUsage] = []
+        for line in result.stdout.splitlines():
+            size_s, _, entry = line.partition("\t")
+            entry = entry.strip()
+            if not entry or entry == base:
+                continue
+            try:
+                size = int(size_s)
+            except ValueError:
+                continue
+            out.append(
+                DirEntryUsage(
+                    path=entry,
+                    name=entry[len(base):].lstrip("/") or entry,
+                    size_bytes=size,
+                )
+            )
+        # Biggest first: the reason anyone opens this screen is to find what
+        # ate the disk.
+        out.sort(key=lambda e: e.size_bytes, reverse=True)
+        return out
+
     # -------------------------------------------------------- networking
+
+    async def interface_configs(
+        self, creds: DeviceCredentials
+    ) -> list[InterfaceConfig]:
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(argv=["ip", "-j", "-d", "-s", "addr", "show"], timeout=20),
+                ssh.Command(argv=["ip", "-j", "route", "show", "default"], timeout=20),
+                ssh.Command(argv=["resolvectl", "status", "--no-pager"], timeout=20),
+                ssh.Command(argv=["cat", "/etc/resolv.conf"], timeout=15),
+                # Lease files name the DHCP server and expiry, which nothing
+                # else on the host reports.
+                ssh.Command(
+                    argv=["sh", "-c", "cat /run/systemd/netif/leases/* 2>/dev/null"],
+                    timeout=15,
+                ),
+                ssh.Command(argv=["networkctl", "list", "--no-pager", "--no-legend"], timeout=20),
+                ssh.Command(argv=["nmcli", "-t", "-f", "DEVICE,STATE,CONNECTION", "device"], timeout=20),
+            ],
+        )
+        addr_r, route_r, resolvectl_r, resolvconf_r, leases_r, networkctl_r, nmcli_r = (
+            batch.results
+        )
+
+        rows = _json_or_empty(addr_r, "listing interfaces")
+        routes = _json_or_empty(route_r, "reading the default route") if route_r.ok else []
+        gateways = _default_gateways(routes)
+        dns_by_iface, dns_search = _parse_resolvectl(resolvectl_r.stdout if resolvectl_r.ok else "")
+        global_dns = _parse_resolv_conf(resolvconf_r.stdout if resolvconf_r.ok else "")
+        leases = _parse_networkd_leases(leases_r.stdout if leases_r.ok else "")
+        managed = _managed_by(
+            networkctl_r.stdout if networkctl_r.ok else "",
+            nmcli_r.stdout if nmcli_r.ok else "",
+        )
+
+        out: list[InterfaceConfig] = []
+        for r in rows:
+            name = r.get("ifname") or ""
+            if not name:
+                continue
+            flags = r.get("flags") or []
+            stats = r.get("stats64") if isinstance(r.get("stats64"), dict) else {}
+            linkinfo = r.get("linkinfo") or {}
+            kind = linkinfo.get("info_kind")
+            vlan_id = (linkinfo.get("info_data") or {}).get("id") if kind == "vlan" else None
+
+            v4 = [
+                a for a in (r.get("addr_info") or []) if a.get("family") == "inet"
+            ]
+            addresses = [
+                f"{a['local']}/{a['prefixlen']}"
+                for a in (r.get("addr_info") or [])
+                if a.get("local") and a.get("prefixlen") is not None
+            ]
+            lease = leases.get(name) or {}
+            out.append(
+                InterfaceConfig(
+                    name=name,
+                    mac_address=r.get("address"),
+                    state=r.get("operstate"),
+                    admin_up="UP" in flags,
+                    mtu=r.get("mtu"),
+                    type=kind or r.get("link_type"),
+                    vlan_id=vlan_id,
+                    vlan_parent=r.get("link") if kind == "vlan" else None,
+                    method=_addr_method(v4, lease),
+                    addresses=addresses,
+                    netmask=_prefix_to_netmask(v4[0]["prefixlen"]) if v4 else None,
+                    gateway=gateways.get(name),
+                    dns_servers=dns_by_iface.get(name) or global_dns,
+                    dns_search=dns_search,
+                    dhcp_server=lease.get("server"),
+                    lease_expires_iso=lease.get("expires"),
+                    rx_bytes=(stats.get("rx") or {}).get("bytes"),
+                    tx_bytes=(stats.get("tx") or {}).get("bytes"),
+                    managed_by=managed.get(name),
+                    raw=r,
+                )
+            )
+        # Loopback last — it is never what anyone came to look at.
+        out.sort(key=lambda i: (i.name == "lo", i.name))
+        return out
 
     async def interfaces_list(self, creds: DeviceCredentials) -> list[Interface]:
         batch = await ssh.run_many(
@@ -763,6 +987,150 @@ def _parse_chrony_sources(text: str) -> list[str]:
         if candidate and candidate not in servers:
             servers.append(candidate)
     return servers
+
+
+_SAFE_PATH = re.compile(r"^/[^\x00-\x1f]*$")
+
+
+def _maybe_float(v: str) -> float | None:
+    try:
+        return float(v)
+    except ValueError:
+        return None
+
+
+def _maybe_int(v: str) -> int | None:
+    try:
+        return int(v)
+    except ValueError:
+        return None
+
+
+def _assert_safe_path(path: str) -> None:
+    """Reject anything that is not a plain absolute path.
+
+    Paths travel as argv elements so a shell cannot see them, but `..`
+    still lets a caller walk out of wherever the UI thinks it is, and a
+    relative path would resolve against the SSH user's home rather than
+    the tree on screen.
+    """
+    if not _SAFE_PATH.match(path) or ".." in path.split("/"):
+        raise UnsupportedOperation(f"'{path}' is not a valid absolute path")
+
+
+def _prefix_to_netmask(prefix: int) -> str:
+    bits = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if 0 <= prefix <= 32 else 0
+    return ".".join(str((bits >> s) & 0xFF) for s in (24, 16, 8, 0))
+
+
+def _default_gateways(routes: list[dict[str, Any]]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for r in routes:
+        dev, gw = r.get("dev"), r.get("gateway")
+        if dev and gw and dev not in out:
+            out[dev] = gw
+    return out
+
+
+def _addr_method(v4: list[dict[str, Any]], lease: dict[str, str]) -> str:
+    """Decide whether an address was leased or configured.
+
+    `ip` does not say. The two tells are a lease file naming the interface,
+    and the `dynamic` flag the kernel sets on an address with a finite
+    lifetime — which is what DHCP produces and static configuration does
+    not.
+    """
+    if lease:
+        return "dhcp"
+    if not v4:
+        return "unmanaged"
+    if any(a.get("dynamic") for a in v4):
+        return "dhcp"
+    return "static"
+
+
+def _parse_resolvectl(text: str) -> tuple[dict[str, list[str]], list[str]]:
+    """Per-link DNS servers and the search domains from `resolvectl status`."""
+    by_iface: dict[str, list[str]] = {}
+    search: list[str] = []
+    current: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("Link ") and "(" in line and ")" in line:
+            current = line[line.index("(") + 1 : line.rindex(")")]
+            continue
+        if line.startswith("Current DNS Server:"):
+            continue
+        if line.startswith("DNS Servers:"):
+            servers = line.split(":", 1)[1].split()
+            if current:
+                by_iface.setdefault(current, []).extend(servers)
+            continue
+        if line.startswith("DNS Domain:"):
+            search.extend(d for d in line.split(":", 1)[1].split() if d != "~.")
+    return by_iface, list(dict.fromkeys(search))
+
+
+def _parse_resolv_conf(text: str) -> list[str]:
+    out: list[str] = []
+    for raw in text.splitlines():
+        parts = raw.split()
+        if len(parts) >= 2 and parts[0] == "nameserver":
+            out.append(parts[1])
+    return out
+
+
+def _parse_networkd_leases(text: str) -> dict[str, dict[str, str]]:
+    """Pull the DHCP server and lease expiry out of networkd lease files.
+
+    The files are `KEY=value` blocks; interface identity comes from the
+    ADDRESS/INTERFACE keys depending on systemd version, so both are read.
+    """
+    out: dict[str, dict[str, str]] = {}
+    current: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if current:
+                iface = current.get("INTERFACE") or current.get("NETWORK")
+                if iface:
+                    out[iface] = {
+                        "server": current.get("SERVER_ADDRESS"),
+                        "expires": current.get("LEASE_EXPIRES") or current.get("T2"),
+                    }
+                current = {}
+            continue
+        key, sep, value = line.partition("=")
+        if sep:
+            current[key.strip()] = value.strip()
+    if current:
+        iface = current.get("INTERFACE") or current.get("NETWORK")
+        if iface:
+            out[iface] = {
+                "server": current.get("SERVER_ADDRESS"),
+                "expires": current.get("LEASE_EXPIRES") or current.get("T2"),
+            }
+    return out
+
+
+def _managed_by(networkctl: str, nmcli: str) -> dict[str, str]:
+    """Which subsystem owns each interface.
+
+    Matters before any write: changing an address that NetworkManager owns
+    via networkd (or the reverse) appears to work and is undone at the next
+    renew or reboot.
+    """
+    out: dict[str, str] = {}
+    for raw in networkctl.splitlines():
+        parts = raw.split()
+        # IDX LINK TYPE OPERATIONAL SETUP
+        if len(parts) >= 5 and parts[0].isdigit() and parts[-1] not in {"unmanaged", "pending"}:
+            out[parts[1]] = "systemd-networkd"
+    for raw in nmcli.splitlines():
+        parts = raw.split(":")
+        if len(parts) >= 2 and parts[1] not in {"unmanaged", ""}:
+            out[parts[0]] = "NetworkManager"
+    return out
 
 
 def _ntp_provider(sync: dict[str, str], chrony: ssh.CommandResult) -> str:

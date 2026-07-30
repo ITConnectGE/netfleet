@@ -114,10 +114,21 @@ async def update_user(
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> UserListItem:
+    # Self-demotion is refused separately from the last-admin rule: with two
+    # admins the org stays administrable, but the person clicking the button
+    # would still lock themselves out of every screen they need to undo it.
+    if payload.is_admin is False and user_id == actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="you cannot remove your own super-admin rights — ask another admin",
+        )
+
     try:
         updated = await user_svc.update_user(session, actor.organization_id, user_id, payload)
     except user_svc.UserNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except user_svc.LastAdminRemoval as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     await audit_svc.write_audit(
         session,

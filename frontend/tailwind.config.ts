@@ -36,6 +36,15 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Five components already used `bg-popover` — the status-pill
+        // tooltip, firmware card, form field, notification bell and the
+        // roles page — but the colour was never registered here, so the
+        // class generated nothing and every one of those floated over the
+        // page with no background at all.
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

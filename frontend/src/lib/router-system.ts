@@ -1,6 +1,12 @@
 import { api, readErrorMessage } from "@/lib/api";
 
 export interface NtpClient {
+  /** Which daemon keeps the clock — systemd-timesyncd, chrony, unknown.
+   *  Null on drivers that do not report it (RouterOS). */
+  provider?: string | null;
+  synchronized?: boolean | null;
+  server_name?: string | null;
+  server_address?: string | null;
   enabled: boolean;
   mode: string | null;
   servers: string | null;

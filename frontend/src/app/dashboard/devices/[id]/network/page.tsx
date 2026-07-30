@@ -32,9 +32,17 @@ import {
   type NeighborDiscovery,
   type Vlan,
 } from "@/lib/network";
+import { LinuxAddresses } from "@/components/linux-addresses";
 import { getDevice, type Device } from "@/lib/devices";
+import {
+  capabilitiesFor,
+  DRIVERS_QUERY_KEY,
+  listDrivers,
+  type Driver,
+} from "@/lib/drivers";
 
 type Tab =
+  | "addresses"
   | "interfaces"
   | "interface-lists"
   | "routes"
@@ -43,46 +51,69 @@ type Tab =
   | "bridge"
   | "neighbors";
 
+// Each sub-tab names the capability that makes it meaningful, so a Linux
+// host stops being offered RouterOS-only concepts: interface *lists*,
+// bridge host tables and CDP/LLDP discovery have no equivalent on a server.
+const NETWORK_TABS: { id: Tab; label: string; needs: string }[] = [
+  { id: "addresses", label: "Addresses", needs: "ip.address.config" },
+  { id: "interfaces", label: "Interfaces", needs: "interface.list" },
+  { id: "interface-lists", label: "Interface lists", needs: "interface.list.member" },
+  { id: "routes", label: "Routes", needs: "ip.route" },
+  { id: "vlans", label: "VLANs", needs: "interface.vlan" },
+  { id: "arp", label: "ARP", needs: "ip.arp" },
+  { id: "bridge", label: "Bridge hosts", needs: "bridge.host" },
+  { id: "neighbors", label: "Neighbors (CDP/LLDP)", needs: "ip.neighbor" },
+];
+
 export default function NetworkPage() {
   const params = useParams<{ id: string }>();
   const deviceId = params.id;
+
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+    enabled: Boolean(deviceId),
+  });
+  const { data: drivers } = useQuery<Driver[]>({
+    queryKey: DRIVERS_QUERY_KEY,
+    queryFn: listDrivers,
+    staleTime: 5 * 60_000,
+  });
+  const caps = capabilitiesFor(drivers, device?.vendor);
+  const tabs = caps
+    ? NETWORK_TABS.filter((t) => caps.has(t.needs))
+    : NETWORK_TABS;
+
   const [tab, setTab] = useState<Tab>("interfaces");
+  // Land on a tab this device actually has rather than an empty panel.
+  const active = tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? tab);
 
   return (
     <div>
       <div className="mb-4 inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
-        {(
-          [
-            ["interfaces", "Interfaces"],
-            ["interface-lists", "Interface lists"],
-            ["routes", "Routes"],
-            ["vlans", "VLANs"],
-            ["arp", "ARP"],
-            ["bridge", "Bridge hosts"],
-            ["neighbors", "Neighbors (CDP/LLDP)"],
-          ] as [Tab, string][]
-        ).map(([k, label]) => (
+        {tabs.map((t) => (
           <button
-            key={k}
-            onClick={() => setTab(k)}
+            key={t.id}
+            onClick={() => setTab(t.id)}
             className={`rounded px-3 py-1.5 font-medium transition ${
-              tab === k
+              active === t.id
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {label}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {tab === "interfaces" && <InterfacesTab deviceId={deviceId} />}
-      {tab === "interface-lists" && <InterfaceListsTab deviceId={deviceId} />}
-      {tab === "routes" && <RoutesTab deviceId={deviceId} />}
-      {tab === "vlans" && <VlansTab deviceId={deviceId} />}
-      {tab === "arp" && <ArpTab deviceId={deviceId} />}
-      {tab === "bridge" && <BridgeTab deviceId={deviceId} />}
-      {tab === "neighbors" && <NeighborsTab deviceId={deviceId} />}
+      {active === "addresses" && <LinuxAddresses deviceId={deviceId} />}
+      {active === "interfaces" && <InterfacesTab deviceId={deviceId} />}
+      {active === "interface-lists" && <InterfaceListsTab deviceId={deviceId} />}
+      {active === "routes" && <RoutesTab deviceId={deviceId} />}
+      {active === "vlans" && <VlansTab deviceId={deviceId} />}
+      {active === "arp" && <ArpTab deviceId={deviceId} />}
+      {active === "bridge" && <BridgeTab deviceId={deviceId} />}
+      {active === "neighbors" && <NeighborsTab deviceId={deviceId} />}
     </div>
   );
 }

@@ -267,6 +267,51 @@ cannot edit yet" rather than guessing.
 
 ---
 
+## Requested backlog (captured, not yet built)
+
+Ordered by risk, not by ask order. Everything above the line is read-only or
+locally reversible; everything below can cut the connection NetFleet manages
+the host over, and none of it ships before the rollback guard does.
+
+**Safe — next up**
+
+- [ ] Neighbour discovery: sweep the interface's own subnet (or one typed in)
+      and read the ARP cache back. `nmap`/`arp-scan` are usually absent, so
+      this is a bounded ping sweep, rate-limited, and never a background job.
+- [ ] Host users and groups: list, create, set password, add to group, lock.
+      `getent`, `useradd`, `groupadd`, `chpasswd`, `usermod`. Refuse to touch
+      `root`, the NetFleet management account, or any UID below 1000 without
+      an explicit override.
+- [ ] Command runner: a curated catalog first (disk usage, failed units, last
+      auth failures), free-form behind its own permission that no default role
+      holds. Full argv + truncated output into the audit log.
+
+**Requires the rollback guard — L8**
+
+- [ ] Address changes: static ↔ DHCP, address/mask/gateway/DNS, release and
+      renew. Must write through whatever owns the interface (netplan,
+      NetworkManager, networkd) rather than `ip addr`, which survives until
+      the next renew and then silently reverts.
+- [ ] VLAN create/delete and tagged/untagged membership.
+- [ ] nftables firewall.
+
+### The rollback guard, built once
+
+Every write above shares one mechanism, because they share one failure mode —
+the change succeeds, and the operator loses the connection that would let them
+undo it:
+
+1. snapshot the current state (ruleset, netplan yaml, interface config)
+2. schedule the restore: `systemd-run --on-active=120 <restore command>`
+3. apply the change
+4. NetFleet reconnects and calls `POST .../confirm`, which cancels the timer
+5. no confirmation within the window → the host restores itself
+
+The timer lives on the *host*, not in NetFleet, which is the point: it still
+fires when the thing that broke is the path between them.
+
+---
+
 ## Stage L4 — Linux-specific read capabilities (L)
 
 - [ ] `Capability` additions: `svc.systemd`, `pkg.manager`, `disk.usage`,

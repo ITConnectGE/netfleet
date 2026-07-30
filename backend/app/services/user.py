@@ -47,6 +47,11 @@ class UserEmailTaken(Exception):
     pass
 
 
+class LastAdminRemoval(Exception):
+    """Refused: the change would leave the organisation with no active
+    super-admin, and there is no way back from that through the UI."""
+
+
 class RoleNotInOrganization(Exception):
     pass
 
@@ -267,10 +272,35 @@ async def update_user(
     data = payload.model_dump(exclude_unset=True)
     if "mobile_phone" in data:
         data["mobile_phone"] = _normalise_phone(data["mobile_phone"])
+
+    # Removing the last super-admin leaves an organisation nobody can
+    # administer — no role grants, no user management, no way back without
+    # database access.
+    demoting = data.get("is_admin") is False and user.is_admin
+    deactivating = data.get("is_active") is False and user.is_active
+    if demoting or deactivating:
+        remaining = await _count_active_admins(session, organization_id, exclude=user_id)
+        if user.is_admin and remaining == 0:
+            raise LastAdminRemoval(
+                "this is the only active super-admin left — promote another user first"
+            )
+
     for k, v in data.items():
         setattr(user, k, v)
     await session.flush()
     return user
+
+
+async def _count_active_admins(
+    session: AsyncSession, organization_id: UUID, *, exclude: UUID
+) -> int:
+    stmt = select(func.count()).select_from(User).where(
+        User.organization_id == organization_id,
+        User.is_admin.is_(True),
+        User.is_active.is_(True),
+        User.id != exclude,
+    )
+    return int((await session.execute(stmt)).scalar_one())
 
 
 async def reset_password(

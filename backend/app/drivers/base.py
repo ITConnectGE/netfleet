@@ -27,10 +27,22 @@ class Capability(StrEnum):
     SYSTEM_SNMP = "system.snmp"
     # IP
     INTERFACE_LIST = "interface.list"
+    # RouterOS groups interfaces into named lists (WAN, LAN…). No Linux
+    # equivalent, so it needs its own capability rather than riding along
+    # with INTERFACE_LIST.
+    INTERFACE_LIST_MEMBER = "interface.list.member"
+    INTERFACE_VLAN = "interface.vlan"
     IP_ADDRESS = "ip.address"
+    IP_ADDRESS_CONFIG = "ip.address.config"  # method (dhcp/static), gateway, DNS
     IP_ROUTE = "ip.route"
     IP_SERVICE = "ip.service"           # api, ssh, www, winbox, …
+    # Two genuinely different things that used to share one name: the ARP /
+    # NDP cache the kernel keeps, versus peers a device advertises itself to
+    # over a discovery protocol. A Linux host has the former and not the
+    # latter, so conflating them put a "Neighbors (CDP/LLDP)" tab on servers.
+    IP_ARP = "ip.arp"
     IP_NEIGHBOR = "ip.neighbor"         # CDP / LLDP / MNDP discovered peers
+    BRIDGE_HOST = "bridge.host"
     # DHCP
     DHCP_SERVER = "dhcp.server"
     DHCP_LEASE = "dhcp.lease"
@@ -43,6 +55,7 @@ class Capability(StrEnum):
     QUEUE_TREE = "queue.tree"
     # Host resources (servers)
     DISK_USAGE = "disk.usage"
+    PROC_LIST = "proc.list"
     # PPP / VPN
     PPP_SECRET = "ppp.secret"
     VPN_L2TP = "vpn.l2tp"
@@ -87,6 +100,68 @@ class SystemInfo:
     swap_total_bytes: int | None = None
     swap_used_bytes: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class InterfaceConfig:
+    """Everything about one interface's addressing in a single row.
+
+    Deliberately denormalised: an operator asking "what is eth0 doing"
+    wants the address, whether it was leased or configured, the gateway
+    and the resolvers together. Splitting them across four tables makes
+    them join it in their head.
+    """
+
+    name: str
+    mac_address: str | None = None
+    state: str | None = None                 # UP / DOWN / UNKNOWN
+    admin_up: bool | None = None
+    mtu: int | None = None
+    type: str | None = None                  # ether, bridge, vlan, wireguard…
+    vlan_id: int | None = None
+    vlan_parent: str | None = None
+    # "dhcp" | "static" | "unmanaged" | "unknown"
+    method: str | None = None
+    addresses: list[str] = field(default_factory=list)   # ["10.0.0.5/24"]
+    netmask: str | None = None               # dotted form of the first prefix
+    gateway: str | None = None
+    dns_servers: list[str] = field(default_factory=list)
+    dns_search: list[str] = field(default_factory=list)
+    dhcp_server: str | None = None
+    lease_expires_iso: str | None = None
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
+    # Which subsystem owns this interface's configuration — netplan,
+    # NetworkManager, systemd-networkd, ifupdown. Writing without knowing
+    # this is how a change silently gets reverted on the next boot.
+    managed_by: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ProcessInfo:
+    """One process, the way `top` and `htop` present them."""
+
+    pid: int
+    user: str | None = None
+    cpu_pct: float | None = None
+    mem_pct: float | None = None
+    rss_bytes: int | None = None
+    state: str | None = None
+    started: str | None = None
+    cpu_time: str | None = None
+    command: str = ""
+    threads: int | None = None
+
+
+@dataclass(slots=True)
+class DirEntryUsage:
+    """One child of a directory, with its recursive size."""
+
+    path: str
+    name: str
+    size_bytes: int
+    is_dir: bool = True
 
 
 @dataclass(slots=True)
@@ -637,6 +712,16 @@ class VendorDriver(Protocol):
     async def test_connection(self, creds: DeviceCredentials) -> bool: ...
     async def system_info(self, creds: DeviceCredentials) -> SystemInfo: ...
     async def disk_usage_list(self, creds: DeviceCredentials) -> list[DiskUsage]: ...
+    async def disk_tree(
+        self, creds: DeviceCredentials, path: str, *, depth: int = 1
+    ) -> list[DirEntryUsage]: ...
+    async def interface_configs(
+        self, creds: DeviceCredentials
+    ) -> list[InterfaceConfig]: ...
+    async def ntp_sync_now(self, creds: DeviceCredentials) -> str: ...
+    async def processes_top(
+        self, creds: DeviceCredentials, *, limit: int = 40
+    ) -> list[ProcessInfo]: ...
     async def system_reboot(self, creds: DeviceCredentials) -> None:
         """Trigger a clean reboot of the device. Implementations should
         swallow the connection-drop that follows because the router

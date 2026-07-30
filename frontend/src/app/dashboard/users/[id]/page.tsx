@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { RiskReportCard } from "@/components/risk-report-card";
 import { useToast } from "@/components/toast";
+import { fetchMe } from "@/lib/auth";
 import { listDevices, type Device } from "@/lib/devices";
 import { listRoles, type Role } from "@/lib/roles";
 import { listSites, type Site } from "@/lib/sites";
@@ -53,9 +54,33 @@ export default function UserDetailPage() {
     queryFn: () => listDevices(),
   });
 
+  const toast = useToast();
+  // The server refuses self-demotion too; knowing who we are lets the
+  // button explain itself instead of failing after the click.
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: fetchMe });
+  const isSelf = me?.id === id;
+
   const toggleActive = useMutation({
     mutationFn: (active: boolean) => updateUser(id, { is_active: active }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+    onError: (e: Error) => toast.error("Could not update user", e.message),
+  });
+
+  const toggleAdmin = useMutation({
+    mutationFn: (admin: boolean) => updateUser(id, { is_admin: admin }),
+    onSuccess: (_r, admin) => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: ["user", id] });
+      toast.success(
+        admin ? "Super-admin granted" : "Super-admin revoked",
+        admin
+          ? "This user now has full access to everything in the organisation."
+          : "Access is now limited to the roles assigned below.",
+      );
+    },
+    // The server refuses to remove the last admin; surface its reason
+    // rather than a generic failure.
+    onError: (e: Error) => toast.error("Could not change super-admin", e.message),
   });
 
   const deleteAssignmentMut = useMutation({
@@ -83,14 +108,31 @@ export default function UserDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!user.is_admin && (
-            <button
-              onClick={() => toggleActive.mutate(!user.is_active)}
-              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm transition hover:bg-accent"
-            >
-              {user.is_active ? "Disable user" : "Enable user"}
-            </button>
-          )}
+          {/* Super-admin is a flag, not a role, so the role table below
+              cannot express it — without this control there was no way to
+              promote or demote anyone from the UI at all. */}
+          <button
+            onClick={() => toggleAdmin.mutate(!user.is_admin)}
+            disabled={toggleAdmin.isPending || isSelf}
+            title={
+              isSelf
+                ? "You cannot change your own super-admin rights"
+                : user.is_admin
+                  ? "Remove super-admin rights, leaving only the roles assigned below"
+                  : "Grant full access to everything in this organisation"
+            }
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {user.is_admin ? "Revoke super-admin" : "Make super-admin"}
+          </button>
+          <button
+            onClick={() => toggleActive.mutate(!user.is_active)}
+            disabled={toggleActive.isPending || isSelf}
+            title={isSelf ? "You cannot disable your own account" : undefined}
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {user.is_active ? "Disable user" : "Enable user"}
+          </button>
         </div>
       </div>
 

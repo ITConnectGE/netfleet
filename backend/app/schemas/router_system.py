@@ -14,6 +14,16 @@ class NtpClientPublic(BaseModel):
     servers: str | None
     primary: str | None
     secondary: str | None
+    # "systemd-timesyncd" | "chrony" | "unknown". Which daemon actually
+    # keeps the clock — without it "NTP: enabled" says nothing about where
+    # the time is coming from, and the server list can only be edited for
+    # one of them.
+    provider: str | None = None
+    # Whether the host currently considers itself in sync, and which server
+    # it is talking to right now, as opposed to the configured list.
+    synchronized: bool | None = None
+    server_name: str | None = None
+    server_address: str | None = None
 
 
 class NtpClientUpdate(BaseModel):
@@ -202,3 +212,53 @@ class DiskUsagePublic(BaseModel):
     inodes_total: int | None = None
     inodes_used: int | None = None
     inodes_used_pct: float | None = None
+
+
+class DirEntryUsagePublic(BaseModel):
+    path: str
+    name: str
+    size_bytes: int
+    is_dir: bool = True
+
+
+class NtpSyncResult(BaseModel):
+    message: str
+
+
+class InterfaceConfigPublic(BaseModel):
+    """One interface's addressing, denormalised on purpose — an operator
+    asking "what is eth0 doing" wants address, method, gateway and
+    resolvers together rather than joining four tables in their head."""
+
+    name: str
+    mac_address: str | None = None
+    state: str | None = None
+    admin_up: bool | None = None
+    mtu: int | None = None
+    type: str | None = None
+    vlan_id: int | None = None
+    vlan_parent: str | None = None
+    method: str | None = None
+    addresses: list[str] = []
+    netmask: str | None = None
+    gateway: str | None = None
+    dns_servers: list[str] = []
+    dns_search: list[str] = []
+    dhcp_server: str | None = None
+    lease_expires_iso: str | None = None
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
+    managed_by: str | None = None
+
+
+class ProcessPublic(BaseModel):
+    pid: int
+    user: str | None = None
+    cpu_pct: float | None = None
+    mem_pct: float | None = None
+    rss_bytes: int | None = None
+    state: str | None = None
+    started: str | None = None
+    cpu_time: str | None = None
+    command: str = ""
+    threads: int | None = None

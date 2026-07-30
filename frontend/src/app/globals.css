@@ -14,6 +14,11 @@
     --foreground: 222 47% 11%;            /* deep slate */
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
+    /* Floating surfaces (tooltips, dropdowns). Opaque white on purpose:
+       these sit over table rows, and anything translucent lets the row
+       hover bleed through and makes the text unreadable. */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
 
     /* Brand */
     --primary: 221 83% 53%;               /* same indigo-blue as before */
@@ -48,6 +53,10 @@
     --foreground: 210 40% 96%;
     --card: 222 47% 9%;
     --card-foreground: 210 40% 96%;
+    /* A touch lighter than --card so a tooltip reads as floating above
+       the surface it covers rather than merging into it. */
+    --popover: 222 47% 12%;
+    --popover-foreground: 210 40% 96%;
     --primary: 217 91% 60%;
     --primary-foreground: 222 47% 11%;
     --muted: 217 33% 17%;

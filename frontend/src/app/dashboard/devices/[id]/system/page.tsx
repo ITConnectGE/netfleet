@@ -12,6 +12,7 @@ import {
   listDrivers,
   type Driver,
 } from "@/lib/drivers";
+import { syncNtpNow } from "@/lib/linux";
 import {
   createSnmpCommunity,
   deleteSnmpCommunity,
@@ -264,6 +265,12 @@ function NtpSection({ deviceId }: { deviceId: string }) {
     }
   }, [data]);
 
+  const syncNow = useMutation({
+    mutationFn: () => syncNtpNow(deviceId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ntp", deviceId] }),
+    onError: (e: Error) => setErrMsg(e.message),
+  });
+
   const m = useMutation({
     mutationFn: () =>
       updateNtp(deviceId, {
@@ -299,6 +306,75 @@ function NtpSection({ deviceId }: { deviceId: string }) {
       {done && (
         <div className="mt-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
           NTP settings updated.
+        </div>
+      )}
+
+      {/* Where the time actually comes from. "NTP: enabled" on its own says
+          nothing about which daemon is running, whether it has managed to
+          sync, or which server it settled on. */}
+      {data && (data.provider || data.synchronized != null) && (
+        <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+          <dl className="grid gap-1.5 sm:grid-cols-2">
+            {data.provider && (
+              <div className="flex gap-2">
+                <dt className="w-28 shrink-0 text-muted-foreground">Provider</dt>
+                <dd className="font-mono">{data.provider}</dd>
+              </div>
+            )}
+            {data.synchronized != null && (
+              <div className="flex gap-2">
+                <dt className="w-28 shrink-0 text-muted-foreground">Status</dt>
+                <dd
+                  className={
+                    data.synchronized
+                      ? "font-medium text-emerald-700"
+                      : "font-medium text-amber-700"
+                  }
+                >
+                  {data.synchronized ? "synchronised" : "not synchronised"}
+                </dd>
+              </div>
+            )}
+            {(data.server_name || data.server_address) && (
+              <div className="flex gap-2 sm:col-span-2">
+                <dt className="w-28 shrink-0 text-muted-foreground">In use now</dt>
+                <dd className="font-mono">
+                  {data.server_name ?? data.server_address}
+                  {data.server_name && data.server_address
+                    ? ` (${data.server_address})`
+                    : ""}
+                </dd>
+              </div>
+            )}
+            {data.servers && (
+              <div className="flex gap-2 sm:col-span-2">
+                <dt className="w-28 shrink-0 text-muted-foreground">Configured</dt>
+                <dd className="break-all font-mono">
+                  {data.servers.split(",").join(", ")}
+                </dd>
+              </div>
+            )}
+          </dl>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => syncNow.mutate()}
+              disabled={syncNow.isPending}
+              className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+            >
+              {syncNow.isPending ? "Syncing…" : "Sync now"}
+            </button>
+            {syncNow.data && (
+              <span className="text-muted-foreground">{syncNow.data.message}</span>
+            )}
+          </div>
+          {data.provider === "chrony" && (
+            <p className="mt-2 text-muted-foreground">
+              This host keeps time with chrony. NetFleet can read its servers
+              but cannot edit the list — change it in the chrony configuration
+              on the host.
+            </p>
+          )}
         </div>
       )}
 

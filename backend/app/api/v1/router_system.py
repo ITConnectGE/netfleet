@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -21,7 +21,9 @@ from app.models.user import User
 from app.schemas.router_system import (
     DeviceClockPublic,
     DeviceClockUpdate,
+    DirEntryUsagePublic,
     DiskUsagePublic,
+    InterfaceConfigPublic,
     LoggingActionCreate,
     LoggingActionPublic,
     LoggingRuleCreate,
@@ -31,6 +33,8 @@ from app.schemas.router_system import (
     NtpClientUpdate,
     NtpServerPublic,
     NtpServerUpdate,
+    NtpSyncResult,
+    ProcessPublic,
     SnmpCommunityCreate,
     SnmpCommunityPublic,
     SnmpCommunityUpdate,
@@ -73,12 +77,19 @@ async def get_ntp(
         ntp = await get_driver(device.vendor).ntp_client_get(_to_driver_creds(device))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    raw = ntp.raw or {}
     return NtpClientPublic(
         enabled=ntp.enabled,
         mode=ntp.mode,
         servers=ntp.servers,
         primary=ntp.primary,
         secondary=ntp.secondary,
+        # Drivers that do not report these leave them null; the UI then
+        # simply shows fewer rows rather than inventing values.
+        provider=raw.get("provider"),
+        synchronized=raw.get("synchronized"),
+        server_name=raw.get("ServerName"),
+        server_address=raw.get("ServerAddress"),
     )
 
 
@@ -799,3 +810,106 @@ async def get_disks(
         )
         for d in disks
     ]
+
+
+@router.get("/{device_id}/disk-tree", response_model=list[DirEntryUsagePublic])
+async def get_disk_tree(
+    device_id: UUID,
+    path: str = Query(default="/", max_length=4096),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[DirEntryUsagePublic]:
+    """Recursive sizes of one directory's immediate children.
+
+    Walking a big tree is slow, so this returns one level at a time and the
+    UI expands on demand rather than pre-computing the whole filesystem.
+    """
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        entries = await get_driver(device.vendor).disk_tree(
+            _to_driver_creds(device), path
+        )
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [
+        DirEntryUsagePublic(
+            path=e.path, name=e.name, size_bytes=e.size_bytes, is_dir=e.is_dir
+        )
+        for e in entries
+    ]
+
+
+@router.post("/{device_id}/ntp/sync", response_model=NtpSyncResult)
+async def sync_ntp_now(
+    device_id: UUID,
+    request: Request,
+    user: User = Depends(require_permission("system.ntp", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> NtpSyncResult:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        message = await get_driver(device.vendor).ntp_sync_now(_to_driver_creds(device))
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.ntp",
+        action="sync_now",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    await session.commit()
+    return NtpSyncResult(message=message)
+
+
+@router.get("/{device_id}/interface-configs", response_model=list[InterfaceConfigPublic])
+async def get_interface_configs(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[InterfaceConfigPublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        cfgs = await get_driver(device.vendor).interface_configs(_to_driver_creds(device))
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [InterfaceConfigPublic(**vars(c)) for c in cfgs if not _drop_raw(c)]
+
+
+def _drop_raw(c: object) -> bool:
+    # `vars()` on a slots dataclass includes `raw`, which the public schema
+    # does not declare and pydantic would reject. Strip it in place instead
+    # of hand-listing twenty fields that would then drift.
+    if hasattr(c, "raw"):
+        c.raw = {}  # type: ignore[attr-defined]
+    return False
+
+
+@router.get("/{device_id}/processes", response_model=list[ProcessPublic])
+async def get_processes(
+    device_id: UUID,
+    limit: int = Query(default=40, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[ProcessPublic]:
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        procs = await get_driver(device.vendor).processes_top(
+            _to_driver_creds(device), limit=limit
+        )
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [ProcessPublic(**vars(p)) for p in procs]
