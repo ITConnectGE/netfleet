@@ -56,6 +56,7 @@ class Capability(StrEnum):
     # Host resources (servers)
     DISK_USAGE = "disk.usage"
     PROC_LIST = "proc.list"
+    CRON = "cron"           # crontabs + systemd timers
     # PPP / VPN
     PPP_SECRET = "ppp.secret"
     VPN_L2TP = "vpn.l2tp"
@@ -136,6 +137,30 @@ class InterfaceConfig:
     # this is how a change silently gets reverted on the next boot.
     managed_by: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ScheduledJob:
+    """One scheduled job, from cron or from a systemd timer.
+
+    Both are represented in the same shape on purpose: on a current Ubuntu
+    box much of what used to live in cron is now a timer, and an operator
+    asking "what runs on this host at night" wants one answer, not two
+    screens they have to reconcile.
+    """
+
+    # "user-crontab" | "system-crontab" | "cron.d" | "run-parts" | "timer"
+    source: str
+    schedule: str                    # "0 3 * * *", "@daily", "daily 06:00"
+    command: str
+    user: str | None = None
+    enabled: bool = True
+    origin: str | None = None        # file path or unit name
+    unit: str | None = None          # timer unit, for source="timer"
+    activates: str | None = None     # service the timer starts
+    next_run_iso: str | None = None
+    last_run_iso: str | None = None
+    comment: str | None = None
 
 
 @dataclass(slots=True)
@@ -722,6 +747,9 @@ class VendorDriver(Protocol):
     async def processes_top(
         self, creds: DeviceCredentials, *, limit: int = 40
     ) -> list[ProcessInfo]: ...
+    async def scheduled_jobs(
+        self, creds: DeviceCredentials
+    ) -> list[ScheduledJob]: ...
     async def system_reboot(self, creds: DeviceCredentials) -> None:
         """Trigger a clean reboot of the device. Implementations should
         swallow the connection-drop that follows because the router

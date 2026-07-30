@@ -262,3 +262,17 @@ class ProcessPublic(BaseModel):
     cpu_time: str | None = None
     command: str = ""
     threads: int | None = None
+
+
+class ScheduledJobPublic(BaseModel):
+    source: str
+    schedule: str
+    command: str
+    user: str | None = None
+    enabled: bool = True
+    origin: str | None = None
+    unit: str | None = None
+    activates: str | None = None
+    next_run_iso: str | None = None
+    last_run_iso: str | None = None
+    comment: str | None = None

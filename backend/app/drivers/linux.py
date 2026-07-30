@@ -38,6 +38,7 @@ from app.drivers.base import (
     IpRoute,
     NtpClient,
     ProcessInfo,
+    ScheduledJob,
     SupportsCapabilityFallback,
     SystemInfo,
     UnsupportedOperation,
@@ -137,6 +138,7 @@ class LinuxDriver(SupportsCapabilityFallback):
         Capability.SYSTEM_CLOCK,
         Capability.DISK_USAGE,
         Capability.PROC_LIST,
+        Capability.CRON,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
         Capability.IP_ADDRESS_CONFIG,
@@ -573,6 +575,86 @@ class LinuxDriver(SupportsCapabilityFallback):
                 break
         return out
 
+    # --------------------------------------------------------- scheduled
+
+    async def scheduled_jobs(self, creds: DeviceCredentials) -> list[ScheduledJob]:
+        """Everything scheduled on the host, cron and systemd timers alike.
+
+        Reading the spool directory rather than shelling `crontab -l` per
+        account: a box can have hundreds of users, and that would be one
+        SSH command each.
+        """
+        batch = await ssh.run_many(
+            creds,
+            [
+                # Debian and RHEL disagree on the spool path; ask for both.
+                ssh.Command(
+                    argv=[
+                        "sh", "-c",
+                        "for f in /var/spool/cron/crontabs/* /var/spool/cron/*; do "
+                        '[ -f "$f" ] && printf "##FILE %s\\n" "$f" && cat "$f"; done',
+                    ],
+                    become=True,
+                    timeout=25,
+                ),
+                ssh.Command(
+                    argv=[
+                        "sh", "-c",
+                        'for f in /etc/crontab /etc/cron.d/*; do [ -f "$f" ] && '
+                        'printf "##FILE %s\\n" "$f" && cat "$f"; done',
+                    ],
+                    become=True,
+                    timeout=25,
+                ),
+                ssh.Command(
+                    argv=[
+                        "sh", "-c",
+                        "for d in hourly daily weekly monthly; do "
+                        'for f in /etc/cron.$d/*; do [ -f "$f" ] && '
+                        'printf "%s\\t%s\\n" "$d" "$f"; done; done',
+                    ],
+                    become=True,
+                    timeout=25,
+                ),
+                # `systemctl show` with a glob emits stable KEY=VALUE blocks.
+                # `list-timers` is column-formatted and its layout shifts
+                # with terminal width and locale.
+                ssh.Command(
+                    argv=[
+                        "systemctl", "show", "*.timer", "--no-pager",
+                        "--property=Id,Description,NextElapseUSecRealtime,"
+                        "LastTriggerUSec,Unit,TimersCalendar,ActiveState,UnitFileState",
+                    ],
+                    timeout=25,
+                ),
+            ],
+        )
+        user_r, system_r, runparts_r, timers_r = batch.results
+
+        jobs: list[ScheduledJob] = []
+        if user_r.ok:
+            jobs += _parse_crontabs(user_r.stdout, source="user-crontab", has_user_field=False)
+        if system_r.ok:
+            jobs += _parse_crontabs(system_r.stdout, source="cron.d", has_user_field=True)
+        if runparts_r.ok:
+            for line in runparts_r.stdout.splitlines():
+                period, _, path = line.partition("\t")
+                if path:
+                    jobs.append(
+                        ScheduledJob(
+                            source="run-parts",
+                            schedule=f"@{period.strip()}",
+                            command=path.strip(),
+                            user="root",
+                            origin=f"/etc/cron.{period.strip()}",
+                        )
+                    )
+        if timers_r.ok:
+            jobs += _parse_timers(timers_r.stdout)
+
+        jobs.sort(key=lambda j: (j.source, j.user or "", j.command))
+        return jobs
+
     # ------------------------------------------------------- disk detail
 
     async def disk_tree(
@@ -990,6 +1072,126 @@ def _parse_chrony_sources(text: str) -> list[str]:
 
 
 _SAFE_PATH = re.compile(r"^/[^\x00-\x1f]*$")
+
+
+_CRON_SHORTCUTS = {
+    "@reboot", "@yearly", "@annually", "@monthly",
+    "@weekly", "@daily", "@midnight", "@hourly",
+}
+
+
+def _parse_crontabs(
+    text: str, *, source: str, has_user_field: bool
+) -> list[ScheduledJob]:
+    """Parse concatenated crontab files delimited by `##FILE <path>`.
+
+    `/etc/crontab` and `/etc/cron.d/*` carry a user column between the
+    schedule and the command; a user's own crontab does not. Getting that
+    wrong silently shifts the command by one field.
+    """
+    jobs: list[ScheduledJob] = []
+    current_file: str | None = None
+    implied_user: str | None = None
+    pending_comment: str | None = None
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("##FILE "):
+            current_file = line[7:].strip()
+            # A user crontab is named after its owner.
+            implied_user = current_file.rsplit("/", 1)[-1] if current_file else None
+            pending_comment = None
+            continue
+        if not line:
+            pending_comment = None
+            continue
+        if line.startswith("#"):
+            # Keep the last comment: it is usually the only description a
+            # cron entry has, and often the only clue to what it is for.
+            pending_comment = line.lstrip("#").strip() or None
+            continue
+        # Environment assignments (PATH=…, MAILTO=…) are not jobs.
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*=", line):
+            continue
+
+        if line.startswith("@"):
+            parts = line.split(None, 1)
+            if parts[0] not in _CRON_SHORTCUTS or len(parts) < 2:
+                continue
+            schedule, rest = parts[0], parts[1]
+        else:
+            parts = line.split(None, 5)
+            if len(parts) < 6:
+                continue
+            schedule, rest = " ".join(parts[:5]), parts[5]
+
+        user = implied_user
+        command = rest
+        if has_user_field:
+            bits = rest.split(None, 1)
+            if len(bits) < 2:
+                continue
+            user, command = bits[0], bits[1]
+
+        jobs.append(
+            ScheduledJob(
+                source="system-crontab"
+                if current_file == "/etc/crontab"
+                else source,
+                schedule=schedule,
+                command=command,
+                user=user,
+                origin=current_file,
+                comment=pending_comment,
+            )
+        )
+        pending_comment = None
+    return jobs
+
+
+def _usec_to_iso(value: str) -> str | None:
+    """systemd reports timestamps as microseconds since the epoch, and uses
+    0 or the max value to mean 'never'."""
+    try:
+        usec = int(value)
+    except ValueError:
+        return None
+    if usec <= 0 or usec >= 2**63 - 1:
+        return None
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(usec / 1_000_000, UTC).isoformat()
+
+
+def _parse_timers(text: str) -> list[ScheduledJob]:
+    """Parse `systemctl show '*.timer'` — KEY=VALUE blocks, blank separated."""
+    jobs: list[ScheduledJob] = []
+    for block in text.split("\n\n"):
+        props = _parse_kv(block)
+        unit = props.get("Id")
+        if not unit or not unit.endswith(".timer"):
+            continue
+        # TimersCalendar looks like: { OnCalendar=daily ; next_elapse=… }
+        calendar = props.get("TimersCalendar", "")
+        m = re.search(r"OnCalendar=([^;}]+)", calendar)
+        schedule = (m.group(1).strip() if m else "") or "(not a calendar timer)"
+        jobs.append(
+            ScheduledJob(
+                source="timer",
+                schedule=schedule,
+                command=props.get("Unit") or props.get("Description") or unit,
+                user="root",
+                enabled=props.get("UnitFileState") != "disabled"
+                and props.get("ActiveState") == "active",
+                origin=unit,
+                unit=unit,
+                activates=props.get("Unit"),
+                next_run_iso=_usec_to_iso(props.get("NextElapseUSecRealtime", "")),
+                last_run_iso=_usec_to_iso(props.get("LastTriggerUSec", "")),
+                comment=props.get("Description"),
+            )
+        )
+    return jobs
 
 
 def _maybe_float(v: str) -> float | None:

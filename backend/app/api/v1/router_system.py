@@ -35,6 +35,7 @@ from app.schemas.router_system import (
     NtpServerUpdate,
     NtpSyncResult,
     ProcessPublic,
+    ScheduledJobPublic,
     SnmpCommunityCreate,
     SnmpCommunityPublic,
     SnmpCommunityUpdate,
@@ -913,3 +914,25 @@ async def get_processes(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
     return [ProcessPublic(**vars(p)) for p in procs]
+
+
+@router.get("/{device_id}/scheduled-jobs", response_model=list[ScheduledJobPublic])
+async def get_scheduled_jobs(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[ScheduledJobPublic]:
+    """Everything scheduled on the host — crontabs and systemd timers.
+
+    Both in one list on purpose: on a current Ubuntu box much of what used
+    to be cron is now a timer, so splitting them would mean an operator
+    checking two screens and reconciling them by hand.
+    """
+    device = await get_device(session, user.organization_id, device_id)
+    try:
+        jobs = await get_driver(device.vendor).scheduled_jobs(_to_driver_creds(device))
+    except (UnsupportedOperation, HostKeyNotPinned):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    return [ScheduledJobPublic(**vars(j)) for j in jobs]

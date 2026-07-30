@@ -97,3 +97,26 @@ export function methodLabel(method: string | null): string {
       return "Unknown";
   }
 }
+
+export interface ScheduledJob {
+  /** user-crontab | system-crontab | cron.d | run-parts | timer */
+  source: string;
+  schedule: string;
+  command: string;
+  user: string | null;
+  enabled: boolean;
+  origin: string | null;
+  unit: string | null;
+  activates: string | null;
+  next_run_iso: string | null;
+  last_run_iso: string | null;
+  comment: string | null;
+}
+
+export async function getScheduledJobs(
+  deviceId: string,
+): Promise<ScheduledJob[]> {
+  return api
+    .get(`devices/${deviceId}/scheduled-jobs`, { timeout: 40_000 })
+    .json<ScheduledJob[]>();
+}
