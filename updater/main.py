@@ -19,6 +19,7 @@ import asyncio
 import os
 import secrets
 import shlex
+import time
 from collections import deque
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -53,6 +54,17 @@ API_HEALTH_URL = os.getenv(
     "NETFLEET_API_HEALTH_URL", "http://api:8000/api/v1/health"
 )
 HEALTH_TIMEOUT_SECONDS = 180
+
+# How long a release-check answer stays good. Long enough that routine
+# UI polling costs ~6 GitHub calls an hour instead of 180; short enough
+# that a release published while you are watching shows up on its own.
+CHECK_CACHE_SECONDS = float(os.getenv("NETFLEET_CHECK_CACHE_SECONDS", "600"))
+
+# Baked into the image at build time. The updater deliberately excludes
+# itself from `docker compose up` during an update so it cannot kill
+# itself mid-upgrade — which also means it never picks up its own fixes.
+# Reporting the version lets the UI say so out loud.
+__version__ = "0.45.1"
 
 
 def _normalize_image_tag(version: str) -> str:
@@ -123,6 +135,14 @@ class _State:
         # and sharing one field means whichever happened last hides the
         # other. This one is cleared on every successful poll.
         self.check_error: str | None = None
+        # Last tag GitHub gave us, and when. Every /status call used to
+        # issue a fresh GitHub request, and the UI polls status every 30 s
+        # from the Updates page plus every 60 s from the banner on every
+        # other page — 180 requests/hour against an unauthenticated limit
+        # of 60, so the instance sat permanently rate-limited and reported
+        # "up to date" forever.
+        self.cached_tag: str | None = None
+        self.cached_at: float = 0.0
         self.started_at_iso: str | None = None
         self.finished_at_iso: str | None = None
         self.log_lines: deque[str] = deque(maxlen=200)
@@ -143,6 +163,11 @@ _state = _State()
 
 class StatusResponse(BaseModel):
     current: str
+    # The updater's own image version. It excludes itself from the recreate
+    # so it cannot kill itself mid-update, which also means it never picks
+    # up its own fixes — when this lags `current`, the operator needs to
+    # recreate it by hand and should be told so.
+    updater_version: str = __version__
     available: str | None = None
     target_version: str | None = None
     channel: str
@@ -207,6 +232,14 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
          body. Add a `Cache-Control: no-cache` header and a random query
          string so we cut both.
     """
+    # Serve a recent answer rather than asking again. A release does not
+    # appear more than once every few minutes, and the cost of asking every
+    # time is a rate-limit ban that makes the whole feature lie.
+    if not force and _state.cached_tag and (
+        time.monotonic() - _state.cached_at < CHECK_CACHE_SECONDS
+    ):
+        return _state.cached_tag
+
     headers = {"Accept": "application/vnd.github+json"}
     if settings.GITHUB_TOKEN:
         # GitHub accepts both "token <pat>" (classic) and "Bearer <pat>"
@@ -233,10 +266,16 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
                     return None
                 r.raise_for_status()
                 _state.check_error = None
-                return r.json().get("tag_name")
+                tag = r.json().get("tag_name")
+                if tag:
+                    _state.cached_tag = tag
+                    _state.cached_at = time.monotonic()
+                return tag
         except Exception as e:
             _state.check_error = f"could not reach GitHub: {_describe(e)}"
-            return None
+            # Keep serving the last good answer: a blip must not make a
+            # known-available update vanish from the screen.
+            return _state.cached_tag
 
     # Forced path: list mode + cache buster.
     bust = secrets.token_hex(4)
@@ -254,7 +293,7 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
             releases = r.json()
     except Exception as e:
         _state.check_error = f"could not reach GitHub: {_describe(e)}"
-        return None
+        return _state.cached_tag
 
     def _key(rel: dict) -> tuple[int, ...]:
         tag = (rel.get("tag_name") or "").lstrip("v")
@@ -280,7 +319,11 @@ async def _check_latest_release(*, force: bool = False) -> str | None:
         return None
     candidates.sort(key=_key, reverse=True)
     _state.check_error = None
-    return candidates[0].get("tag_name")
+    tag = candidates[0].get("tag_name")
+    if tag:
+        _state.cached_tag = tag
+        _state.cached_at = time.monotonic()
+    return tag
 
 
 # ---------------- Shell helpers ----------------
@@ -484,6 +527,7 @@ async def status(force: bool = False) -> StatusResponse:
     )
     return StatusResponse(
         current=current,
+        updater_version=__version__,
         available=show_available,
         target_version=_state.target_version,
         channel=settings.UPDATE_CHANNEL,

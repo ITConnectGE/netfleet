@@ -12,6 +12,10 @@ export type UpdateState =
 
 export interface UpdateStatus {
   current: string;
+  /** The updater container's own version. It excludes itself from the
+   *  recreate during an update, so it can lag the rest of the stack and
+   *  never pick up its own fixes. Absent on older updaters. */
+  updater_version?: string | null;
   available: string | null;
   target_version: string | null;
   channel: string;

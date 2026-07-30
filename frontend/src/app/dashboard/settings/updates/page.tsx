@@ -77,9 +77,34 @@ export default function UpdatesPage() {
         </p>
       </div>
 
+      {/* The updater excludes itself from the recreate so it cannot kill
+          itself mid-update — which also means it never picks up its own
+          fixes. When it lags, say so, because the symptom is this very page
+          misreporting and there is no way to guess that from the outside. */}
+      {data.updater_version && data.updater_version !== data.current && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/60 p-4 text-sm">
+          <p className="font-medium text-amber-900">
+            The updater itself is out of date ({data.updater_version} vs{" "}
+            {data.current})
+          </p>
+          <p className="mt-1 text-amber-800">
+            It never recreates itself, so fixes to update-checking do not
+            reach it. On the host, run:
+          </p>
+          <pre className="mt-2 overflow-x-auto rounded-md bg-amber-100/70 px-3 py-2 font-mono text-xs text-amber-950">
+            cd /opt/netfleet && docker compose up -d updater
+          </pre>
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Current version">
           <p className="mt-1 font-mono text-2xl">{data.current}</p>
+          {data.updater_version && data.updater_version !== data.current && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              updater: {data.updater_version}
+            </p>
+          )}
         </Card>
         <Card title="Available">
           {data.available ? (

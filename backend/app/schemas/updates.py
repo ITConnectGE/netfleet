@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 
 class UpdateStatusPublic(BaseModel):
     current: str
+    # The updater's own image version. Defaulted because an updater
+    # container older than this release does not send it.
+    updater_version: str | None = None
     available: str | None
     target_version: str | None
     channel: str
