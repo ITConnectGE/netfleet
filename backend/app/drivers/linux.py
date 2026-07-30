@@ -30,6 +30,8 @@ from app.drivers.base import (
     Capability,
     DeviceClock,
     DeviceCredentials,
+    DeviceGroup,
+    DeviceUser,
     DirEntryUsage,
     DiskUsage,
     Interface,
@@ -139,6 +141,7 @@ class LinuxDriver(SupportsCapabilityFallback):
         Capability.DISK_USAGE,
         Capability.PROC_LIST,
         Capability.CRON,
+        Capability.SYSTEM_USER,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
         Capability.IP_ADDRESS_CONFIG,
@@ -574,6 +577,180 @@ class LinuxDriver(SupportsCapabilityFallback):
             if len(out) >= n:
                 break
         return out
+
+    # ------------------------------------------------- users and groups
+
+    async def device_users_list(self, creds: DeviceCredentials) -> list[DeviceUser]:
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(argv=["getent", "passwd"], timeout=20),
+                ssh.Command(argv=["getent", "group"], timeout=20),
+                # Password status: L = locked, P = usable, NP = no password.
+                # `passwd -S` needs root and is the only way to tell a locked
+                # account from an enabled one.
+                ssh.Command(argv=["passwd", "-Sa"], become=True, timeout=20),
+                ssh.Command(argv=["lastlog"], timeout=25),
+            ],
+        )
+        passwd_r, group_r, status_r, lastlog_r = batch.results
+        if not passwd_r.ok:
+            raise ssh.SshError(
+                f"listing accounts failed: {(passwd_r.stderr or '').strip()[:200]}"
+            )
+
+        groups = _parse_group_file(group_r.stdout) if group_r.ok else []
+        primary_by_gid = {g.gid: g.name for g in groups if g.gid is not None}
+        secondary: dict[str, list[str]] = {}
+        for g in groups:
+            for member in g.members:
+                secondary.setdefault(member, []).append(g.name)
+
+        locked = _parse_passwd_status(status_r.stdout) if status_r.ok else {}
+        last_login = _parse_lastlog(lastlog_r.stdout) if lastlog_r.ok else {}
+
+        out: list[DeviceUser] = []
+        for entry in _parse_passwd_file(passwd_r.stdout):
+            name = entry["name"]
+            uid = entry["uid"]
+            primary = primary_by_gid.get(entry["gid"])
+            member_of = list(dict.fromkeys([primary, *secondary.get(name, [])]))
+            out.append(
+                DeviceUser(
+                    id=name,
+                    name=name,
+                    group=primary,
+                    groups=[g for g in member_of if g],
+                    uid=uid,
+                    gid=entry["gid"],
+                    shell=entry["shell"],
+                    home=entry["home"],
+                    comment=entry["gecos"] or None,
+                    disabled=locked.get(name, False),
+                    last_logged_in=last_login.get(name),
+                    # Below 1000 is the system range on every distro we
+                    # target; `nobody` sits at the top of the 32-bit range.
+                    is_system=uid is not None and (uid < 1000 or uid == 65534),
+                    is_protected=_is_protected(name, creds.username),
+                )
+            )
+        out.sort(key=lambda u: (u.is_system, u.name))
+        return out
+
+    async def device_groups_list(self, creds: DeviceCredentials) -> list[DeviceGroup]:
+        result = await ssh.run(creds, ["getent", "group"], timeout=20)
+        if not result.ok:
+            raise ssh.SshError("listing groups failed")
+        groups = _parse_group_file(result.stdout)
+        groups.sort(key=lambda g: (g.is_system, g.name))
+        return groups
+
+    async def device_user_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        username: str,
+        password: str | None = None,
+        groups: list[str] | None = None,
+        shell: str | None = None,
+        comment: str | None = None,
+        create_home: bool = True,
+    ) -> None:
+        _assert_safe_account_name(username)
+        for g in groups or []:
+            _assert_safe_account_name(g)
+        if shell:
+            _assert_safe_path(shell)
+
+        argv = ["useradd"]
+        argv += ["--create-home"] if create_home else ["--no-create-home"]
+        argv += ["--shell", shell or "/bin/bash"]
+        if comment:
+            # GECOS is comma-delimited; a comma would silently become the
+            # next field (room number, phone…).
+            argv += ["--comment", comment.replace(",", " ")]
+        if groups:
+            argv += ["--groups", ",".join(groups)]
+        argv.append(username)
+
+        cmds = [ssh.Command(argv=argv, become=True, timeout=30)]
+        if password:
+            cmds.append(_chpasswd(username, password))
+        else:
+            # No password means key-only, and useradd already leaves the
+            # account locked for password auth — make that explicit rather
+            # than depending on the default.
+            cmds.append(
+                ssh.Command(argv=["usermod", "--lock", username], become=True, timeout=20)
+            )
+
+        batch = await ssh.run_many(creds, cmds)
+        batch.results[0].check(f"creating account '{username}'")
+        batch.results[1].check(f"setting the password for '{username}'")
+
+    async def device_user_set_password(
+        self, creds: DeviceCredentials, username: str, new_password: str
+    ) -> None:
+        _assert_safe_account_name(username)
+        _assert_not_protected(username, creds.username, "change the password of")
+        result = await ssh.run_many(creds, [_chpasswd(username, new_password)])
+        result.results[0].check(f"setting the password for '{username}'")
+
+    async def device_user_set_disabled(
+        self, creds: DeviceCredentials, username: str, disabled: bool
+    ) -> None:
+        _assert_safe_account_name(username)
+        _assert_not_protected(username, creds.username, "lock")
+        result = await ssh.run(
+            creds,
+            ["usermod", "--lock" if disabled else "--unlock", username],
+            become=True,
+            timeout=20,
+        )
+        result.check(("locking" if disabled else "unlocking") + f" '{username}'")
+
+    async def device_user_set_groups(
+        self, creds: DeviceCredentials, username: str, groups: list[str]
+    ) -> None:
+        _assert_safe_account_name(username)
+        for g in groups:
+            _assert_safe_account_name(g)
+        # Deliberately allowed on protected accounts: adding the management
+        # user to a group is a normal thing to want, and unlike locking it
+        # cannot take away access.
+        result = await ssh.run(
+            creds,
+            ["usermod", "--groups", ",".join(groups), username],
+            become=True,
+            timeout=25,
+        )
+        result.check(f"setting groups for '{username}'")
+
+    async def device_user_remove(
+        self, creds: DeviceCredentials, username: str, *, remove_home: bool = False
+    ) -> None:
+        _assert_safe_account_name(username)
+        _assert_not_protected(username, creds.username, "delete")
+        argv = ["userdel"]
+        if remove_home:
+            argv.append("--remove")
+        argv.append(username)
+        result = await ssh.run(creds, argv, become=True, timeout=40)
+        result.check(f"deleting '{username}'")
+
+    async def device_group_add(self, creds: DeviceCredentials, name: str) -> None:
+        _assert_safe_account_name(name)
+        result = await ssh.run(creds, ["groupadd", name], become=True, timeout=20)
+        result.check(f"creating group '{name}'")
+
+    async def device_group_remove(self, creds: DeviceCredentials, name: str) -> None:
+        _assert_safe_account_name(name)
+        if name in _PROTECTED_GROUPS:
+            raise UnsupportedOperation(
+                f"'{name}' is a system group and cannot be deleted through NetFleet"
+            )
+        result = await ssh.run(creds, ["groupdel", name], become=True, timeout=20)
+        result.check(f"deleting group '{name}'")
 
     # --------------------------------------------------------- scheduled
 
@@ -1072,6 +1249,121 @@ def _parse_chrony_sources(text: str) -> list[str]:
 
 
 _SAFE_PATH = re.compile(r"^/[^\x00-\x1f]*$")
+
+
+# Accounts NetFleet will not modify. `root` because a mistake there ends
+# the host's administrability, and the account NetFleet connects as because
+# locking it ends NetFleet's own access — the operator would have to fix it
+# from a console.
+_PROTECTED_USERS = frozenset({"root"})
+_PROTECTED_GROUPS = frozenset(
+    {"root", "sudo", "wheel", "adm", "shadow", "sudoers", "users", "nogroup"}
+)
+# POSIX-portable account name, the same rule `useradd` enforces.
+_SAFE_ACCOUNT = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+
+
+def _assert_safe_account_name(name: str) -> None:
+    if not _SAFE_ACCOUNT.match(name):
+        raise UnsupportedOperation(
+            f"'{name}' is not a valid account name "
+            "(lowercase letters, digits, hyphen and underscore; max 32)"
+        )
+
+
+def _is_protected(name: str, management_user: str | None) -> bool:
+    return name in _PROTECTED_USERS or name == management_user
+
+
+def _assert_not_protected(name: str, management_user: str | None, action: str) -> None:
+    if name in _PROTECTED_USERS:
+        raise UnsupportedOperation(
+            f"NetFleet will not {action} '{name}' — do it from a console if you "
+            "really mean to"
+        )
+    if management_user and name == management_user:
+        raise UnsupportedOperation(
+            f"'{name}' is the account NetFleet manages this host with; "
+            f"to {action} it you would lose access to the host"
+        )
+
+
+def _chpasswd(username: str, password: str) -> ssh.Command:
+    """Set a password without it ever appearing in a command line.
+
+    `chpasswd` reads `user:password` from stdin, so the secret never lands
+    in argv where every process on the box can read it out of /proc.
+    """
+    return ssh.Command(
+        argv=["chpasswd"],
+        become=True,
+        stdin=f"{username}:{password}\n",
+        timeout=25,
+    )
+
+
+def _parse_passwd_file(text: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) < 7:
+            continue
+        out.append(
+            {
+                "name": parts[0],
+                "uid": _maybe_int(parts[2]),
+                "gid": _maybe_int(parts[3]),
+                "gecos": parts[4].split(",")[0].strip(),
+                "home": parts[5],
+                "shell": parts[6],
+            }
+        )
+    return out
+
+
+def _parse_group_file(text: str) -> list[DeviceGroup]:
+    out: list[DeviceGroup] = []
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) < 4:
+            continue
+        gid = _maybe_int(parts[2])
+        out.append(
+            DeviceGroup(
+                name=parts[0],
+                gid=gid,
+                members=[m for m in parts[3].split(",") if m],
+                is_system=gid is not None and (gid < 1000 or gid == 65534),
+            )
+        )
+    return out
+
+
+def _parse_passwd_status(text: str) -> dict[str, bool]:
+    """`passwd -Sa` → {account: locked}.
+
+    Second field is L (locked), P (usable password) or NP (no password).
+    NP is not locked but has no password either — treated as not locked,
+    because on a key-only account that is the normal, working state.
+    """
+    out: dict[str, bool] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            out[parts[0]] = parts[1] == "L"
+    return out
+
+
+def _parse_lastlog(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in text.splitlines()[1:]:
+        parts = line.split(None, 3)
+        if len(parts) < 2:
+            continue
+        if "**Never logged in**" in line:
+            continue
+        out[parts[0]] = parts[-1].strip()
+    return out
 
 
 _CRON_SHORTCUTS = {

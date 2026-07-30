@@ -42,9 +42,26 @@ jobs:
         run: mypy app
         continue-on-error: true   # strict mode + work-in-progress code
 
+      # Importing the app validates Settings, so the suite needs a well-formed
+      # key even though no test encrypts anything. Generated per run rather
+      # than committed, so nothing in the repo looks like a usable secret.
+      - name: Generate throwaway config for the test run
+        run: |
+          python - <<'EOF' >> "$GITHUB_ENV"
+          import secrets
+          from cryptography.fernet import Fernet
+          print(f"NETFLEET_JWT_SECRET={secrets.token_urlsafe(48)}")
+          print(f"NETFLEET_FERNET_KEY={Fernet.generate_key().decode()}")
+          print("NETFLEET_DATABASE_URL=postgresql+asyncpg://ci:ci@localhost:5432/ci")
+          EOF
+
       - name: pytest
         run: pytest -q
-        continue-on-error: true   # no tests yet in Phase 1
+        # No longer allowed to fail. Two production bugs — a paramiko 4
+        # attribute that no longer exists, and `vars()` on slots dataclasses
+        # breaking three endpoints at once — shipped because nothing here
+        # could catch them. The suite that would have is in tests/ now, so a
+        # red run has to block.
 
   frontend:
     name: Frontend (lint + build)

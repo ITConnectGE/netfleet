@@ -577,7 +577,7 @@ class IpService:
 
 @dataclass(slots=True)
 class DeviceUser:
-    """A router-local user account (e.g. RouterOS /user/print)."""
+    """A device-local account — RouterOS `/user/print` or a Unix account."""
 
     id: str | None
     name: str
@@ -585,7 +585,30 @@ class DeviceUser:
     disabled: bool = False
     comment: str | None = None
     last_logged_in: str | None = None
+    # Unix hosts. `group` carries the primary group so the shared UI keeps
+    # working; `groups` carries the full set, which RouterOS has no notion of.
+    uid: int | None = None
+    gid: int | None = None
+    groups: list[str] = field(default_factory=list)
+    shell: str | None = None
+    home: str | None = None
+    # True for accounts the platform owns — root, daemons, and the account
+    # NetFleet itself connects as. Editing those is how a host stops being
+    # manageable, so the UI marks them and the driver refuses.
+    is_system: bool = False
+    is_protected: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class DeviceGroup:
+    """A Unix group. RouterOS groups are a different concept (permission
+    bundles) and are not represented here."""
+
+    name: str
+    gid: int | None = None
+    members: list[str] = field(default_factory=list)
+    is_system: bool = False
 
 
 @dataclass(slots=True)
@@ -1016,6 +1039,32 @@ class VendorDriver(Protocol):
     ) -> None: ...
     async def device_user_set_disabled(
         self, creds: DeviceCredentials, username: str, disabled: bool
+    ) -> None: ...
+    async def device_user_add(
+        self,
+        creds: DeviceCredentials,
+        *,
+        username: str,
+        password: str | None = None,
+        groups: list[str] | None = None,
+        shell: str | None = None,
+        comment: str | None = None,
+        create_home: bool = True,
+    ) -> None: ...
+    async def device_user_remove(
+        self, creds: DeviceCredentials, username: str, *, remove_home: bool = False
+    ) -> None: ...
+    async def device_user_set_groups(
+        self, creds: DeviceCredentials, username: str, groups: list[str]
+    ) -> None: ...
+    async def device_groups_list(
+        self, creds: DeviceCredentials
+    ) -> list[DeviceGroup]: ...
+    async def device_group_add(
+        self, creds: DeviceCredentials, name: str
+    ) -> None: ...
+    async def device_group_remove(
+        self, creds: DeviceCredentials, name: str
     ) -> None: ...
 
     # PPP secrets (L2TP / PPTP / SSTP / OVPN)

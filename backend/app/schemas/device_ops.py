@@ -34,6 +34,41 @@ class DeviceUserPublic(BaseModel):
     disabled: bool
     comment: str | None
     last_logged_in: str | None
+    # Unix hosts only; RouterOS leaves these at their defaults.
+    uid: int | None = None
+    gid: int | None = None
+    groups: list[str] = []
+    shell: str | None = None
+    home: str | None = None
+    is_system: bool = False
+    # Accounts NetFleet refuses to modify: root, and the account it manages
+    # the host with. The UI disables the controls rather than letting the
+    # request fail after the click.
+    is_protected: bool = False
+
+
+class DeviceGroupPublic(BaseModel):
+    name: str
+    gid: int | None = None
+    members: list[str] = []
+    is_system: bool = False
+
+
+class DeviceUserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=32)
+    password: str | None = Field(default=None, max_length=512)
+    groups: list[str] = Field(default_factory=list)
+    shell: str | None = Field(default=None, max_length=128)
+    comment: str | None = Field(default=None, max_length=255)
+    create_home: bool = True
+
+
+class DeviceUserGroupsUpdate(BaseModel):
+    groups: list[str] = Field(default_factory=list)
+
+
+class DeviceGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=32)
 
 
 class DeviceUserPasswordReset(BaseModel):

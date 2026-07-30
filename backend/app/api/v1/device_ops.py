@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -17,7 +17,11 @@ from app.drivers import get_driver
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.device_ops import (
+    DeviceGroupCreate,
+    DeviceGroupPublic,
+    DeviceUserCreate,
     DeviceUserDisableRequest,
+    DeviceUserGroupsUpdate,
     DeviceUserPasswordReset,
     DeviceUserPublic,
     IpServicePublic,
@@ -160,6 +164,13 @@ async def list_device_users(
             disabled=u.disabled,
             comment=u.comment,
             last_logged_in=u.last_logged_in,
+            uid=u.uid,
+            gid=u.gid,
+            groups=u.groups,
+            shell=u.shell,
+            home=u.home,
+            is_system=u.is_system,
+            is_protected=u.is_protected,
         )
         for u in items
     ]
@@ -243,3 +254,196 @@ async def set_device_user_disabled(
         request_payload={"target_username": username, "disabled": payload.disabled},
     )
     await session.commit()
+
+
+# ---------------- Host accounts: create / delete / groups ----------------
+
+
+async def _audit_user_op(
+    session: AsyncSession,
+    *,
+    user: User,
+    request: Request,
+    device_id: UUID,
+    action: str,
+    payload: dict,
+) -> None:
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="system.user",
+        action=action,
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        request_payload=payload,
+    )
+    await session.commit()
+
+
+def _to_http(e: Exception) -> HTTPException:
+    if isinstance(e, device_svc.DeviceNotFound):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
+@router.post("/{device_id}/system-users", status_code=status.HTTP_204_NO_CONTENT)
+async def create_device_user(
+    device_id: UUID,
+    payload: DeviceUserCreate,
+    request: Request,
+    user: User = Depends(require_permission("system.user", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await ops.create_device_user(
+            session,
+            user.organization_id,
+            device_id,
+            username=payload.username,
+            password=payload.password,
+            groups=payload.groups,
+            shell=payload.shell,
+            comment=payload.comment,
+            create_home=payload.create_home,
+        )
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+
+    # The password is excluded by name here and would also be caught by the
+    # audit redactor — both, because this one costs nothing.
+    await _audit_user_op(
+        session,
+        user=user,
+        request=request,
+        device_id=device_id,
+        action="create",
+        payload=payload.model_dump(exclude={"password"}),
+    )
+
+
+@router.delete(
+    "/{device_id}/system-users/{username}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_device_user(
+    device_id: UUID,
+    username: str,
+    request: Request,
+    remove_home: bool = Query(default=False),
+    user: User = Depends(require_permission("system.user", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await ops.delete_device_user(
+            session, user.organization_id, device_id, username, remove_home=remove_home
+        )
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+
+    await _audit_user_op(
+        session,
+        user=user,
+        request=request,
+        device_id=device_id,
+        action="delete",
+        payload={"target_username": username, "remove_home": remove_home},
+    )
+
+
+@router.put(
+    "/{device_id}/system-users/{username}/groups",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def set_device_user_groups(
+    device_id: UUID,
+    username: str,
+    payload: DeviceUserGroupsUpdate,
+    request: Request,
+    user: User = Depends(require_permission("system.user", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await ops.set_device_user_groups(
+            session, user.organization_id, device_id, username, payload.groups
+        )
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+
+    await _audit_user_op(
+        session,
+        user=user,
+        request=request,
+        device_id=device_id,
+        action="set_groups",
+        payload={"target_username": username, "groups": payload.groups},
+    )
+
+
+@router.get("/{device_id}/system-groups", response_model=list[DeviceGroupPublic])
+async def list_device_groups(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> list[DeviceGroupPublic]:
+    try:
+        groups = await ops.list_device_groups(session, user.organization_id, device_id)
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+    return [
+        DeviceGroupPublic(
+            name=g.name, gid=g.gid, members=g.members, is_system=g.is_system
+        )
+        for g in groups
+    ]
+
+
+@router.post("/{device_id}/system-groups", status_code=status.HTTP_204_NO_CONTENT)
+async def create_device_group(
+    device_id: UUID,
+    payload: DeviceGroupCreate,
+    request: Request,
+    user: User = Depends(require_permission("system.user", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await ops.create_device_group(
+            session, user.organization_id, device_id, payload.name
+        )
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+
+    await _audit_user_op(
+        session,
+        user=user,
+        request=request,
+        device_id=device_id,
+        action="create_group",
+        payload={"name": payload.name},
+    )
+
+
+@router.delete(
+    "/{device_id}/system-groups/{name}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_device_group(
+    device_id: UUID,
+    name: str,
+    request: Request,
+    user: User = Depends(require_permission("system.user", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> None:
+    try:
+        await ops.delete_device_group(session, user.organization_id, device_id, name)
+    except (device_svc.DeviceNotFound, ops.OperationError) as e:
+        raise _to_http(e) from e
+
+    await _audit_user_op(
+        session,
+        user=user,
+        request=request,
+        device_id=device_id,
+        action="delete_group",
+        payload={"name": name},
+    )

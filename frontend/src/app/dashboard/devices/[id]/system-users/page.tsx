@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { LinuxAccounts } from "@/components/linux-accounts";
+import { getDevice, type Device } from "@/lib/devices";
+
 import {
   listDeviceUsers,
   resetDeviceUserPassword,
@@ -17,9 +20,20 @@ export default function DeviceSystemUsersPage() {
   const qc = useQueryClient();
   const [resettingFor, setResettingFor] = useState<string | null>(null);
 
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+    enabled: Boolean(deviceId),
+  });
+
+  const isServer = device?.device_class === "server";
+
   const { data: users, isLoading, error } = useQuery<DeviceUser[]>({
     queryKey: ["device-users", deviceId],
     queryFn: () => listDeviceUsers(deviceId),
+    // The Linux view fetches this itself; skipping it here avoids two
+    // requests for the same list on every render of a server.
+    enabled: Boolean(deviceId) && !isServer,
   });
 
   const disableMut = useMutation({
@@ -27,6 +41,16 @@ export default function DeviceSystemUsersPage() {
       setDeviceUserDisabled(deviceId, username, disabled),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["device-users", deviceId] }),
   });
+
+  // Unix accounts and RouterOS users share a tab but almost nothing else:
+  // one has UIDs, supplementary groups, a login shell and a home
+  // directory, the other has a permission-bundle "group" and neither of
+  // the rest. Rendering both through one table would show empty columns to
+  // each. Placed after every hook — an early return above them would make
+  // the hook order depend on which device is loaded.
+  if (isServer) {
+    return <LinuxAccounts deviceId={deviceId} />;
+  }
 
   return (
     <div>
