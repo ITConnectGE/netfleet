@@ -12,6 +12,7 @@ import pytest
 from app.drivers import ssh_transport as ssh
 from app.drivers.base import DeviceCredentials
 from app.drivers.linux import LinuxDriver
+from helpers import ok
 
 
 @pytest.fixture
@@ -68,11 +69,3 @@ def fake_ssh(monkeypatch):
     monkeypatch.setattr(ssh, "run_many", fake._run_many)
     monkeypatch.setattr(ssh, "run", fake._run)
     return fake
-
-
-def ok(stdout: str = "", stderr: str = "") -> ssh.CommandResult:
-    return ssh.CommandResult(rc=0, stdout=stdout, stderr=stderr)
-
-
-def fail(stderr: str = "boom", rc: int = 1) -> ssh.CommandResult:
-    return ssh.CommandResult(rc=rc, stdout="", stderr=stderr)

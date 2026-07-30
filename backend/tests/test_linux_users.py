@@ -10,7 +10,7 @@ import pytest
 
 from app.drivers import ssh_transport as ssh
 from app.drivers.base import UnsupportedOperation
-from tests.conftest import fail, ok
+from helpers import fail, ok
 
 PASSWD = """root:x:0:0:root:/root:/bin/bash
 daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
