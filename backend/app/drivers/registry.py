@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from app.drivers.base import VendorDriver
+from app.drivers.linux import LinuxDriver
 from app.drivers.mikrotik import MikrotikDriver
 
 _REGISTRY: dict[str, VendorDriver] = {
     MikrotikDriver.vendor: MikrotikDriver(),
+    LinuxDriver.vendor: LinuxDriver(),
 }
 
 

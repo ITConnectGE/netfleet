@@ -18,6 +18,17 @@ from app.services import device_onboarding as onboarding_svc
 
 router = APIRouter()
 
+# Dropped from the audit payload before it is persisted. `audit._redact`
+# also catches these by name, but excluding them here means the plaintext
+# never enters the audit path at all. Keep in step with every credential
+# field on DeviceCreate / DeviceUpdate.
+_CREDENTIAL_FIELDS = {
+    "password",
+    "api_key",
+    "ssh_private_key",
+    "become_password",
+}
+
 
 @router.get("", response_model=list[DevicePublic])
 async def list_devices(
@@ -46,7 +57,7 @@ async def create_device(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     # Redact creds from audit payload
-    audit_payload = payload.model_dump(exclude={"password", "api_key"})
+    audit_payload = payload.model_dump(exclude=_CREDENTIAL_FIELDS)
     await audit_svc.write_audit(
         session,
         user_id=user.id,
@@ -92,7 +103,7 @@ async def update_device(
     except device_svc.SiteNotInOrganization as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
-    audit_payload = payload.model_dump(exclude_unset=True, exclude={"password", "api_key"})
+    audit_payload = payload.model_dump(exclude_unset=True, exclude=_CREDENTIAL_FIELDS)
     await audit_svc.write_audit(
         session,
         user_id=user.id,
@@ -179,13 +190,19 @@ async def get_onboarding_script(
     user: User = Depends(require_permission("devices", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> PlainTextResponse:
-    """Return a copy-paste RouterOS script that prepares the device for
-    NetFleet to manage it: user group + user, IP services + whitelist,
-    firewall rules. By default the stored password is embedded; pass
-    ?include_password=false to leave a placeholder instead (audited
-    either way as a credential reveal)."""
+    """Return a copy-paste script that prepares the device for NetFleet to
+    manage it.
+
+    RouterOS: user group + user, IP services + whitelist, firewall rules.
+    Linux: management user, NetFleet's public key, sudoers drop-in,
+    firewall allow for the SSH port.
+
+    By default the stored RouterOS password is embedded; pass
+    ?include_password=false to leave a placeholder instead (audited either
+    way as a credential reveal). Linux onboarding is key-based and never
+    embeds a secret."""
     try:
-        text = await onboarding_svc.generate_routeros_script(
+        text, extension = await onboarding_svc.generate_script(
             session,
             organization_id=user.organization_id,
             device_id=device_id,
@@ -211,6 +228,8 @@ async def get_onboarding_script(
         text,
         media_type="text/plain; charset=utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="netfleet-onboarding-{device_id}.rsc"',
+            "Content-Disposition": (
+                f'attachment; filename="netfleet-onboarding-{device_id}.{extension}"'
+            ),
         },
     )

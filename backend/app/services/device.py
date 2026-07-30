@@ -12,9 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import decrypt_field, encrypt_field
 from app.drivers import get_driver
 from app.drivers.base import DeviceCredentials as DriverCredentials
-from app.models.device import Device, DeviceStatus
+from app.models.device import Device, DeviceClass, DeviceStatus, DeviceTransport
 from app.models.site import Site
-from app.schemas.device import DeviceCreate, DevicePublic, DeviceUpdate, TestConnectionResult
+from app.schemas.device import (
+    SERVER_VENDORS,
+    DeviceCreate,
+    DevicePublic,
+    DeviceUpdate,
+    TestConnectionResult,
+    assert_posix_username,
+)
+from app.services.ssh_keys import generate_ed25519_keypair
 
 log = structlog.get_logger(__name__)
 
@@ -35,7 +43,21 @@ class UnknownVendor(Exception):
     pass
 
 
+class HostKeyNotPinned(Exception):
+    """An SSH device is being used before its host key has been pinned.
+
+    Pinning happens on the first successful "Test connection". Until then
+    the transport would accept *any* host key — which is the inherent TOFU
+    window, except that nothing else on the read paths ever records the
+    fingerprint, so for a device that is never explicitly tested the window
+    would stay open forever. Failing closed turns a silent MITM opportunity
+    into one visible action the operator has to take."""
+
+
 # ---------------- helpers ----------------
+
+
+_DERIVED_PUBLIC_FIELDS = {"has_password", "has_api_key", "has_ssh_key"}
 
 
 def to_public(d: Device) -> DevicePublic:
@@ -44,17 +66,45 @@ def to_public(d: Device) -> DevicePublic:
             **{
                 k: getattr(d, k)
                 for k in DevicePublic.model_fields
-                if k not in {"has_password", "has_api_key"}
+                if k not in _DERIVED_PUBLIC_FIELDS
             },
             "has_password": d.password_encrypted is not None,
             "has_api_key": d.api_key_encrypted is not None,
+            "has_ssh_key": d.ssh_private_key_encrypted is not None,
         }
     )
 
 
-def _to_driver_creds(d: Device) -> DriverCredentials:
+def _to_driver_creds(d: Device, *, allow_first_connect: bool = False) -> DriverCredentials:
+    """Build driver credentials for `d`.
+
+    `allow_first_connect` is the one escape hatch from the host-key pin
+    requirement, and only `test_connection` sets it — that is the call
+    whose whole job is to establish the pin.
+    """
+    if (
+        d.transport is DeviceTransport.SSH
+        and d.ssh_host_key_fingerprint is None
+        and not allow_first_connect
+    ):
+        raise HostKeyNotPinned(
+            f"the SSH host key for '{d.name}' has not been verified yet — "
+            "run Test connection on this device first"
+        )
+
     password = decrypt_field(d.password_encrypted) if d.password_encrypted else None
     api_key = decrypt_field(d.api_key_encrypted) if d.api_key_encrypted else None
+    ssh_key = (
+        decrypt_field(d.ssh_private_key_encrypted) if d.ssh_private_key_encrypted else None
+    )
+    ssh_passphrase = (
+        decrypt_field(d.ssh_key_passphrase_encrypted)
+        if d.ssh_key_passphrase_encrypted
+        else None
+    )
+    become_password = (
+        decrypt_field(d.become_password_encrypted) if d.become_password_encrypted else None
+    )
     return DriverCredentials(
         host=d.host,
         port=d.port,
@@ -63,6 +113,12 @@ def _to_driver_creds(d: Device) -> DriverCredentials:
         api_key=api_key,
         transport=d.transport.value,
         verify_tls=d.verify_tls,
+        ssh_port=d.ssh_port or 22,
+        ssh_private_key=ssh_key,
+        ssh_key_passphrase=ssh_passphrase,
+        become_method=d.become_method.value,
+        become_password=become_password,
+        host_key_fingerprint=d.ssh_host_key_fingerprint,
     )
 
 
@@ -122,18 +178,35 @@ async def create_device(
     if dupe is not None:
         raise DeviceNameTaken(f"device with name '{payload.name}' already exists")
 
+    ssh_private_key = payload.ssh_private_key
+    if payload.generate_ssh_key:
+        ssh_private_key = generate_ed25519_keypair(
+            comment=f"netfleet@{payload.name}"
+        ).private_pem
+
     device = Device(
         organization_id=organization_id,
         site_id=payload.site_id,
         vendor=payload.vendor,
+        device_class=(
+            DeviceClass.SERVER if payload.vendor in SERVER_VENDORS else DeviceClass.NETWORK
+        ),
         name=payload.name,
         host=payload.host,
         port=payload.port,
+        ssh_port=payload.ssh_port,
         transport=payload.transport,
         verify_tls=payload.verify_tls,
         username=payload.username,
         password_encrypted=encrypt_field(payload.password) if payload.password else None,
         api_key_encrypted=encrypt_field(payload.api_key) if payload.api_key else None,
+        ssh_private_key_encrypted=(
+            encrypt_field(ssh_private_key) if ssh_private_key else None
+        ),
+        become_method=payload.become_method,
+        become_password_encrypted=(
+            encrypt_field(payload.become_password) if payload.become_password else None
+        ),
         notes=payload.notes,
         status=DeviceStatus.UNKNOWN,
     )
@@ -154,12 +227,30 @@ async def update_device(
     if "site_id" in data and data["site_id"] is not None:
         await _assert_site_in_org(session, organization_id, data["site_id"])
 
+    # DeviceUpdate has no vendor field, so the server-only account-name rule
+    # can only be enforced here, where the device is in hand.
+    if device.vendor in SERVER_VENDORS and data.get("username"):
+        assert_posix_username(data["username"])
+
     if "password" in data:
         pw = data.pop("password")
         device.password_encrypted = encrypt_field(pw) if pw else None
     if "api_key" in data:
         k = data.pop("api_key")
         device.api_key_encrypted = encrypt_field(k) if k else None
+    if "ssh_private_key" in data:
+        key = data.pop("ssh_private_key")
+        device.ssh_private_key_encrypted = encrypt_field(key) if key else None
+    if "become_password" in data:
+        bp = data.pop("become_password")
+        device.become_password_encrypted = encrypt_field(bp) if bp else None
+    # Re-pin on the next connection. Only meaningful after a legitimate
+    # rebuild — an unexplained host-key change is what the pin is for.
+    if data.pop("reset_host_key", False):
+        device.ssh_host_key_fingerprint = None
+    # NOT NULL column — an explicit null in the payload means "leave it".
+    if data.get("become_method") is None:
+        data.pop("become_method", None)
 
     for k, v in data.items():
         setattr(device, k, v)
@@ -184,7 +275,7 @@ async def test_connection(
 ) -> TestConnectionResult:
     device = await get_device(session, organization_id, device_id)
     driver = get_driver(device.vendor)
-    creds = _to_driver_creds(device)
+    creds = _to_driver_creds(device, allow_first_connect=True)
 
     try:
         ok = await driver.test_connection(creds)
@@ -204,6 +295,15 @@ async def test_connection(
         device.model = info.model or device.model
         device.firmware = info.firmware or device.firmware
         device.serial = info.serial or device.serial
+        device.os_family = info.os_family or device.os_family
+        device.os_version = info.os_version or device.os_version
+        # Trust on first use: SSH drivers report the host key they saw. A
+        # mismatch never reaches here — the driver raises instead — so this
+        # only ever writes the first-connect value.
+        if device.ssh_host_key_fingerprint is None:
+            fingerprint = info.raw.get("host_key_fingerprint")
+            if fingerprint:
+                device.ssh_host_key_fingerprint = str(fingerprint)[:128]
         await session.flush()
         return TestConnectionResult(
             ok=True,

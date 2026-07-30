@@ -6,11 +6,13 @@
 
 ### Multi-vendor network fleet management for MSPs
 
-**Open-source, self-hosted central management** for your routers, firewalls and edge
-devices - with granular RBAC, delegated IT-support access, real-time monitoring,
-in-app updates, and one-command Ubuntu install.
+**Open-source, self-hosted central management** for your routers, firewalls, edge
+devices **and Linux servers** - with granular RBAC, delegated IT-support access,
+real-time monitoring, in-app updates, and one-command Ubuntu install.
 
 > **Shipping now**: MikroTik RouterOS driver (RouterOS 6.x and 7.x).
+> **In development**: [Linux server driver](docs/LINUX-PLAN.md) - agentless SSH, for
+> cloud VPS fleets.
 > **Roadmap**: FortiGate, Cisco IOS-XE, Ubiquiti UISP, Aruba, MIST.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -34,6 +36,11 @@ in-app updates, and one-command Ubuntu install.
 If you run an IT outsourcing company, you probably manage **dozens to hundreds of network
 devices across many client sites**, often from **multiple vendors** - MikroTik routers
 at one client, FortiGate firewalls at another, a stray Cisco somewhere.
+
+And that is only the network half. The other half is **Linux servers - both in the
+cloud and on the internal network**. A handful of VPSes at Hetzner, a few at
+DigitalOcean, plus the file server, the hypervisor and the monitoring box sitting in
+a client's own LAN. Each one its own SSH session, its own patch level, its own firewall.
 
 The tools you have all fall short:
 
@@ -105,6 +112,47 @@ That's what **NetFleet** does.
 - Daily scheduled backups (SFTP-pulled to NetFleet) with retention + on-demand restore
 - Firmware: nightly fleet-wide update check, per-device upgrade trigger,
   per-device auto-upgrade window (UTC hour range)
+
+### Linux and cloud VPS fleet (in development - see [LINUX-PLAN.md](docs/LINUX-PLAN.md))
+
+Your servers do not live in one place. Some are scattered across Hetzner, DigitalOcean,
+Contabo, AWS and that one VPS nobody remembers paying for. The rest sit **inside your
+clients' internal networks** - file servers, hypervisors, database boxes, the Zabbix VM,
+appliances with no public IP at all. Today that means N SSH sessions, N tmux panes, and
+no idea which box is three kernel CVEs behind.
+
+NetFleet treats a Linux host as just another device in the same fleet as your routers -
+same tenant/site hierarchy, same RBAC, same audit log:
+
+- **Agentless.** Nothing is installed on your servers. Pure SSH, key or password auth,
+  unprivileged user + `sudo`. Works on any host the moment you can SSH into it -
+  no ports to open, no agent to keep updated, no vendor lock-in.
+- **Cloud and internal alike.** A public VPS and a `10.0.0.x` file server behind a
+  client's router are the same kind of device here. Internal hosts need no public IP
+  and no inbound port-forward - NetFleet reaches them the same way you already do,
+  over your management network or the WireGuard tunnel it set up on the router.
+- **One command, every server, at once.** Select 40 hosts across 6 providers, run the
+  command, get per-host exit codes and output in one view. Free-form execution is
+  behind its own permission that no default role holds; a curated safe-command
+  catalog covers day-to-day L1 work.
+- **All your alerts on one screen.** Failed systemd units, disks near full, pending
+  security updates, reboot-required flags, journald errors - aggregated across the
+  whole fleet instead of hidden inside each box.
+- **Firewall management.** nftables rules read and edited from the UI, with a
+  mandatory lockout guard: every ruleset change is applied behind a rollback timer
+  and reverts itself unless you explicitly confirm you still have access.
+- **Patch management.** Nightly fleet-wide scan for pending package updates
+  (security count broken out), one-click or scheduled upgrades inside a maintenance
+  window - reusing the same machinery as router firmware upgrades.
+- **Services, storage, processes, users.** systemd unit control, disk and inode usage,
+  top processes, host accounts and `authorized_keys` - all RBAC-scoped and audited.
+- **Backups.** `/etc` archive plus a package manifest, on the same schedule and
+  retention policy as your router backups.
+- **WireGuard.** A Linux host can be a site-to-site tunnel endpoint, so
+  Linux <-> MikroTik tunnels are built from the same UI.
+
+Because it is the same RBAC engine, a role like *"restart services and read logs on
+Client A's web servers only"* works exactly like *"edit NAT on Client A's routers only"*.
 
 ### Platform
 
@@ -218,6 +266,7 @@ auto-hides sections that the active device's driver does not expose.
 |---|---|---|
 | **MikroTik (RouterOS 7.x)** | shipped | `librouteros` (API) + paramiko (SFTP) |
 | **MikroTik (RouterOS 6.x)** | shipped | same driver, both ROS majors |
+| **Linux (Debian / Ubuntu / RHEL / Rocky)** | in development | agentless SSH (paramiko), `ip -j` / systemd / nftables |
 | **FortiGate (FortiOS)**     | roadmap | FortiOS REST API |
 | **Cisco (IOS-XE / NX-OS)**  | roadmap | RESTCONF / NETCONF |
 | **Ubiquiti (UISP / UniFi)** | roadmap | UISP API |
@@ -291,6 +340,9 @@ Shipped:
 
 Up next:
 
+- Phase 12 - **Linux servers, agentless** (cloud VPS fleets): SSH driver, systemd /
+  packages / storage / journald, fleet-wide command runner, nftables with rollback
+  guard, `/etc` backups - full plan in [docs/LINUX-PLAN.md](docs/LINUX-PLAN.md)
 - Phase 9 - i18n (ka/ru/en) + email notifications (failed backups, leaked
   secrets unrotated past N days, firmware updates available)
 - FortiGate driver (FortiOS REST)

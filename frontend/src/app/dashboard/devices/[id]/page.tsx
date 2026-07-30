@@ -158,15 +158,20 @@ export default function DeviceDetailPage() {
             type="button"
             onClick={() => {
               const safeName = device.name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+              const ext = device.device_class === "server" ? "sh" : "rsc";
               downloadAuthed(
                 `/api/v1/devices/${device.id}/onboarding-script`,
-                `netfleet-onboarding-${safeName}.rsc`,
+                `netfleet-onboarding-${safeName}.${ext}`,
               ).catch((e: Error) => toast.error("Download failed", e.message));
             }}
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent"
-            title="Download the RouterOS onboarding script (.rsc) that prepares this device for NetFleet management"
+            title={
+              device.device_class === "server"
+                ? "Download the Linux onboarding script (.sh) that creates the management user, installs NetFleet's key and opens the firewall"
+                : "Download the RouterOS onboarding script (.rsc) that prepares this device for NetFleet management"
+            }
           >
-            Onboarding .rsc
+            Onboarding .{device.device_class === "server" ? "sh" : "rsc"}
           </button>
           <button
             onClick={() => {

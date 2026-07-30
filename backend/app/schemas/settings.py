@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field
+import ipaddress
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class SmtpSettingsPublic(BaseModel):
@@ -106,6 +108,28 @@ class OrgInfoPublic(BaseModel):
 
 class OrgInfoUpdate(BaseModel):
     netfleet_external_ips: str | None = Field(default=None, max_length=512)
+
+    @field_validator("netfleet_external_ips")
+    @classmethod
+    def _validate_ips(cls, v: str | None) -> str | None:
+        """Each entry ends up in a firewall rule inside the generated
+        onboarding scripts, so it has to be an address or CIDR — not an
+        arbitrary string that happens to sit in a shell variable."""
+        if not v or not v.strip():
+            return v
+        cleaned: list[str] = []
+        for part in v.split(","):
+            entry = part.strip()
+            if not entry:
+                continue
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as e:
+                raise ValueError(
+                    f"'{entry}' is not a valid IP address or CIDR range"
+                ) from e
+            cleaned.append(entry)
+        return ",".join(cleaned)
 
 
 class SmsProviderPreset(BaseModel):

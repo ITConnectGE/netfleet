@@ -120,6 +120,27 @@ A single new worker (`app/workers/scheduler.py`) drives all daily jobs:
 
 ---
 
+## Phase 12 — Linux servers (agentless)
+
+Bring Linux hosts — bare metal, VMs, and cloud VPSes — into the same fleet as
+network devices. Agentless: every operation is an on-demand SSH command, no
+daemon installed on managed hosts.
+
+Detailed stage-by-stage breakdown: **[LINUX-PLAN.md](LINUX-PLAN.md)**.
+
+- [x] L1 — Schema + credentials foundation (`device_class`, SSH key, sudo, host-key pin) — M
+- [x] L1b — Onboarding: server-side keypair + `sudo bash` script (user, key, sudoers, firewall) — M
+- [x] L2 — SSH transport layer (`drivers/ssh_transport.py`) — M
+- [x] L3 — `LinuxDriver` read-only core (system info, interfaces, addresses, routes, ARP) — L
+- [ ] L4 — Linux read capabilities (systemd, packages, disk, processes, journald) — L
+- [ ] L5 — Write ops (service control, package upgrades, host users) — M
+- [ ] L6 — Command runner + bulk execution across the fleet — M
+- [ ] L7 — Backups (`/etc` archive + package manifest, reuses Phase 7a retention) — M
+- [ ] L8 — nftables firewall with mandatory lockout guard + WireGuard — L
+- [ ] L9 — Web terminal (optional) — M
+
+---
+
 ## Future / wishlist
 
 - FortiGate vendor driver (FortiOS REST)

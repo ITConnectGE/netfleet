@@ -3,7 +3,14 @@
 from app.core.database import Base
 from app.models.access_request import AccessRequest, AccessRequestGrant, AccessRequestStatus
 from app.models.audit_log import AuditLog, AuditOutcome
-from app.models.device import Device, DeviceStatus, DeviceTransport
+from app.models.device import (
+    BecomeMethod,
+    Device,
+    DeviceClass,
+    DeviceStatus,
+    DeviceTransport,
+    OsFamily,
+)
 from app.models.device_backup import BackupSource, BackupStatus, DeviceBackup
 from app.models.device_log_event import DeviceLogEvent, EventSeverity, EventSource
 from app.models.host_metric import HostMetricSample
@@ -27,8 +34,10 @@ __all__ = [
     "AuthMethod",
     "BackupSource",
     "BackupStatus",
+    "BecomeMethod",
     "Device",
     "DeviceBackup",
+    "DeviceClass",
     "DeviceLogEvent",
     "DeviceStatus",
     "DeviceTransport",
@@ -36,6 +45,7 @@ __all__ = [
     "EventSource",
     "HostMetricSample",
     "Organization",
+    "OsFamily",
     "Permission",
     "PermissionAction",
     "RefreshToken",
