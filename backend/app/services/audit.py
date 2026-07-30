@@ -25,11 +25,37 @@ _SECRET_KEYS = frozenset(
     }
 )
 
+# Substrings that mark a field as secret wherever they appear in its name.
+# Exact-match alone is fail-open: it silently misses every prefixed or
+# suffixed variant a new schema introduces (`become_password`,
+# `ssh_private_key`, `smtp_password`), and the miss is invisible until
+# someone reads the audit log. Matching on substrings makes the next
+# credential field added anywhere safe by default.
+_SECRET_SUBSTRINGS = (
+    "password",
+    "passwd",
+    "secret",
+    "api_key",
+    "apikey",
+    "token",
+    "private_key",
+    "privatekey",
+    "passphrase",
+    "credential",
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    lowered = key.lower()
+    if lowered in _SECRET_KEYS:
+        return True
+    return any(marker in lowered for marker in _SECRET_SUBSTRINGS)
+
 
 def _redact(payload: Any) -> Any:
     if isinstance(payload, dict):
         return {
-            k: ("***REDACTED***" if k.lower() in _SECRET_KEYS else _redact(v))
+            k: ("***REDACTED***" if _is_secret_key(k) else _redact(v))
             for k, v in payload.items()
         }
     if isinstance(payload, list):

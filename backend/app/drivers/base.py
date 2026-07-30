@@ -65,6 +65,11 @@ class SystemInfo:
     uptime_seconds: int | None = None
     cpu_load_pct: float | None = None
     memory_used_pct: float | None = None
+    # Servers only. On a Linux host `firmware` carries the kernel release
+    # and these carry the distro, so the device row can show something
+    # more useful than "6.8.0-generic".
+    os_family: str | None = None
+    os_version: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -541,6 +546,17 @@ class DeviceCredentials:
     api_key: str | None = None
     transport: str = "api"   # api | rest | ssh | netconf
     verify_tls: bool = True
+
+    # SSH-transport fields. Ignored by API-transport drivers, so adding
+    # them costs the MikroTik driver nothing. `ssh_port` is carried here
+    # rather than passed per-call because an SSH driver needs it on every
+    # single operation, not just backups.
+    ssh_port: int = 22
+    ssh_private_key: str | None = None       # OpenSSH PEM text
+    ssh_key_passphrase: str | None = None
+    become_method: str = "none"              # none | sudo
+    become_password: str | None = None
+    host_key_fingerprint: str | None = None  # pinned value; None = pin on first connect
 
 
 @runtime_checkable

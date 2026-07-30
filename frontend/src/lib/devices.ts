@@ -2,12 +2,19 @@ import { api, readErrorMessage } from "@/lib/api";
 
 export type DeviceStatus = "unknown" | "online" | "offline" | "error";
 export type DeviceTransport = "api" | "rest" | "ssh" | "netconf";
+export type DeviceClass = "network" | "server";
+export type BecomeMethod = "none" | "sudo";
+
+/** Vendors whose devices are servers rather than network gear. Mirrors
+ *  SERVER_VENDORS in the backend's device schema. */
+export const SERVER_VENDORS = new Set(["linux"]);
 
 export interface Device {
   id: string;
   organization_id: string;
   site_id: string;
   vendor: string;
+  device_class: DeviceClass;
   name: string;
   host: string;
   port: number;
@@ -17,9 +24,14 @@ export interface Device {
   username: string;
   has_password: boolean;
   has_api_key: boolean;
+  has_ssh_key: boolean;
+  become_method: BecomeMethod;
+  ssh_host_key_fingerprint: string | null;
   model: string | null;
   serial: string | null;
   firmware: string | null;
+  os_family: string | null;
+  os_version: string | null;
   firmware_available: string | null;
   firmware_checked_at: string | null;
   routerboard_current: string | null;
@@ -45,6 +57,12 @@ export interface DeviceCreate {
   username: string;
   password?: string | null;
   api_key?: string | null;
+  /** SSH vendors only: have NetFleet generate the keypair. The public half
+   *  is handed to the onboarding script; the private half never leaves the DB. */
+  generate_ssh_key?: boolean;
+  ssh_private_key?: string | null;
+  become_method?: BecomeMethod;
+  become_password?: string | null;
   notes?: string | null;
 }
 
@@ -58,6 +76,11 @@ export interface DeviceUpdate {
   username?: string;
   password?: string | null;
   api_key?: string | null;
+  ssh_private_key?: string | null;
+  become_method?: BecomeMethod;
+  become_password?: string | null;
+  /** Clears the pinned host key so the next connection re-pins it. */
+  reset_host_key?: boolean;
   site_id?: string;
   is_enabled?: boolean;
   notes?: string | null;

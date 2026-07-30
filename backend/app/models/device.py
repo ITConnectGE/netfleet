@@ -5,7 +5,16 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,8 +36,36 @@ class DeviceStatus(StrEnum):
 class DeviceTransport(StrEnum):
     API = "api"          # native RouterOS API (8728/8729)
     REST = "rest"        # RouterOS 7.x REST over HTTPS
-    SSH = "ssh"          # future — for vendors without an API
+    SSH = "ssh"          # Linux hosts, and vendors without an API
     NETCONF = "netconf"  # future — Cisco / Juniper
+
+
+class DeviceClass(StrEnum):
+    """Network gear vs. servers. Both live in `devices` and share the
+    tenant/site tree, RBAC scoping and audit log; they differ only in
+    which UI pages and driver capabilities apply."""
+
+    NETWORK = "network"
+    SERVER = "server"
+
+
+class OsFamily(StrEnum):
+    """Known values for `Device.os_family`. Stored as a plain string, not
+    a DB enum — it is discovered data and every new distro would
+    otherwise cost a migration."""
+
+    DEBIAN = "debian"      # Debian, Ubuntu, Mint
+    RHEL = "rhel"          # RHEL, Rocky, Alma, CentOS, Fedora
+    ALPINE = "alpine"
+    SUSE = "suse"
+    UNKNOWN = "unknown"
+
+
+class BecomeMethod(StrEnum):
+    """How the driver escalates privilege after logging in."""
+
+    NONE = "none"   # already root, or the command needs no escalation
+    SUDO = "sudo"
 
 
 class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
@@ -53,6 +90,12 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     )
 
     vendor: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    device_class: Mapped[DeviceClass] = mapped_column(
+        Enum(DeviceClass, name="device_class", values_callable=lambda c: [e.value for e in c]),
+        nullable=False,
+        default=DeviceClass.NETWORK,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=8728)
@@ -72,10 +115,31 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     password_encrypted: Mapped[str | None] = mapped_column(String(1024))
     api_key_encrypted: Mapped[str | None] = mapped_column(String(1024))
 
+    # SSH key auth (Linux hosts). NetFleet generates the pair itself during
+    # onboarding; the public half goes into the onboarding script and only
+    # the private half is stored here.
+    ssh_private_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    ssh_key_passphrase_encrypted: Mapped[str | None] = mapped_column(String(1024))
+    become_method: Mapped[BecomeMethod] = mapped_column(
+        Enum(
+            BecomeMethod,
+            name="device_become_method",
+            values_callable=lambda c: [e.value for e in c],
+        ),
+        nullable=False,
+        default=BecomeMethod.NONE,
+    )
+    become_password_encrypted: Mapped[str | None] = mapped_column(String(1024))
+    # Trust-on-first-use: pinned on the first successful connect. A later
+    # mismatch fails the connection rather than silently accepting a new key.
+    ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(String(128))
+
     # discovered metadata (populated on first successful connection)
     model: Mapped[str | None] = mapped_column(String(128))
     serial: Mapped[str | None] = mapped_column(String(128))
     firmware: Mapped[str | None] = mapped_column(String(64))
+    os_family: Mapped[str | None] = mapped_column(String(32))
+    os_version: Mapped[str | None] = mapped_column(String(64))
 
     # runtime status — updated by worker poller and test-connection calls
     status: Mapped[DeviceStatus] = mapped_column(

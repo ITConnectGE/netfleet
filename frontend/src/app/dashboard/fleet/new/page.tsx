@@ -11,6 +11,8 @@ import { downloadAuthed } from "@/lib/api";
 import {
   createDevice,
   getOnboardingScript,
+  SERVER_VENDORS,
+  testDeviceConnection,
   type Device,
 } from "@/lib/devices";
 import { listDrivers, type Driver } from "@/lib/drivers";
@@ -476,7 +478,11 @@ function DeviceStep({
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [verifyTls, setVerifyTls] = useState(false);
+  const [useSudo, setUseSudo] = useState(true);
+  const [sshAuth, setSshAuth] = useState<"generate" | "password">("generate");
   const [error, setError] = useState<string | null>(null);
+
+  const isServer = SERVER_VENDORS.has(vendor);
 
   useEffect(() => {
     if (!drivers || drivers.length === 0) return;
@@ -485,22 +491,48 @@ function DeviceStep({
     }
   }, [drivers, vendor]);
 
+  // Switching vendor rewrites the port and the default account, because a
+  // RouterOS 'admin' on 8728 and a Linux 'netfleet' on 22 share nothing.
   useEffect(() => {
-    if (vendor === "mikrotik") setPort(8728);
+    if (SERVER_VENDORS.has(vendor)) {
+      setPort(22);
+      setUsername((u) => (u === "admin" ? "netfleet" : u));
+    } else if (vendor === "mikrotik") {
+      setPort(8728);
+      setUsername((u) => (u === "netfleet" ? "admin" : u));
+    }
   }, [vendor]);
 
   const m = useMutation({
     mutationFn: () =>
-      createDevice({
-        site_id: site.id,
-        name,
-        vendor,
-        host,
-        port,
-        username,
-        password: password || null,
-        verify_tls: verifyTls,
-      }),
+      createDevice(
+        isServer
+          ? {
+              site_id: site.id,
+              name,
+              vendor,
+              host,
+              // The backend keeps port and ssh_port in step for servers;
+              // sending both avoids depending on that as a side effect.
+              port,
+              ssh_port: port,
+              transport: "ssh",
+              username,
+              password: sshAuth === "password" ? password || null : null,
+              generate_ssh_key: sshAuth === "generate",
+              become_method: useSudo ? "sudo" : "none",
+            }
+          : {
+              site_id: site.id,
+              name,
+              vendor,
+              host,
+              port,
+              username,
+              password: password || null,
+              verify_tls: verifyTls,
+            },
+      ),
     onSuccess: (d) => onCreated(d),
     onError: (e: Error) => setError(e.message),
   });
@@ -594,27 +626,78 @@ function DeviceStep({
               autoComplete="off"
               className={input}
             />
+            {isServer && (
+              <span className="block text-xs font-normal text-muted-foreground">
+                The onboarding script creates this account on the server.
+              </span>
+            )}
           </label>
-          <label className="block space-y-1 text-sm font-medium">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              className={input}
-            />
-          </label>
+          {isServer ? (
+            <label className="block space-y-1 text-sm font-medium">
+              Authentication
+              <select
+                value={sshAuth}
+                onChange={(e) =>
+                  setSshAuth(e.target.value as "generate" | "password")
+                }
+                className={input}
+              >
+                <option value="generate">Generate SSH key (recommended)</option>
+                <option value="password">Password</option>
+              </select>
+              <span className="block text-xs font-normal text-muted-foreground">
+                {sshAuth === "generate"
+                  ? "NetFleet creates the keypair. The public half goes into the onboarding script; the private half never leaves this server."
+                  : "Password auth is weaker and many cloud images disable it by default."}
+              </span>
+            </label>
+          ) : (
+            <label className="block space-y-1 text-sm font-medium">
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                className={input}
+              />
+            </label>
+          )}
+          {isServer && sshAuth === "password" && (
+            <label className="block space-y-1 text-sm font-medium">
+              Password
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                className={input}
+              />
+            </label>
+          )}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={verifyTls}
-            onChange={(e) => setVerifyTls(e.target.checked)}
-            className="size-4 rounded"
-          />
-          Reject untrusted TLS certificates
-        </label>
+        {isServer ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={useSudo}
+              onChange={(e) => setUseSudo(e.target.checked)}
+              className="size-4 rounded"
+            />
+            Escalate with sudo (uncheck only when connecting directly as root)
+          </label>
+        ) : (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={verifyTls}
+              onChange={(e) => setVerifyTls(e.target.checked)}
+              className="size-4 rounded"
+            />
+            Reject untrusted TLS certificates
+          </label>
+        )}
         <div className="flex justify-end">
           <button
             type="submit"
@@ -649,6 +732,21 @@ function OnboardingStep({
     () => device.name.replace(/[^a-z0-9-]+/gi, "-").toLowerCase(),
     [device.name],
   );
+  const isServer = device.device_class === "server";
+  const ext = isServer ? "sh" : "rsc";
+
+  // For SSH devices this is not just a convenience: the first successful
+  // test is what pins the host key, and every other endpoint refuses to
+  // talk to an unpinned device. Running it here means the operator leaves
+  // the wizard with a verified host rather than a 409 on the next page.
+  const test = useMutation({
+    mutationFn: () => testDeviceConnection(device.id),
+    onSuccess: (r) =>
+      r.ok
+        ? toast.success("Connected", `${r.identity ?? device.name} is online`)
+        : toast.error("Not connected yet", r.error ?? "unknown error"),
+    onError: (e: Error) => toast.error("Test failed", e.message),
+  });
 
   return (
     <section className="rounded-lg border border-emerald-300 bg-emerald-50/40 p-5">
@@ -657,12 +755,24 @@ function OnboardingStep({
           <h2 className="text-base font-semibold text-emerald-900">
             Device added — finish onboarding
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Open WinBox / SSH on <span className="font-medium">{device.name}</span>,
-            paste the script (or upload the .rsc), then click&nbsp;
-            <span className="font-medium">Open device</span> below to watch the
-            first connection turn green.
-          </p>
+          {isServer ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Copy this script onto{" "}
+              <span className="font-medium">{device.name}</span> and run{" "}
+              <code className="rounded bg-black/10 px-1 font-mono text-xs">
+                sudo bash netfleet-onboarding-{safeName}.sh
+              </code>
+              , then click <span className="font-medium">Open device</span> below
+              to watch the first connection turn green. It is safe to re-run.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Open WinBox / SSH on <span className="font-medium">{device.name}</span>,
+              paste the script (or upload the .rsc), then click&nbsp;
+              <span className="font-medium">Open device</span> below to watch the
+              first connection turn green.
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -700,14 +810,36 @@ function OnboardingStep({
               onClick={() =>
                 downloadAuthed(
                   `/api/v1/devices/${device.id}/onboarding-script`,
-                  `netfleet-onboarding-${safeName}.rsc`,
+                  `netfleet-onboarding-${safeName}.${ext}`,
                 ).catch((e: Error) => toast.error("Download failed", e.message))
               }
               className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
             >
-              Download .rsc
+              Download .{ext}
+            </button>
+            <button
+              type="button"
+              onClick={() => test.mutate()}
+              disabled={test.isPending}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-50"
+              title={
+                isServer
+                  ? "Run this after the script. The first successful connection pins the server's SSH host key."
+                  : "Check that NetFleet can reach the device"
+              }
+            >
+              {test.isPending ? "Testing…" : "Test connection"}
             </button>
           </div>
+          {isServer && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Run <span className="font-medium">Test connection</span> once the
+              script has finished. It pins this server&apos;s SSH host key —
+              until then NetFleet refuses to run anything else against it, and
+              afterwards a changed host key fails loudly instead of being
+              accepted silently.
+            </p>
+          )}
           <pre className="mt-3 max-h-[40vh] overflow-auto rounded-md border border-border bg-zinc-950 p-3 font-mono text-[11px] text-zinc-100">
             {script}
           </pre>

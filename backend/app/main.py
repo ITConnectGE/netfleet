@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, unhandled_exception_handler
+from app.services.device import HostKeyNotPinned
 
 configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
 log = structlog.get_logger()
@@ -64,6 +65,15 @@ app.add_middleware(RequestIdMiddleware)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(v1_router, prefix="/api/v1")
+
+
+@app.exception_handler(HostKeyNotPinned)
+async def _host_key_not_pinned(request: Request, exc: HostKeyNotPinned) -> JSONResponse:
+    # Raised from `_to_driver_creds`, which every driver-mediated endpoint
+    # funnels through. Handled centrally so each of the ~60 call sites does
+    # not have to catch it, and so it reads as an actionable 409 rather than
+    # an opaque 500.
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.exception_handler(RequestValidationError)
