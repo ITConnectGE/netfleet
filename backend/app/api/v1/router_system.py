@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields as dataclass_fields
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -885,16 +887,22 @@ async def get_interface_configs(
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [InterfaceConfigPublic(**vars(c)) for c in cfgs if not _drop_raw(c)]
+    return [InterfaceConfigPublic(**_fields(c, drop={"raw"})) for c in cfgs]
 
 
-def _drop_raw(c: object) -> bool:
-    # `vars()` on a slots dataclass includes `raw`, which the public schema
-    # does not declare and pydantic would reject. Strip it in place instead
-    # of hand-listing twenty fields that would then drift.
-    if hasattr(c, "raw"):
-        c.raw = {}  # type: ignore[attr-defined]
-    return False
+def _fields(obj: Any, *, drop: set[str] = frozenset()) -> dict[str, Any]:
+    """Dataclass instance → dict, minus fields the public schema omits.
+
+    `dataclasses.fields` rather than `vars()`: every driver dataclass is
+    declared with `slots=True`, so instances have no `__dict__` and
+    `vars()` raises TypeError. Listing the fields by hand instead would
+    drift the moment a dataclass gains one.
+    """
+    return {
+        f.name: getattr(obj, f.name)
+        for f in dataclass_fields(obj)
+        if f.name not in drop
+    }
 
 
 @router.get("/{device_id}/processes", response_model=list[ProcessPublic])
@@ -913,7 +921,7 @@ async def get_processes(
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [ProcessPublic(**vars(p)) for p in procs]
+    return [ProcessPublic(**_fields(p)) for p in procs]
 
 
 @router.get("/{device_id}/scheduled-jobs", response_model=list[ScheduledJobPublic])
@@ -935,4 +943,4 @@ async def get_scheduled_jobs(
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
-    return [ScheduledJobPublic(**vars(j)) for j in jobs]
+    return [ScheduledJobPublic(**_fields(j)) for j in jobs]
