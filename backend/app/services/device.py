@@ -43,6 +43,12 @@ class UnknownVendor(Exception):
     pass
 
 
+class InvalidDeviceField(Exception):
+    """A field failed a rule the schema could not check on its own —
+    currently only the server account-name rule, which needs the device's
+    vendor and so cannot live on `DeviceUpdate`."""
+
+
 class HostKeyNotPinned(Exception):
     """An SSH device is being used before its host key has been pinned.
 
@@ -180,9 +186,12 @@ async def create_device(
 
     ssh_private_key = payload.ssh_private_key
     if payload.generate_ssh_key:
-        ssh_private_key = generate_ed25519_keypair(
-            comment=f"netfleet@{payload.name}"
-        ).private_pem
+        # A fixed comment, not the device name. Only the private half is
+        # stored, and its comment is never read: the onboarding script
+        # re-derives the public key with a UUID-based comment. Deriving it
+        # from the name here bought nothing and rejected every display name
+        # containing a space.
+        ssh_private_key = generate_ed25519_keypair(comment="netfleet").private_pem
 
     device = Device(
         organization_id=organization_id,
@@ -228,9 +237,13 @@ async def update_device(
         await _assert_site_in_org(session, organization_id, data["site_id"])
 
     # DeviceUpdate has no vendor field, so the server-only account-name rule
-    # can only be enforced here, where the device is in hand.
+    # can only be enforced here, where the device is in hand. Re-raised as a
+    # typed error: a bare ValueError out of a service becomes a 500.
     if device.vendor in SERVER_VENDORS and data.get("username"):
-        assert_posix_username(data["username"])
+        try:
+            assert_posix_username(data["username"])
+        except ValueError as e:
+            raise InvalidDeviceField(str(e)) from e
 
     if "password" in data:
         pw = data.pop("password")

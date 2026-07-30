@@ -51,7 +51,7 @@ async def create_device(
         device = await device_svc.create_device(session, user.organization_id, payload)
     except device_svc.UnknownVendor as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except device_svc.SiteNotInOrganization as e:
+    except (device_svc.SiteNotInOrganization, device_svc.InvalidDeviceField) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except device_svc.DeviceNameTaken as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
@@ -100,7 +100,7 @@ async def update_device(
         device = await device_svc.update_device(session, user.organization_id, device_id, payload)
     except device_svc.DeviceNotFound as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
-    except device_svc.SiteNotInOrganization as e:
+    except (device_svc.SiteNotInOrganization, device_svc.InvalidDeviceField) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     audit_payload = payload.model_dump(exclude_unset=True, exclude=_CREDENTIAL_FIELDS)
