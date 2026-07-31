@@ -15,6 +15,7 @@ from app.models.device_backup import BackupSource, BackupStatus, DeviceBackup
 from app.models.device_log_event import DeviceLogEvent, EventSeverity, EventSource
 from app.models.host_metric import HostMetricSample
 from app.models.organization import Organization
+from app.models.package_run import PackageRun, PackageRunKind, PackageRunState
 from app.models.refresh_token import RefreshToken
 from app.models.role import AssignmentScope, Permission, PermissionAction, Role, RoleAssignment
 from app.models.secret_audit import SecretKind, SecretReveal, SecretRotation
@@ -45,6 +46,9 @@ __all__ = [
     "EventSource",
     "HostMetricSample",
     "Organization",
+    "PackageRun",
+    "PackageRunKind",
+    "PackageRunState",
     "OsFamily",
     "Permission",
     "PermissionAction",

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.v1.router_system import _fields
+from app.api.v1._dataclasses import fields as _fields
 from app.drivers import base
+from app.schemas import packages as pkg_schemas
 from app.schemas import router_system as schemas
 
 # Each pair is a dataclass the driver returns and the model the API builds
@@ -34,6 +35,7 @@ PAIRS = [
         schemas.DirEntryUsagePublic,
         set(),
     ),
+    (base.PackageUpdate(name="nginx"), pkg_schemas.PackageUpdatePublic, set()),
 ]
 
 

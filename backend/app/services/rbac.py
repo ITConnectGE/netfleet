@@ -40,6 +40,7 @@ APP_SECTIONS: dict[str, list[str]] = {
     "devices": ["read", "write", "execute"],   # execute = test_connection / reboot
     "users": ["read", "write"],
     "roles": ["read", "write"],
+    "pkg.manager": ["read", "write", "execute"],
     "audit": ["read"],
     "events": ["read", "write"],
     "settings": ["read", "write"],

@@ -11,11 +11,12 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import __version__
 from app.api.v1 import router as v1_router
 from app.core.config import settings
-from app.core.database import close_db, init_db
+from app.core.database import close_db, init_db, session_factory
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, unhandled_exception_handler
 from app.drivers.base import UnsupportedOperation
 from app.services.device import HostKeyNotPinned
+from app.services.packages import mark_orphaned_runs
 
 configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
 log = structlog.get_logger()
@@ -25,6 +26,19 @@ log = structlog.get_logger()
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     log.info("netfleet.startup", version=__version__, env=settings.ENV)
     await init_db()
+
+    # Package runs live in a background task, so an API restart orphans any
+    # that were in flight. The command may well have finished on the host —
+    # what ended was our ability to watch it — but a row that still claims
+    # to be running months later is worse than one that admits as much.
+    try:
+        async with session_factory()() as session:
+            closed = await mark_orphaned_runs(session)
+        if closed:
+            log.info("packages.orphaned_runs_closed", count=closed)
+    except Exception as e:  # noqa: BLE001 - never block startup on housekeeping
+        log.warning("packages.orphan_sweep_failed", error=str(e))
+
     yield
     await close_db()
     log.info("netfleet.shutdown")

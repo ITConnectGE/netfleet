@@ -17,6 +17,7 @@ from app.api.v1 import (
     network,
     notifications,
     oidc,
+    packages,
     queues,
     reports,
     roles,
@@ -49,6 +50,7 @@ router.include_router(router_system.router, prefix="/devices", tags=["router-sys
 router.include_router(network.router, prefix="/devices", tags=["network"])
 router.include_router(queues.router, prefix="/devices", tags=["queues"])
 router.include_router(backups.router, prefix="/devices", tags=["backups"])
+router.include_router(packages.router, prefix="/devices", tags=["packages"])
 router.include_router(firmware.router, prefix="", tags=["firmware"])
 router.include_router(bulk.router, prefix="/bulk", tags=["bulk"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])

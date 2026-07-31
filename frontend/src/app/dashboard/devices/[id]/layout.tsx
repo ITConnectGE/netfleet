@@ -73,6 +73,7 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
     { href: `${base}/queues`, label: "Queues", needs: ["queue.simple"] },
     { href: `${base}/storage`, label: "Storage", needs: ["disk.usage"] },
     { href: `${base}/processes`, label: "Processes", needs: ["proc.list"] },
+    { href: `${base}/packages`, label: "Packages", needs: ["pkg.manager"] },
     { href: `${base}/scheduled`, label: "Scheduled", needs: ["cron"] },
     { href: `${base}/logs`, label: "Logs", needs: ["system.log"] },
     { href: `${base}/system`, label: "System", needs: ["system.info"] },

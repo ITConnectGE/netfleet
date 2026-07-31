@@ -275,16 +275,25 @@ the host over, and none of it ships before the rollback guard does.
 
 **Safe — next up**
 
+- [x] Host users and groups — shipped in 0.48.0. `getent`, `useradd`,
+      `groupadd`, `chpasswd`, `usermod`; `root` and the NetFleet management
+      account refused outright.
+- [x] Packages — shipped in 0.49.0. List with security counts, refresh,
+      upgrade (all or selected), reboot-required. Long runs are tracked in
+      `device_package_runs` rather than held open in an HTTP request.
 - [ ] Neighbour discovery: sweep the interface's own subnet (or one typed in)
       and read the ARP cache back. `nmap`/`arp-scan` are usually absent, so
       this is a bounded ping sweep, rate-limited, and never a background job.
-- [ ] Host users and groups: list, create, set password, add to group, lock.
-      `getent`, `useradd`, `groupadd`, `chpasswd`, `usermod`. Refuse to touch
-      `root`, the NetFleet management account, or any UID below 1000 without
-      an explicit override.
+- [ ] Storage: list files alongside directories, download a file, upload into
+      a directory. The read side is a small addition to the tree; the transfer
+      side is a file manager running as root and needs its own permission,
+      size ceilings and streaming — not a bolt-on to the current endpoints.
 - [ ] Command runner: a curated catalog first (disk usage, failed units, last
       auth failures), free-form behind its own permission that no default role
       holds. Full argv + truncated output into the audit log.
+- [ ] Scheduled upgrades: reuse the existing `auto_upgrade_window_*` columns
+      and the nightly scheduler so patching happens in a maintenance window
+      rather than whenever someone clicks.
 
 **Requires the rollback guard — L8**
 

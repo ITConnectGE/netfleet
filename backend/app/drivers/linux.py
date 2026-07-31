@@ -39,6 +39,8 @@ from app.drivers.base import (
     IpAddress,
     IpRoute,
     NtpClient,
+    PackageState,
+    PackageUpdate,
     ProcessInfo,
     ScheduledJob,
     SupportsCapabilityFallback,
@@ -141,6 +143,7 @@ class LinuxDriver(SupportsCapabilityFallback):
         Capability.DISK_USAGE,
         Capability.PROC_LIST,
         Capability.CRON,
+        Capability.PKG_MANAGER,
         Capability.SYSTEM_USER,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
@@ -577,6 +580,159 @@ class LinuxDriver(SupportsCapabilityFallback):
             if len(out) >= n:
                 break
         return out
+
+    # ---------------------------------------------------------- packages
+
+    async def _package_manager(self, creds: DeviceCredentials) -> str:
+        """Which package manager the host actually has.
+
+        Detected rather than derived from os_family: a Fedora box has dnf,
+        an old CentOS has yum, and asking the host is cheaper than being
+        wrong.
+        """
+        result = await ssh.run(
+            creds,
+            [
+                "sh", "-c",
+                "for m in apt-get dnf yum zypper apk; do "
+                'command -v $m >/dev/null 2>&1 && { echo $m; exit 0; }; done; echo unknown',
+            ],
+            timeout=15,
+        )
+        found = (result.stdout or "").strip().splitlines()
+        return (found[0] if found else "unknown").replace("apt-get", "apt")
+
+    async def packages_state(self, creds: DeviceCredentials) -> PackageState:
+        manager = await self._package_manager(creds)
+        if manager not in {"apt", "dnf", "yum"}:
+            raise UnsupportedOperation(
+                f"package management for '{manager}' is not implemented yet"
+            )
+
+        if manager == "apt":
+            listing = ssh.Command(
+                # `apt list` warns about its unstable CLI on stderr; the
+                # format itself has been stable for a decade and there is no
+                # machine-readable alternative that reports candidates.
+                argv=["apt", "list", "--upgradable"],
+                timeout=60,
+            )
+        else:
+            # dnf exits 100 when updates exist, 0 when none. Neither is a
+            # failure, so the caller must not treat rc as one.
+            listing = ssh.Command(argv=[manager, "-q", "list", "updates"], timeout=120)
+
+        batch = await ssh.run_many(
+            creds,
+            [
+                listing,
+                ssh.Command(argv=["test", "-f", "/var/run/reboot-required"], timeout=10),
+                ssh.Command(
+                    argv=["cat", "/var/run/reboot-required.pkgs"], timeout=10
+                ),
+                # RHEL equivalent; absent on Debian, which is fine.
+                ssh.Command(argv=["needs-restarting", "-r"], become=True, timeout=30),
+                ssh.Command(
+                    argv=["stat", "-c", "%y", "/var/lib/apt/periodic/update-success-stamp"],
+                    timeout=10,
+                ),
+            ],
+        )
+        listing_r, reboot_flag, reboot_pkgs, needs_restarting, stamp = batch.results
+
+        if manager == "apt":
+            updates = _parse_apt_upgradable(listing_r.stdout)
+        else:
+            updates = _parse_dnf_updates(listing_r.stdout)
+
+        reboot = reboot_flag.rc == 0
+        if needs_restarting.ok is False and needs_restarting.rc == 1:
+            # `needs-restarting -r` exits 1 when a reboot is needed.
+            reboot = True
+
+        return PackageState(
+            manager=manager,
+            updates=updates,
+            security_count=sum(1 for u in updates if u.is_security),
+            reboot_required=reboot,
+            reboot_required_by=[
+                p.strip() for p in reboot_pkgs.stdout.splitlines() if p.strip()
+            ]
+            if reboot_pkgs.ok
+            else [],
+            last_refreshed_iso=(stamp.stdout.strip() or None) if stamp.ok else None,
+        )
+
+    async def packages_refresh(self, creds: DeviceCredentials) -> str:
+        manager = await self._package_manager(creds)
+        if manager == "apt":
+            argv = ["apt-get", "update", "-q"]
+        elif manager in {"dnf", "yum"}:
+            argv = [manager, "-q", "makecache"]
+        else:
+            raise UnsupportedOperation(
+                f"package management for '{manager}' is not implemented yet"
+            )
+        result = await ssh.run(creds, argv, become=True, timeout=300)
+        # apt-get update returns non-zero when *any* repository fails, even
+        # if the rest refreshed. Report the output either way rather than
+        # throwing away a mostly-successful refresh.
+        if not result.ok and not result.stdout.strip():
+            raise ssh.SshError(
+                f"refreshing package lists failed: {result.stderr.strip()[:300]}"
+            )
+        return (result.stdout + result.stderr).strip()
+
+    async def packages_upgrade(
+        self,
+        creds: DeviceCredentials,
+        *,
+        names: list[str] | None = None,
+        security_only: bool = False,
+        timeout: float = 1800.0,
+    ) -> str:
+        manager = await self._package_manager(creds)
+        for n in names or []:
+            _assert_safe_package_name(n)
+
+        if manager == "apt":
+            argv = [
+                # No shell here, so the environment is set with env(1).
+                # DEBIAN_FRONTEND stops debconf opening a dialog nobody can
+                # answer, which otherwise hangs until the timeout.
+                "env",
+                "DEBIAN_FRONTEND=noninteractive",
+                "apt-get",
+                "-y",
+                # Keep the administrator's config files. Without these two,
+                # a package that ships a changed conffile either prompts
+                # (hang) or silently replaces a file someone edited.
+                "-o", "Dpkg::Options::=--force-confdef",
+                "-o", "Dpkg::Options::=--force-confold",
+            ]
+            if security_only:
+                raise UnsupportedOperation(
+                    "apt cannot filter to security updates on its own; install "
+                    "unattended-upgrades on the host for that"
+                )
+            argv += ["install", "--only-upgrade", *names] if names else ["upgrade"]
+        elif manager in {"dnf", "yum"}:
+            argv = [manager, "-y"]
+            if security_only:
+                argv.append("--security")
+            argv += ["upgrade", *(names or [])]
+        else:
+            raise UnsupportedOperation(
+                f"package management for '{manager}' is not implemented yet"
+            )
+
+        result = await ssh.run(creds, argv, become=True, timeout=timeout)
+        output = (result.stdout + result.stderr).strip()
+        if not result.ok:
+            raise ssh.SshError(
+                f"upgrade failed (exit {result.rc}): {output[-800:] or 'no output'}"
+            )
+        return output
 
     # ------------------------------------------------- users and groups
 
@@ -1300,6 +1456,76 @@ def _chpasswd(username: str, password: str) -> ssh.Command:
         stdin=f"{username}:{password}\n",
         timeout=25,
     )
+
+
+_SAFE_PACKAGE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,127}$")
+
+
+def _assert_safe_package_name(name: str) -> None:
+    if not _SAFE_PACKAGE.match(name):
+        raise UnsupportedOperation(f"'{name}' is not a valid package name")
+
+
+def _parse_apt_upgradable(text: str) -> list[PackageUpdate]:
+    """Parse `apt list --upgradable`.
+
+    Lines look like:
+        nginx/noble-security 1.24.0-2ubuntu7.1 amd64 [upgradable from: 1.24.0-2]
+    The first line is "Listing..." and repeated runs can emit warnings on
+    stdout, so anything without the expected shape is skipped rather than
+    guessed at.
+    """
+    out: list[PackageUpdate] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or "/" not in line or line.startswith(("Listing", "WARNING", "N:")):
+            continue
+        head, _, rest = line.partition("/")
+        parts = rest.split()
+        if len(parts) < 2:
+            continue
+        suite = parts[0]
+        current = None
+        if "[upgradable from:" in line:
+            current = line.split("[upgradable from:", 1)[1].strip().rstrip("]").strip()
+        out.append(
+            PackageUpdate(
+                name=head,
+                current_version=current,
+                candidate_version=parts[1],
+                # Ubuntu and Debian both name the pocket "<suite>-security".
+                is_security="-security" in suite,
+                origin=suite,
+                architecture=parts[2] if len(parts) > 2 else None,
+            )
+        )
+    return out
+
+
+def _parse_dnf_updates(text: str) -> list[PackageUpdate]:
+    """Parse `dnf -q list updates`: name.arch  version  repo."""
+    out: list[PackageUpdate] = []
+    for raw in text.splitlines():
+        parts = raw.split()
+        if len(parts) != 3 or raw.startswith(" ") or "." not in parts[0]:
+            continue
+        if parts[0].lower() in {"last", "available", "updated"}:
+            continue
+        name, _, arch = parts[0].rpartition(".")
+        repo = parts[2]
+        out.append(
+            PackageUpdate(
+                name=name or parts[0],
+                candidate_version=parts[1],
+                # RHEL-family security content lives in repos whose id ends
+                # in -security, or is flagged by `updateinfo` — which needs
+                # a separate call, so this is the cheap approximation.
+                is_security="security" in repo.lower(),
+                origin=repo,
+                architecture=arch or None,
+            )
+        )
+    return out
 
 
 def _parse_passwd_file(text: str) -> list[dict[str, Any]]:

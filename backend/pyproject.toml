@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netfleet-api"
-version = "0.48.0"
+version = "0.49.0"
 description = "NetFleet — multi-vendor network fleet management API"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }

@@ -57,6 +57,7 @@ class Capability(StrEnum):
     DISK_USAGE = "disk.usage"
     PROC_LIST = "proc.list"
     CRON = "cron"           # crontabs + systemd timers
+    PKG_MANAGER = "pkg.manager"   # list / refresh / upgrade packages
     # PPP / VPN
     PPP_SECRET = "ppp.secret"
     VPN_L2TP = "vpn.l2tp"
@@ -137,6 +138,33 @@ class InterfaceConfig:
     # this is how a change silently gets reverted on the next boot.
     managed_by: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PackageUpdate:
+    """One pending package update."""
+
+    name: str
+    current_version: str | None = None
+    candidate_version: str | None = None
+    # True when the update comes from a security pocket. Worth separating:
+    # "12 updates" is background noise, "3 security updates" is a decision.
+    is_security: bool = False
+    origin: str | None = None       # suite/repo it comes from
+    architecture: str | None = None
+
+
+@dataclass(slots=True)
+class PackageState:
+    """What the host's package manager currently reports."""
+
+    manager: str                    # apt | dnf | zypper | apk | unknown
+    updates: list[PackageUpdate] = field(default_factory=list)
+    security_count: int = 0
+    reboot_required: bool = False
+    # Packages that asked for the reboot, when the host records them.
+    reboot_required_by: list[str] = field(default_factory=list)
+    last_refreshed_iso: str | None = None
 
 
 @dataclass(slots=True)
@@ -773,6 +801,16 @@ class VendorDriver(Protocol):
     async def scheduled_jobs(
         self, creds: DeviceCredentials
     ) -> list[ScheduledJob]: ...
+    async def packages_state(self, creds: DeviceCredentials) -> PackageState: ...
+    async def packages_refresh(self, creds: DeviceCredentials) -> str: ...
+    async def packages_upgrade(
+        self,
+        creds: DeviceCredentials,
+        *,
+        names: list[str] | None = None,
+        security_only: bool = False,
+        timeout: float = 1800.0,
+    ) -> str: ...
     async def system_reboot(self, creds: DeviceCredentials) -> None:
         """Trigger a clean reboot of the device. Implementations should
         swallow the connection-drop that follows because the router

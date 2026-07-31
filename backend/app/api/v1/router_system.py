@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import fields as dataclass_fields
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -15,6 +13,7 @@ from app.api.dependencies import (
     get_current_user,
     require_permission,
 )
+from app.api.v1._dataclasses import fields as _fields
 from app.drivers import get_driver
 from app.drivers.base import SnmpCommunity as DriverSnmpCommunity
 from app.drivers.base import UnsupportedOperation
@@ -888,21 +887,6 @@ async def get_interface_configs(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
     return [InterfaceConfigPublic(**_fields(c, drop={"raw"})) for c in cfgs]
-
-
-def _fields(obj: Any, *, drop: set[str] = frozenset()) -> dict[str, Any]:
-    """Dataclass instance → dict, minus fields the public schema omits.
-
-    `dataclasses.fields` rather than `vars()`: every driver dataclass is
-    declared with `slots=True`, so instances have no `__dict__` and
-    `vars()` raises TypeError. Listing the fields by hand instead would
-    drift the moment a dataclass gains one.
-    """
-    return {
-        f.name: getattr(obj, f.name)
-        for f in dataclass_fields(obj)
-        if f.name not in drop
-    }
 
 
 @router.get("/{device_id}/processes", response_model=list[ProcessPublic])

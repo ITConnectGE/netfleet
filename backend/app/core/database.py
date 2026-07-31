@@ -65,3 +65,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         raise RuntimeError("Database not initialized — call init_db() first.")
     async with _sessionmaker() as session:
         yield session
+
+
+def session_factory() -> async_sessionmaker[AsyncSession]:
+    """The raw factory, for work that outlives a request.
+
+    A background task cannot borrow the request's session — that one is
+    closed as soon as the response is sent, and the first write afterwards
+    fails. Anything long-running opens its own.
+    """
+    if _sessionmaker is None:
+        raise RuntimeError("Database not initialized — call init_db() first.")
+    return _sessionmaker
