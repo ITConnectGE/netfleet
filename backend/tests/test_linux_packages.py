@@ -144,3 +144,58 @@ async def test_no_reboot_flag_means_no_reboot(driver, creds, fake_ssh):
     state = await driver.packages_state(creds)
     assert state.reboot_required is False
     assert state.reboot_required_by == []
+
+
+# ---------------- fleet caching ----------------
+
+
+class _Device:
+    """Just enough of the ORM row for the cache-writing path."""
+
+    def __init__(self, name: str = "web-01") -> None:
+        self.id = name
+        self.name = name
+        self.vendor = "linux"
+        self.packages_manager = None
+        self.packages_updates_count = None
+        self.packages_security_count = None
+        self.packages_reboot_required = False
+        self.packages_checked_at = None
+        self.packages_check_error = None
+
+
+def test_apply_state_records_zero_as_zero_not_null():
+    """A checked host with nothing pending must read as 0, and an unchecked
+    one as null — the overview renders those differently on purpose."""
+    from app.drivers.base import PackageState
+    from app.services.packages import _apply_state
+
+    d = _Device()
+    assert d.packages_updates_count is None      # never checked
+
+    _apply_state(d, PackageState(manager="apt", updates=[], security_count=0))
+    assert d.packages_updates_count == 0
+    assert d.packages_security_count == 0
+    assert d.packages_checked_at is not None
+    assert d.packages_check_error is None
+
+
+def test_apply_state_clears_a_previous_error():
+    from app.drivers.base import PackageState, PackageUpdate
+    from app.services.packages import _apply_state
+
+    d = _Device()
+    d.packages_check_error = "could not connect"
+    _apply_state(
+        d,
+        PackageState(
+            manager="apt",
+            updates=[PackageUpdate(name="nginx", is_security=True)],
+            security_count=1,
+            reboot_required=True,
+        ),
+    )
+    assert d.packages_check_error is None
+    assert d.packages_updates_count == 1
+    assert d.packages_security_count == 1
+    assert d.packages_reboot_required is True

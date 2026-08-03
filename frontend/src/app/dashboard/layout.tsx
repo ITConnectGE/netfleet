@@ -10,6 +10,7 @@ import {
   type LucideIcon,
   Menu,
   Network,
+  Server,
   ScrollText,
   Settings,
   Siren,
@@ -49,6 +50,7 @@ const NAV_GROUPS: { label: string; items: NavItemDef[] }[] = [
     items: [
       { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
       { href: "/dashboard/fleet", label: "Fleet", icon: Network },
+      { href: "/dashboard/servers", label: "Servers", icon: Server },
       { href: "/dashboard/bulk", label: "Bulk", icon: Layers },
     ],
   },

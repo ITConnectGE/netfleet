@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import session_factory
 from app.drivers import get_driver
 from app.drivers.base import PackageState, UnsupportedOperation
+from app.models.device import Device, DeviceClass
 from app.models.package_run import PackageRun, PackageRunKind, PackageRunState
 from app.services.device import HostKeyNotPinned, _to_driver_creds, get_device
 
@@ -51,8 +52,74 @@ def _tail(text: str) -> str:
 async def get_state(
     session: AsyncSession, organization_id: UUID, device_id: UUID
 ) -> PackageState:
+    """Read package state from the host and cache the summary on the device.
+
+    Caching here rather than only in the scheduler means opening a host's
+    Packages tab also refreshes what the fleet overview shows for it —
+    otherwise the two screens disagree and the overview looks broken.
+    """
     device = await get_device(session, organization_id, device_id)
-    return await get_driver(device.vendor).packages_state(_to_driver_creds(device))
+    try:
+        state = await get_driver(device.vendor).packages_state(_to_driver_creds(device))
+    except Exception as e:
+        # Record the failure so the overview can say "could not check"
+        # rather than showing a silently stale number.
+        device.packages_check_error = str(e)[:1024]
+        device.packages_checked_at = datetime.now(UTC)
+        await session.commit()
+        raise
+
+    _apply_state(device, state)
+    await session.commit()
+    return state
+
+
+def _apply_state(device, state: PackageState) -> None:
+    device.packages_manager = state.manager
+    device.packages_updates_count = len(state.updates)
+    device.packages_security_count = state.security_count
+    device.packages_reboot_required = state.reboot_required
+    device.packages_checked_at = datetime.now(UTC)
+    device.packages_check_error = None
+
+
+async def refresh_fleet_packages(
+    session: AsyncSession, organization_id: UUID
+) -> tuple[int, int]:
+    """Refresh cached counts for every enabled server in an organisation.
+
+    Sequential on purpose: this runs unattended against every host an MSP
+    manages, and a burst of concurrent SSH sessions is exactly the kind of
+    thing that trips fail2ban or an IDS at three in the morning.
+    """
+    stmt = select(Device).where(
+        Device.organization_id == organization_id,
+        Device.device_class == DeviceClass.SERVER,
+        Device.is_enabled.is_(True),
+    )
+    devices = list((await session.execute(stmt)).scalars())
+
+    ok = failed = 0
+    for device in devices:
+        try:
+            state = await get_driver(device.vendor).packages_state(
+                _to_driver_creds(device)
+            )
+        except Exception as e:  # noqa: BLE001 - one bad host must not stop the sweep
+            device.packages_check_error = str(e)[:1024]
+            device.packages_checked_at = datetime.now(UTC)
+            failed += 1
+            log.info(
+                "packages.fleet_refresh.device_failed",
+                device_id=str(device.id),
+                error=str(e)[:200],
+            )
+            continue
+        _apply_state(device, state)
+        ok += 1
+
+    await session.commit()
+    return ok, failed
 
 
 async def list_runs(

@@ -24,6 +24,7 @@ from app.models.organization import Organization
 from app.services import backups as backup_svc
 from app.services import events as events_svc
 from app.services import firmware as firmware_svc
+from app.services import packages as packages_svc
 from app.services import host_metrics as host_metrics_svc
 
 log = structlog.get_logger("netfleet.scheduler")
@@ -68,6 +69,24 @@ async def job_firmware_check(session: AsyncSession) -> None:
         await session.commit()
         log.info(
             "scheduler.firmware_check.done",
+            organization_id=str(org.id),
+            ok=ok,
+            failed=failed,
+        )
+
+
+async def job_package_check(session: AsyncSession) -> None:
+    """Refresh cached package counts for every Linux server, every org.
+
+    Feeds the fleet overview. Runs nightly rather than continuously: the
+    answer changes when a repository publishes, not by the minute, and
+    every check is an SSH session on someone's production host.
+    """
+    orgs = list((await session.execute(select(Organization))).scalars())
+    for org in orgs:
+        ok, failed = await packages_svc.refresh_fleet_packages(session, org.id)
+        log.info(
+            "scheduler.package_check.done",
             organization_id=str(org.id),
             ok=ok,
             failed=failed,
@@ -180,6 +199,13 @@ JOBS: list[ScheduledJob] = [
         name="firmware-check",
         interval_seconds=int(os.environ.get("NETFLEET_FIRMWARE_INTERVAL_SECONDS", str(24 * 3600))),
         handler=job_firmware_check,
+    ),
+    ScheduledJob(
+        name="package-check",
+        interval_seconds=int(
+            os.environ.get("NETFLEET_PACKAGE_CHECK_INTERVAL_SECONDS", str(24 * 3600))
+        ),
+        handler=job_package_check,
     ),
     ScheduledJob(
         name="firmware-auto-upgrade",

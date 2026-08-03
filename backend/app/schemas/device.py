@@ -161,6 +161,15 @@ class DevicePublic(BaseModel):
     firmware: str | None
     os_family: str | None
     os_version: str | None
+    # Cached by the nightly sweep and by opening a host's Packages
+    # tab. Null means never checked, which the UI shows as such
+    # rather than as zero.
+    packages_manager: str | None = None
+    packages_updates_count: int | None = None
+    packages_security_count: int | None = None
+    packages_reboot_required: bool = False
+    packages_checked_at: datetime | None = None
+    packages_check_error: str | None = None
     firmware_available: str | None
     firmware_checked_at: datetime | None
     routerboard_current: str | None

@@ -141,6 +141,19 @@ class Device(IdMixin, TimestampsMixin, TableNameMixin, Base):
     os_family: Mapped[str | None] = mapped_column(String(32))
     os_version: Mapped[str | None] = mapped_column(String(64))
 
+    # Cached package state, so the fleet overview can list every server's
+    # pending updates without opening an SSH session per row. Refreshed by
+    # the nightly scheduler and by anyone opening the host's Packages tab.
+    packages_manager: Mapped[str | None] = mapped_column(String(16))
+    packages_updates_count: Mapped[int | None] = mapped_column(Integer)
+    packages_security_count: Mapped[int | None] = mapped_column(Integer)
+    packages_reboot_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # Without this a stale count is indistinguishable from a fresh one.
+    packages_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    packages_check_error: Mapped[str | None] = mapped_column(String(1024))
+
     # runtime status — updated by worker poller and test-connection calls
     status: Mapped[DeviceStatus] = mapped_column(
         Enum(DeviceStatus, name="device_status", values_callable=lambda c: [e.value for e in c]),

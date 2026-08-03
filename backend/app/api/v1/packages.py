@@ -157,3 +157,31 @@ async def upgrade_packages(
         packages=payload.packages or None,
         security_only=payload.security_only,
     )
+
+
+@router.post("/packages/refresh-all", status_code=status.HTTP_202_ACCEPTED)
+async def refresh_all_package_counts(
+    request: Request,
+    user: User = Depends(require_permission("pkg.manager", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict[str, int]:
+    """Re-read pending updates for every enabled server in the org.
+
+    Sequential inside the service, so this can take a while on a large
+    fleet — but it is the same work the nightly sweep does, just on
+    demand.
+    """
+    ok, failed = await pkg_svc.refresh_fleet_packages(session, user.organization_id)
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="pkg.manager",
+        action="refresh_all",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"ok": ok, "failed": failed},
+    )
+    await session.commit()
+    return {"checked": ok, "failed": failed}

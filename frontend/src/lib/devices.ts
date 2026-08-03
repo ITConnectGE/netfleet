@@ -32,6 +32,15 @@ export interface Device {
   firmware: string | null;
   os_family: string | null;
   os_version: string | null;
+  /** Cached package counts, refreshed nightly and whenever a host's
+   *  Packages tab is opened. Null means never checked — which is not
+   *  the same as zero and must not be rendered as a clean result. */
+  packages_manager?: string | null;
+  packages_updates_count?: number | null;
+  packages_security_count?: number | null;
+  packages_reboot_required?: boolean;
+  packages_checked_at?: string | null;
+  packages_check_error?: string | null;
   firmware_available: string | null;
   firmware_checked_at: string | null;
   routerboard_current: string | null;
