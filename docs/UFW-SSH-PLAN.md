@@ -326,28 +326,43 @@ move a deny above the SSH allow and confirm NetFleet refuses with the reason.
 
 ---
 
-## Stage F5 — Rule enable / disable (M)
+## Stage F5 — Rule enable / disable (M) — **done**
 
 The one place where NetFleet must hold state the host does not.
 
-- [ ] Model + migration `0026_ufw_disabled_rules`: device, full rule spec,
-      intended position, comment, disabled_at, disabled_by
-- [ ] Disable = capture spec + position → guarded delete from host → store row
-- [ ] Enable = `ufw insert <stored position>` (clamped to the current rule
+- [x] Model + migration `0026_ufw_disabled_rules`: device, full rule spec,
+      position, disabled_at, disabled_by. Unique on `(device_id, spec)` —
+      disabling the same rule twice would leave a duplicate to re-enable.
+- [x] Disable = capture spec + position → guarded delete from host → store row.
+      **The row is written only after the host confirms the removal.** The
+      reverse order would leave NetFleet claiming a rule is disabled while it
+      is still being enforced.
+- [x] Enable = `ufw insert <stored position>` (clamped to the current rule
       count) → guarded → drop the row
-- [ ] **Drift handling.** The stored position is a hint, not a promise. If the
-      ruleset changed since the rule was disabled, re-enable still succeeds but
-      the response flags that the position could not be honoured exactly, and
-      the UI says where it actually landed.
-- [ ] **Honesty in the UI, not in a tooltip.** Disabled rules render in a
-      visually separate section with a plain statement that they exist only in
-      NetFleet and are invisible in `ufw status` on the host. Anyone reading the
-      host directly must not be misled by our screen.
-- [ ] Orphan cleanup: disabled rows are deleted with the device
+- [x] **Drift handling.** The stored position is a hint, not a promise. The
+      driver clamps it — `ufw insert` errors on a position past the end — and
+      returns where the rule actually landed; when that differs from the stored
+      position the response says so. It matters because ufw is first-match, so
+      a rule returning two places lower can mean something different.
+- [x] **Re-enabling is safety-checked like a move.** A deny coming back above
+      the allow that keeps NetFleet reachable is a lockout, so `enable` runs
+      the same first-match projection F4 built. The projection clamps its
+      insert index exactly as the driver does, or it would judge a placement
+      the host would never produce.
+- [x] Display fields are re-parsed from the stored spec rather than stored
+      twice, so the disabled table shows the same columns as the live one and
+      there is one source of truth.
+- [x] **Honesty in the UI, not in a tooltip.** Disabled rules render in a
+      visually separate, dashed section whose header states in a full sentence
+      that they are removed from the host and invisible in `ufw status` there.
+      Anyone reading the host directly must not be misled by our screen.
+- [x] Orphan cleanup: rows cascade with the device and the organisation
+- [x] Tests: `backend/tests/test_ufw_toggle.py` (12)
 
 **Ships:** the toggle you asked for, without lying about where it lives.
 **Accept:** disable a rule, confirm `ufw status` on the host no longer shows it,
-re-enable, confirm it returns at the same position.
+re-enable, confirm it returns at the same position. Then delete a rule *above*
+a disabled one and re-enable it, to see the drift note.
 
 ---
 

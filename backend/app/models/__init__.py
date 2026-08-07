@@ -22,6 +22,7 @@ from app.models.role import AssignmentScope, Permission, PermissionAction, Role,
 from app.models.secret_audit import SecretKind, SecretReveal, SecretRotation
 from app.models.site import Site
 from app.models.tenant import Tenant
+from app.models.ufw_disabled_rule import UfwDisabledRule
 from app.models.user import AuthMethod, User
 from app.models.wg_peer_secret import WgPeerSecret
 
@@ -63,6 +64,7 @@ __all__ = [
     "SecretRotation",
     "Site",
     "Tenant",
+    "UfwDisabledRule",
     "User",
     "WgPeerSecret",
 ]

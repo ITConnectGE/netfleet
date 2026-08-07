@@ -18,6 +18,26 @@ export interface UfwRule {
   spec: string | null;
 }
 
+/**
+ * A rule switched off in NetFleet.
+ *
+ * ufw has no disabled state, so this rule is *not on the host* — it will not
+ * appear in `ufw status` there. NetFleet is holding it, along with where to
+ * put it back.
+ */
+export interface UfwDisabledRule {
+  id: string;
+  spec: string;
+  position: number | null;
+  disabled_at: string;
+  action: string;
+  direction: string;
+  destination: string;
+  source: string;
+  interface: string | null;
+  comment: string | null;
+}
+
 export interface UfwStatus {
   installed: boolean;
   active: boolean;
@@ -32,6 +52,8 @@ export interface UfwStatus {
    * ufw is switched off and `ufw status` lists nothing in that state.
    */
   rules_from_added: boolean;
+  /** Rules NetFleet is holding off the host. Not visible in `ufw status`. */
+  disabled_rules: UfwDisabledRule[];
 }
 
 export async function getUfwStatus(deviceId: string): Promise<UfwStatus> {
@@ -156,6 +178,44 @@ export async function moveUfwRule(
         json: { spec, position, force },
         timeout: 120_000,
       })
+      .json<UfwWriteResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+/**
+ * Switch a rule off: remove it from the host, remember it in NetFleet. There
+ * is no ufw command for this — a rule is in the ruleset or it is not.
+ */
+export async function disableUfwRule(
+  deviceId: string,
+  spec: string,
+  force = false,
+): Promise<UfwWriteResult> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/firewall/ufw/rules/disable`, {
+        json: { spec, force },
+        timeout: 120_000,
+      })
+      .json<UfwWriteResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+export async function enableUfwRule(
+  deviceId: string,
+  disabledRuleId: string,
+  force = false,
+): Promise<UfwWriteResult> {
+  try {
+    return await api
+      .post(
+        `devices/${deviceId}/firewall/ufw/disabled/${disabledRuleId}/enable`,
+        { searchParams: { force }, timeout: 120_000 },
+      )
       .json<UfwWriteResult>();
   } catch (e) {
     throw new Error(await readErrorMessage(e));

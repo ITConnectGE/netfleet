@@ -8,12 +8,15 @@ import {
   confirmGuard,
   createUfwRule,
   deleteUfwRule,
+  disableUfwRule,
   editUfwRule,
+  enableUfwRule,
   getUfwStatus,
   listPendingGuards,
   moveUfwRule,
   rollbackGuard,
   type ChangeGuard,
+  type UfwDisabledRule,
   type UfwRule,
   type UfwRuleCreate,
   type UfwStatus,
@@ -23,10 +26,11 @@ import { cn } from "@/lib/utils";
 /**
  * UFW on a Linux host.
  *
- * Read-only for now — stage F1 of docs/UFW-SSH-PLAN.md. The screen's one job
- * at this stage is to never misrepresent enforcement: a firewall that is
- * configured but switched off has to look different from one with no rules,
- * and different again from a host with no ufw at all.
+ * The screen's overriding job is to never misrepresent what is being
+ * enforced. A firewall that is configured but switched off looks different
+ * from one with no rules, and different again from a host with no ufw at all.
+ * Rules NetFleet is holding off the host get their own section saying exactly
+ * that, because they are genuinely absent from `ufw status` there.
  */
 export function UfwFirewall({ deviceId }: { deviceId: string }) {
   const qc = useQueryClient();
@@ -65,6 +69,26 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
     onError: (e: Error) => {
       invalidate();
       toast.error("Could not move the rule", e.message);
+    },
+  });
+
+  const toggle = useMutation({
+    mutationFn: (v: { spec: string } | { id: string }) =>
+      "spec" in v
+        ? disableUfwRule(deviceId, v.spec)
+        : enableUfwRule(deviceId, v.id),
+    onSuccess: (r, v) => {
+      invalidate();
+      toast.success(
+        "spec" in v ? "Rule disabled" : "Rule enabled",
+        // The command carries a note when a re-enabled rule could not land at
+        // its old position, which matters because ufw is first-match.
+        r.command,
+      );
+    },
+    onError: (e: Error) => {
+      invalidate();
+      toast.error("Could not change the rule", e.message);
     },
   });
 
@@ -180,10 +204,14 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
             <RuleTable
               rules={data.rules}
               numbered={!data.rules_from_added}
-              busy={remove.isPending || move.isPending}
+              busy={remove.isPending || move.isPending || toggle.isPending}
               onEdit={(r) => {
                 setShowForm(false);
                 setEditing(r);
+              }}
+              onDisable={(r) => {
+                if (!r.spec) return;
+                toggle.mutate({ spec: r.spec });
               }}
               onMove={(r, delta) => {
                 if (!r.spec || r.position === null) return;
@@ -199,6 +227,14 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
                   return;
                 remove.mutate({ spec: r.spec, force: false });
               }}
+            />
+          )}
+
+          {data.disabled_rules.length > 0 && (
+            <DisabledRules
+              rules={data.disabled_rules}
+              busy={toggle.isPending}
+              onEnable={(r) => toggle.mutate({ id: r.id })}
             />
           )}
 
@@ -603,6 +639,7 @@ function RuleTable({
   busy,
   onEdit,
   onMove,
+  onDisable,
   onDelete,
 }: {
   rules: UfwRule[];
@@ -610,6 +647,7 @@ function RuleTable({
   busy: boolean;
   onEdit: (rule: UfwRule) => void;
   onMove: (rule: UfwRule, delta: number) => void;
+  onDisable: (rule: UfwRule) => void;
   onDelete: (rule: UfwRule) => void;
 }) {
   // Order is behaviour, not presentation: ufw stops at the first rule that
@@ -629,7 +667,7 @@ function RuleTable({
             <th className="px-3 py-2 font-medium">From</th>
             <th className="px-3 py-2 font-medium">Interface</th>
             <th className="px-3 py-2 font-medium">Comment</th>
-            <th className="w-44 px-3 py-2" />
+            <th className="w-56 px-3 py-2" />
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -688,6 +726,16 @@ function RuleTable({
                     disabled={busy || !r.spec}
                   />
                   <RowButton
+                    label="Disable"
+                    title={
+                      r.spec
+                        ? "Remove from the host and keep it here — it will not appear in `ufw status` while disabled"
+                        : NO_SPEC
+                    }
+                    onClick={() => onDisable(r)}
+                    disabled={busy || !r.spec}
+                  />
+                  <RowButton
                     label="Delete"
                     danger
                     // Without a spec there is no stable handle for this rule,
@@ -704,6 +752,82 @@ function RuleTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Rules NetFleet is holding off the host.
+ *
+ * The disclaimer is a full sentence in the section header, not a tooltip.
+ * These rules are genuinely absent from the host: someone who SSHes in and
+ * runs `ufw status` will not see them, and this screen must not leave them
+ * thinking otherwise.
+ */
+function DisabledRules({
+  rules,
+  busy,
+  onEnable,
+}: {
+  rules: UfwDisabledRule[];
+  busy: boolean;
+  onEnable: (rule: UfwDisabledRule) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-dashed border-border bg-muted/30">
+      <div className="border-b border-border/70 px-3 py-2">
+        <h3 className="text-sm font-semibold">
+          Disabled rules ({rules.length})
+        </h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          ufw has no disabled state, so these are removed from the host and
+          held here. They are <strong>not</strong> in{" "}
+          <span className="font-mono">ufw status</span> on the server — only
+          NetFleet knows about them. Enabling one puts it back at the position
+          it held, if that position still exists.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-border/70 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="w-12 px-3 py-2 font-medium">Was #</th>
+              <th className="px-3 py-2 font-medium">To</th>
+              <th className="px-3 py-2 font-medium">Action</th>
+              <th className="px-3 py-2 font-medium">From</th>
+              <th className="px-3 py-2 font-medium">Comment</th>
+              <th className="w-24 px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/70">
+            {rules.map((r) => (
+              <tr key={r.id} className="opacity-70 hover:opacity-100">
+                <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                  {r.position ?? "—"}
+                </td>
+                <td className="px-3 py-1.5 font-mono text-xs">
+                  {r.destination}
+                </td>
+                <td className="px-3 py-1.5">
+                  <ActionPill action={r.action} direction={r.direction} />
+                </td>
+                <td className="px-3 py-1.5 font-mono text-xs">{r.source}</td>
+                <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                  {r.comment ?? "—"}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <RowButton
+                    label="Enable"
+                    title={`Reinstall: ${r.spec}`}
+                    onClick={() => onEnable(r)}
+                    disabled={busy}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

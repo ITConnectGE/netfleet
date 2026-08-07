@@ -20,15 +20,18 @@ from app.api.dependencies import (
 )
 from app.api.v1._dataclasses import fields as _fields
 from app.drivers.base import UfwRuleSpec
+from app.drivers.linux import _ufw_rule_from_spec as parse_ufw_spec
 from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.ufw import (
     ChangeGuardPublic,
+    UfwDisabledRulePublic,
     UfwRuleCreate,
     UfwRuleDelete,
     UfwRuleEdit,
     UfwRuleMove,
     UfwRulePublic,
+    UfwRuleToggle,
     UfwStatusPublic,
     UfwWriteResult,
 )
@@ -65,6 +68,31 @@ async def get_ufw_status(
         rules=[UfwRulePublic(**_fields(r)) for r in state.rules],
         app_profiles=state.app_profiles,
         rules_from_added=state.rules_from_added,
+        disabled_rules=[
+            _disabled_public(row)
+            for row in await ufw_svc.list_disabled(
+                session, user.organization_id, device_id
+            )
+        ],
+    )
+
+
+def _disabled_public(row) -> UfwDisabledRulePublic:
+    """Re-parse the stored spec for display, rather than storing the display
+    columns alongside it — one source of truth, and the parser is shared with
+    the live rules."""
+    parsed = parse_ufw_spec(row.spec)
+    return UfwDisabledRulePublic(
+        id=row.id,
+        spec=row.spec,
+        position=row.position,
+        disabled_at=row.disabled_at,
+        action=parsed.action,
+        direction=parsed.direction,
+        destination=parsed.destination,
+        source=parsed.source,
+        interface=parsed.interface,
+        comment=parsed.comment,
     )
 
 
@@ -274,6 +302,70 @@ async def move_ufw_rule(
             spec=payload.spec,
             position=payload.position,
             force=payload.force,
+            started_by_user_id=user.id,
+        ),
+    )
+
+
+@router.post("/{device_id}/firewall/ufw/rules/disable", response_model=UfwWriteResult)
+async def disable_ufw_rule(
+    device_id: UUID,
+    payload: UfwRuleToggle,
+    request: Request,
+    user: User = Depends(require_permission("firewall.ufw", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> UfwWriteResult:
+    """Switch a rule off.
+
+    ufw has no disabled state, so the rule is removed from the host and
+    remembered in NetFleet. It will not appear in `ufw status` on the host
+    while it is off.
+    """
+    return await _guarded_write(
+        session,
+        user,
+        request,
+        device_id,
+        action="rule_disable",
+        payload=payload.model_dump(),
+        run=lambda: ufw_svc.disable_rule(
+            session,
+            user.organization_id,
+            device_id,
+            spec=payload.spec,
+            force=payload.force,
+            started_by_user_id=user.id,
+        ),
+    )
+
+
+@router.post(
+    "/{device_id}/firewall/ufw/disabled/{disabled_rule_id}/enable",
+    response_model=UfwWriteResult,
+)
+async def enable_ufw_rule(
+    device_id: UUID,
+    disabled_rule_id: UUID,
+    request: Request,
+    force: bool = False,
+    user: User = Depends(require_permission("firewall.ufw", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> UfwWriteResult:
+    """Put a switched-off rule back, at its old position where that is still
+    a position that exists."""
+    return await _guarded_write(
+        session,
+        user,
+        request,
+        device_id,
+        action="rule_enable",
+        payload={"disabled_rule_id": str(disabled_rule_id), "force": force},
+        run=lambda: ufw_svc.enable_rule(
+            session,
+            user.organization_id,
+            device_id,
+            disabled_rule_id=disabled_rule_id,
+            force=force,
             started_by_user_id=user.id,
         ),
     )

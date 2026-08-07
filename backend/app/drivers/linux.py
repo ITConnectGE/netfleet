@@ -879,12 +879,7 @@ class LinuxDriver(SupportsCapabilityFallback):
         if position < 1:
             raise ValueError("a rule position is 1-based")
         delete_argv = _delete_argv_from_spec(spec)
-
-        tokens = spec.split()[1:]
-        if tokens and tokens[0] == "route":
-            insert_argv = ["ufw", "route", "insert", str(position), *tokens[1:]]
-        else:
-            insert_argv = ["ufw", "insert", str(position), *tokens]
+        insert_argv = _insert_argv_from_spec(spec, position)
 
         batch = await ssh.run_many(
             creds,
@@ -896,6 +891,25 @@ class LinuxDriver(SupportsCapabilityFallback):
         batch.results[0].check("removing the rule from its old position")
         batch.results[1].check("re-inserting the rule at its new position")
         return f"{' '.join(delete_argv)} ; {' '.join(insert_argv)}"
+
+    async def ufw_rule_restore(
+        self, creds: DeviceCredentials, *, spec: str, position: int | None
+    ) -> tuple[str, int]:
+        """Reinstall a rule NetFleet removed. Returns the command and the
+        position it actually landed at.
+
+        The stored position is a hint. The ruleset can change while a rule is
+        switched off, so it is clamped to what currently exists — `ufw insert`
+        errors on a position past the end — and the caller is told where the
+        rule really went rather than being left to assume.
+        """
+        count = await self._ufw_added_count(creds)
+        landed = count + 1 if position is None else min(max(position, 1), count + 1)
+
+        argv = _insert_argv_from_spec(spec, landed)
+        result = await ssh.run(creds, argv, become=True, timeout=60)
+        result.check("restoring the firewall rule")
+        return " ".join(argv), landed
 
     async def ufw_rule_delete(self, creds: DeviceCredentials, *, spec: str) -> str:
         """Delete by rule specification, never by number.
@@ -1985,6 +1999,32 @@ def _build_ufw_rule_argv(
     return argv
 
 
+def _insert_argv_from_spec(spec: str, position: int | None) -> list[str]:
+    """Turn a `ufw show added` line back into the command that installs it.
+
+    `route` precedes `insert` — `ufw route insert N RULE` — matching the
+    delete form.
+    """
+    tokens = spec.split()
+    if not tokens or tokens[0] != "ufw":
+        raise ValueError("a rule specification must start with 'ufw'")
+    rest = tokens[1:]
+    if not rest:
+        raise ValueError("a rule specification needs a rule")
+
+    argv = ["ufw"]
+    if rest[0] == "route":
+        argv.append("route")
+        rest = rest[1:]
+    if position is not None:
+        if position < 1:
+            raise ValueError("a rule position is 1-based")
+        argv += ["insert", str(position)]
+    if not rest or rest[0] not in _UFW_ACTIONS:
+        raise ValueError(f"{spec!r} does not name a rule ufw can install")
+    return argv + rest
+
+
 def _delete_argv_from_spec(spec: str) -> list[str]:
     """Turn a `ufw show added` line into the command that removes it.
 
@@ -2117,6 +2157,68 @@ def ufw_path_verdict(rules: list[UfwRule], path: ManagementPath) -> str:
             continue
         return "allow" if rule.action in {"allow", "limit"} else "deny"
     return "default"
+
+
+# The projections. Each returns the ruleset a change would leave behind, in
+# the order it would leave it in, so `ufw_would_lock_out` can judge the result
+# rather than the intent. Pure functions, kept beside the verdict they feed.
+
+
+def ufw_projected_rule(spec: UfwRuleSpec) -> UfwRule:
+    """The shape a rule that does not exist yet would have.
+
+    Only the fields the verdict reads are filled; this never leaves the
+    simulation, so inventing a position or an ip_version would be noise.
+    """
+    destination = spec.port or "Anywhere"
+    if spec.port and spec.protocol:
+        destination = f"{spec.port}/{spec.protocol}"
+    return UfwRule(
+        action=spec.action,
+        direction=spec.direction,
+        destination=destination,
+        source=spec.from_address or "Anywhere",
+        interface=spec.interface,
+        comment=spec.comment,
+    )
+
+
+def ufw_project_deleted(rules: list[UfwRule], spec: str) -> list[UfwRule]:
+    return [r for r in rules if r.spec != spec]
+
+
+def ufw_project_inserted(
+    rules: list[UfwRule], rule: UfwRule, position: int | None
+) -> list[UfwRule]:
+    """Clamped the same way the driver clamps it — a projection that models a
+    placement the host would never produce judges the wrong ruleset."""
+    if position is None:
+        return [*rules, rule]
+    index = min(max(position - 1, 0), len(rules))
+    return rules[:index] + [rule] + rules[index:]
+
+
+def ufw_project_replaced(
+    rules: list[UfwRule], old_spec: str, new: UfwRule, position: int | None
+) -> list[UfwRule]:
+    remaining = ufw_project_deleted(rules, old_spec)
+    if position is None:
+        # With no position given, ufw appends — but an edit keeps the original
+        # slot when we can still see where it was.
+        original = next((i for i, r in enumerate(rules) if r.spec == old_spec), None)
+        if original is None:
+            return [*remaining, new]
+        return remaining[:original] + [new] + remaining[original:]
+    return ufw_project_inserted(remaining, new, position)
+
+
+def ufw_project_moved(
+    rules: list[UfwRule], spec: str, position: int
+) -> list[UfwRule]:
+    target = next((r for r in rules if r.spec == spec), None)
+    if target is None:
+        return rules
+    return ufw_project_inserted(ufw_project_deleted(rules, spec), target, position)
 
 
 def ufw_would_lock_out(

@@ -7,15 +7,26 @@ call the driver directly — see docs/UFW-SSH-PLAN.md before adding one.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.drivers import get_driver
 from app.drivers.base import UfwRule, UfwRuleSpec, UfwStatus, UnsupportedOperation
-from app.drivers.linux import ufw_would_lock_out
+from app.drivers.linux import _ufw_rule_from_spec as _rule_from_spec
+from app.drivers.linux import (
+    ufw_project_deleted,
+    ufw_project_inserted,
+    ufw_project_moved,
+    ufw_project_replaced,
+    ufw_projected_rule,
+    ufw_would_lock_out,
+)
 from app.models.change_guard import ChangeGuard
+from app.models.ufw_disabled_rule import UfwDisabledRule
 from app.services import change_guard as guard_svc
 from app.services.device import HostKeyNotPinned, _to_driver_creds, get_device
 
@@ -140,7 +151,7 @@ async def delete_rule(
             session,
             organization_id,
             device_id,
-            project=lambda rules: [r for r in rules if r.spec != spec],
+            project=lambda rules: ufw_project_deleted(rules, spec),
             what="Deleting this rule",
         )
 
@@ -154,37 +165,6 @@ async def delete_rule(
         started_by_user_id=started_by_user_id,
         apply=lambda creds: driver.ufw_rule_delete(creds, spec=spec),
     )
-
-
-def _as_rule(spec: UfwRuleSpec) -> UfwRule:
-    """The projected shape of a rule that does not exist yet.
-
-    Only the fields the safety check reads are filled — this never leaves the
-    simulation, so inventing a position or an ip_version would be noise.
-    """
-    destination = spec.port or "Anywhere"
-    if spec.port and spec.protocol:
-        destination = f"{spec.port}/{spec.protocol}"
-    return UfwRule(
-        action=spec.action,
-        direction=spec.direction,
-        destination=destination,
-        source=spec.from_address or "Anywhere",
-        interface=spec.interface,
-        comment=spec.comment,
-    )
-
-
-def _replaced(rules: list[UfwRule], old_spec: str, new: UfwRule, position: int | None):
-    """The ruleset after an edit, in the order it would end up in."""
-    remaining = [r for r in rules if r.spec != old_spec]
-    if position is None:
-        # ufw appends when no position is given.
-        original = next((i for i, r in enumerate(rules) if r.spec == old_spec), None)
-        index = len(remaining) if original is None else original
-    else:
-        index = min(max(position - 1, 0), len(remaining))
-    return remaining[:index] + [new] + remaining[index:]
 
 
 async def edit_rule(
@@ -203,8 +183,8 @@ async def edit_rule(
             session,
             organization_id,
             device_id,
-            project=lambda rules: _replaced(
-                rules, old_spec, _as_rule(spec), position
+            project=lambda rules: ufw_project_replaced(
+                rules, old_spec, ufw_projected_rule(spec), position
             ),
             what="This edit",
         )
@@ -223,13 +203,138 @@ async def edit_rule(
     )
 
 
-def _moved(rules: list[UfwRule], spec: str, position: int) -> list[UfwRule]:
-    target = next((r for r in rules if r.spec == spec), None)
+async def list_disabled(
+    session: AsyncSession, organization_id: UUID, device_id: UUID
+) -> list[UfwDisabledRule]:
+    stmt = (
+        select(UfwDisabledRule)
+        .where(
+            UfwDisabledRule.organization_id == organization_id,
+            UfwDisabledRule.device_id == device_id,
+        )
+        .order_by(UfwDisabledRule.position.nulls_last(), UfwDisabledRule.disabled_at)
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
+async def disable_rule(
+    session: AsyncSession,
+    organization_id: UUID,
+    device_id: UUID,
+    *,
+    spec: str,
+    force: bool = False,
+    started_by_user_id: UUID | None = None,
+) -> tuple[ChangeGuard, str]:
+    """Switch a rule off: remove it from the host, remember it here.
+
+    ufw has no disabled state, so this is a delete plus a record of how to put
+    it back. The record is written only after the host confirms the removal —
+    the reverse order would leave NetFleet claiming a rule is disabled when it
+    is still being enforced.
+    """
+    status = await get_status(session, organization_id, device_id)
+    target = next((r for r in status.rules if r.spec == spec), None)
     if target is None:
-        return rules
-    remaining = [r for r in rules if r.spec != spec]
-    index = min(max(position - 1, 0), len(remaining))
-    return remaining[:index] + [target] + remaining[index:]
+        raise OperationError(
+            "that rule is no longer in the ruleset — reload and try again"
+        )
+
+    if not force:
+        await _assert_change_is_safe(
+            session,
+            organization_id,
+            device_id,
+            project=lambda rules: ufw_project_deleted(rules, spec),
+            what="Disabling this rule",
+        )
+
+    device = await get_device(session, organization_id, device_id)
+    driver = get_driver(device.vendor)
+    guard, command = await guard_svc.run_guarded(
+        session,
+        organization_id,
+        device_id,
+        kind="ufw.rule.disable",
+        started_by_user_id=started_by_user_id,
+        apply=lambda creds: driver.ufw_rule_delete(creds, spec=spec),
+    )
+
+    session.add(
+        UfwDisabledRule(
+            organization_id=organization_id,
+            device_id=device_id,
+            disabled_by_user_id=started_by_user_id,
+            spec=spec,
+            position=target.position,
+            disabled_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    return guard, command
+
+
+async def enable_rule(
+    session: AsyncSession,
+    organization_id: UUID,
+    device_id: UUID,
+    *,
+    disabled_rule_id: UUID,
+    force: bool = False,
+    started_by_user_id: UUID | None = None,
+) -> tuple[ChangeGuard, str]:
+    """Put a switched-off rule back, at its old position where that still
+    means something."""
+    stmt = select(UfwDisabledRule).where(
+        UfwDisabledRule.id == disabled_rule_id,
+        UfwDisabledRule.organization_id == organization_id,
+        UfwDisabledRule.device_id == device_id,
+    )
+    row = (await session.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        raise OperationError("no such disabled rule")
+
+    if not force:
+        # Re-enabling is not automatically safe: a deny returning above the
+        # allow that keeps NetFleet reachable locks the host out just as a
+        # move would.
+        restored = _rule_from_spec(row.spec)
+        position = row.position
+        await _assert_change_is_safe(
+            session,
+            organization_id,
+            device_id,
+            project=lambda rules: ufw_project_inserted(rules, restored, position),
+            what="Re-enabling this rule",
+        )
+
+    device = await get_device(session, organization_id, device_id)
+    driver = get_driver(device.vendor)
+    spec, position = row.spec, row.position
+    guard, result = await guard_svc.run_guarded(
+        session,
+        organization_id,
+        device_id,
+        kind="ufw.rule.enable",
+        started_by_user_id=started_by_user_id,
+        apply=lambda creds: driver.ufw_rule_restore(
+            creds, spec=spec, position=position
+        ),
+    )
+    command, landed = result
+
+    await session.delete(row)
+    await session.commit()
+
+    if position is not None and landed != position:
+        # Drift: the ruleset moved on while this rule was switched off. The
+        # rule is back, but not where it was, and ufw is first-match — so this
+        # is reported rather than quietly absorbed.
+        command = (
+            f"{command}  [landed at position {landed}, not the "
+            f"{position} it held when it was disabled]"
+        )
+    return guard, command
 
 
 async def move_rule(
@@ -269,7 +374,7 @@ async def move_rule(
             session,
             organization_id,
             device_id,
-            project=lambda rules: _moved(rules, spec, position),
+            project=lambda rules: ufw_project_moved(rules, spec, position),
             what="Moving this rule",
         )
 

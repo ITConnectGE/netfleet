@@ -98,6 +98,33 @@ class UfwWriteResult(BaseModel):
     guard: ChangeGuardPublic
 
 
+class UfwDisabledRulePublic(BaseModel):
+    """A rule switched off in NetFleet.
+
+    It is not on the host and will not appear in `ufw status` there. The UI
+    says so explicitly — anyone reading the host directly must not be misled
+    by our screen into thinking these exist.
+    """
+
+    id: UUID
+    spec: str
+    position: int | None
+    disabled_at: datetime
+    # Parsed from the spec for display, so the table can show the same columns
+    # as the live rules rather than a raw command line.
+    action: str
+    direction: str
+    destination: str
+    source: str
+    interface: str | None = None
+    comment: str | None = None
+
+
+class UfwRuleToggle(BaseModel):
+    spec: str = Field(min_length=5, max_length=512)
+    force: bool = False
+
+
 class UfwStatusPublic(BaseModel):
     installed: bool
     active: bool
@@ -108,3 +135,7 @@ class UfwStatusPublic(BaseModel):
     rules: list[UfwRulePublic] = []
     app_profiles: list[str] = []
     rules_from_added: bool = False
+    # Rules NetFleet is holding off the host. Carried on the status response so
+    # one fetch gives the whole picture — the enabled and the disabled halves
+    # of a ruleset are only meaningful together.
+    disabled_rules: list[UfwDisabledRulePublic] = []
