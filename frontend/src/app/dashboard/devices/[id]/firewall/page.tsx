@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { useToast } from "@/components/toast";
+import { UfwFirewall } from "@/components/ufw-firewall";
+import { getDevice, type Device } from "@/lib/devices";
 import {
   createFilterRule,
   createNatRule,
@@ -42,9 +44,19 @@ export default function FirewallPage() {
   const [chainFilter, setChainFilter] = useState<"all" | "input" | "forward" | "output">("all");
   const [showForm, setShowForm] = useState(false);
 
+  const { data: device } = useQuery<Device>({
+    queryKey: ["device", deviceId],
+    queryFn: () => getDevice(deviceId),
+    enabled: Boolean(deviceId),
+  });
+  const isServer = device?.device_class === "server";
+
   const { data: rules, isLoading, error } = useQuery<FilterRule[]>({
     queryKey: ["fw-filter", deviceId],
     queryFn: () => listFilterRules(deviceId),
+    // A Linux host has no RouterOS filter table; asking for one returns 501
+    // and would surface as an error banner above the ufw view.
+    enabled: Boolean(deviceId) && !isServer,
   });
 
   const toggle = useMutation({
@@ -130,6 +142,15 @@ export default function FirewallPage() {
     const n = neighborsOf(r);
     if (n.isLast) return;
     move.mutate({ id: r.id, beforeId: null });
+  }
+
+  // RouterOS filter/NAT and a Linux host's ufw share this tab and nothing
+  // else: one has chains and per-rule counters, the other an ordered list and
+  // an on/off switch for the whole firewall. Placed after every hook — an
+  // early return above them would make the hook order depend on which device
+  // happens to be loaded.
+  if (isServer) {
+    return <UfwFirewall deviceId={deviceId} />;
   }
 
   return (

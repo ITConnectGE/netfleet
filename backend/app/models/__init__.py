@@ -3,6 +3,7 @@
 from app.core.database import Base
 from app.models.access_request import AccessRequest, AccessRequestGrant, AccessRequestStatus
 from app.models.audit_log import AuditLog, AuditOutcome
+from app.models.change_guard import ChangeGuard, ChangeGuardState
 from app.models.device import (
     BecomeMethod,
     Device,
@@ -36,6 +37,8 @@ __all__ = [
     "BackupSource",
     "BackupStatus",
     "BecomeMethod",
+    "ChangeGuard",
+    "ChangeGuardState",
     "Device",
     "DeviceBackup",
     "DeviceClass",

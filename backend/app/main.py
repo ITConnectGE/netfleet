@@ -15,6 +15,7 @@ from app.core.database import close_db, init_db, session_factory
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, unhandled_exception_handler
 from app.drivers.base import UnsupportedOperation
+from app.services.change_guard import expire_stale_guards
 from app.services.device import HostKeyNotPinned
 from app.services.packages import mark_orphaned_runs
 
@@ -38,6 +39,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             log.info("packages.orphaned_runs_closed", count=closed)
     except Exception as e:  # noqa: BLE001 - never block startup on housekeeping
         log.warning("packages.orphan_sweep_failed", error=str(e))
+
+    # Same reasoning for firewall guards. The host restored itself when its
+    # timer fired; what NetFleet lost was the chance to observe it, and a row
+    # that still claims to be armed is a pending change that will never
+    # resolve.
+    try:
+        async with session_factory()() as session:
+            expired = await expire_stale_guards(session)
+        if expired:
+            log.info("change_guard.stale_guards_expired", count=expired)
+    except Exception as e:  # noqa: BLE001 - never block startup on housekeeping
+        log.warning("change_guard.expiry_sweep_failed", error=str(e))
 
     yield
     await close_db()

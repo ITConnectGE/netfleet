@@ -68,6 +68,9 @@ DRIVER_SECTIONS: dict[str, list[str]] = {
     "firewall.filter":          ["read", "write"],
     "firewall.nat":             ["read", "write"],
     "firewall.mangle":          ["read", "write"],
+    # execute = enable/disable the firewall itself, which is a bigger hammer
+    # than editing a rule and is worth being able to grant separately.
+    "firewall.ufw":             ["read", "write", "execute"],
     # QoS
     "queue.simple":             ["read", "write"],
     "queue.tree":               ["read", "write"],

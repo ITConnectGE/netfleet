@@ -400,6 +400,9 @@ The highest-value feature of the whole phase.
 
 Last because it is the only place where a mistake severs your own access.
 
+Firewall half broken out in detail: **[UFW-SSH-PLAN.md](UFW-SSH-PLAN.md)**,
+which also carries the two SSH-key items left open in L1 and L5.
+
 - [ ] **Lockout guard, built first and non-optional.** Before any ruleset write:
       snapshot the current ruleset, schedule
       `systemd-run --on-active=120 nft -f <snapshot>`, apply the change, then
@@ -407,7 +410,12 @@ Last because it is the only place where a mistake severs your own access.
       timer. Same contract as RouterOS safe-mode. No write path may bypass it.
 - [ ] nftables primary: `nft -j list ruleset` read, rule add/delete/move mapped
       onto the existing `FilterRule` / `NatRule` dataclasses
-- [ ] iptables / ufw / firewalld: **read-only** rendering, with a clear "managed
+- [ ] **ufw is writable** — amended 2026-08-06, superseding the line below for
+      ufw only. On an Ubuntu host ufw *owns* the ruleset and regenerates it from
+      `/etc/ufw/user.rules` on every reload, so writing nftables underneath an
+      active ufw is the unsafe option, not the safe one. Rationale and stages in
+      [UFW-SSH-PLAN.md](UFW-SSH-PLAN.md).
+- [ ] iptables / firewalld: **read-only** rendering, with a clear "managed
       by X, edit not supported" banner. Do not attempt to write through wrappers.
 - [ ] WireGuard: `wg show` + wg-quick config rendering →
       `wireguard_interfaces_list`, `wireguard_peers_list`, peer add/remove

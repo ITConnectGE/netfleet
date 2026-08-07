@@ -14,6 +14,7 @@ from app.api.v1._dataclasses import fields as _fields
 from app.drivers import base
 from app.schemas import packages as pkg_schemas
 from app.schemas import router_system as schemas
+from app.schemas import ufw as ufw_schemas
 
 # Each pair is a dataclass the driver returns and the model the API builds
 # from it, plus fields the public shape deliberately omits.
@@ -36,6 +37,13 @@ PAIRS = [
         set(),
     ),
     (base.PackageUpdate(name="nginx"), pkg_schemas.PackageUpdatePublic, set()),
+    (
+        base.UfwRule(
+            action="allow", direction="in", destination="22/tcp", source="Anywhere"
+        ),
+        ufw_schemas.UfwRulePublic,
+        set(),
+    ),
 ]
 
 

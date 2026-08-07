@@ -62,7 +62,7 @@ export default function DeviceLayout({ children }: { children: ReactNode }) {
     {
       href: `${base}/firewall`,
       label: "Firewall",
-      needs: ["firewall.filter", "firewall.nat"],
+      needs: ["firewall.filter", "firewall.nat", "firewall.ufw"],
     },
     {
       href: `${base}/network`,

@@ -38,6 +38,7 @@ from app.drivers.base import (
     InterfaceConfig,
     IpAddress,
     IpRoute,
+    ManagementPath,
     NtpClient,
     PackageState,
     PackageUpdate,
@@ -45,6 +46,9 @@ from app.drivers.base import (
     ScheduledJob,
     SupportsCapabilityFallback,
     SystemInfo,
+    UfwRule,
+    UfwRuleSpec,
+    UfwStatus,
     UnsupportedOperation,
 )
 
@@ -144,6 +148,7 @@ class LinuxDriver(SupportsCapabilityFallback):
         Capability.PROC_LIST,
         Capability.CRON,
         Capability.PKG_MANAGER,
+        Capability.FIREWALL_UFW,
         Capability.SYSTEM_USER,
         Capability.INTERFACE_LIST,
         Capability.IP_ADDRESS,
@@ -733,6 +738,223 @@ class LinuxDriver(SupportsCapabilityFallback):
                 f"upgrade failed (exit {result.rc}): {output[-800:] or 'no output'}"
             )
         return output
+
+    # ------------------------------------------------------------- ufw
+
+    async def ufw_status(self, creds: DeviceCredentials) -> UfwStatus:
+        """Read the host's ufw configuration.
+
+        Three reads in one batch, and all three matter:
+
+        * `ufw status numbered verbose` — the running ruleset, with the
+          positions every later write needs.
+        * `ufw show added` — the rules *as configured*. This is the only one
+          that answers when ufw is switched off, because `ufw status` then
+          prints "Status: inactive" and nothing else. It is also the
+          authoritative rule spec: ufw renumbers on every delete, so a
+          position is not an identifier.
+        * `ufw app list` — profile names, so the UI can show "OpenSSH" as a
+          known profile rather than an opaque string.
+        """
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(argv=["ufw", "version"], become=True, timeout=15),
+                ssh.Command(
+                    argv=["ufw", "status", "numbered", "verbose"],
+                    become=True,
+                    timeout=30,
+                ),
+                ssh.Command(argv=["ufw", "show", "added"], become=True, timeout=30),
+                ssh.Command(argv=["ufw", "app", "list"], become=True, timeout=20),
+            ],
+        )
+        version, status_r, added_r, apps_r = batch.results
+
+        if _is_missing_command(version):
+            # Not an error: plenty of hosts legitimately have no ufw, and the
+            # UI needs to say so rather than show an empty ruleset.
+            return UfwStatus(installed=False, active=False)
+
+        if not status_r.ok:
+            raise ssh.SshError(
+                "reading the ufw status failed: "
+                f"{(status_r.stderr or status_r.stdout).strip()[:200]}"
+            )
+
+        status = _parse_ufw_status(status_r.stdout)
+        added = _parse_ufw_added(added_r.stdout) if added_r.ok else []
+
+        if status.active:
+            # Attach the spec from `ufw show added` so a later delete has a
+            # stable handle. Only when the counts line up exactly: the two
+            # commands order rules the same way, but a v6-only rule or ufw's
+            # IPV6 setting can make them disagree, and pinning the wrong spec
+            # to a rule would mean a later delete removes the wrong one.
+            if len(added) == len(status.rules):
+                for rule, spec in zip(status.rules, added, strict=True):
+                    rule.spec = spec
+        else:
+            # Inactive: the numbered table was empty, so the configured rules
+            # are all we have and they carry no positions.
+            status.rules = [_ufw_rule_from_spec(s) for s in added]
+            status.rules_from_added = True
+
+        status.app_profiles = _parse_ufw_app_list(apps_r.stdout) if apps_r.ok else []
+        return status
+
+    async def ufw_rule_add(
+        self,
+        creds: DeviceCredentials,
+        spec: UfwRuleSpec,
+        *,
+        position: int | None = None,
+    ) -> str:
+        """Install one rule. Returns the command that was run.
+
+        `position` maps to `ufw insert N`, which is 1-based. Omitting it
+        appends, which is ufw's own default.
+        """
+        argv = _build_ufw_rule_argv(spec, position=position)
+        result = await ssh.run(creds, argv, become=True, timeout=60)
+        result.check("adding the firewall rule")
+        return " ".join(argv)
+
+    async def ufw_rule_delete(self, creds: DeviceCredentials, *, spec: str) -> str:
+        """Delete by rule specification, never by number.
+
+        ufw renumbers on every delete, so a position captured when the page
+        rendered can address a different rule by the time the click lands.
+        Deleting by spec also removes the IPv4 and IPv6 halves together, which
+        deleting one number does not.
+        """
+        argv = _delete_argv_from_spec(spec)
+        result = await ssh.run(creds, argv, become=True, timeout=60)
+        result.check("deleting the firewall rule")
+        return " ".join(argv)
+
+    # -------------------------------------------------- the lockout guard
+
+    async def management_path(self, creds: DeviceCredentials) -> ManagementPath:
+        """The address and port this host actually sees NetFleet arriving on.
+
+        Read from `$SSH_CONNECTION` in the live session rather than from the
+        organisation's configured egress IPs. Internal hosts are reached over
+        a management VLAN or a WireGuard tunnel and never see NetFleet's
+        external address, so protecting the configured one would whitelist an
+        address the host cannot receive from — causing exactly the lockout the
+        check exists to prevent.
+        """
+        result = await ssh.run(
+            creds, ["printenv", "SSH_CONNECTION"], timeout=15
+        )
+        return _parse_ssh_connection(result.stdout if result.ok else "")
+
+    async def guard_supported(self, creds: DeviceCredentials) -> bool:
+        result = await ssh.run(creds, ["systemd-run", "--version"], timeout=15)
+        return not _is_missing_command(result)
+
+    async def ufw_guard_arm(
+        self,
+        creds: DeviceCredentials,
+        *,
+        token: str,
+        window_seconds: int,
+    ) -> str:
+        """Snapshot the ufw ruleset and schedule its restoration.
+
+        Returns the snapshot directory. Everything here happens *before* the
+        change it protects, on the same connection where possible: a batch
+        that dies halfway must never leave the change applied with no timer
+        behind it.
+        """
+        _assert_safe_token(token)
+        directory = f"{_GUARD_DIR_PREFIX}{token}"
+        unit = f"{_GUARD_UNIT_PREFIX}{token}"
+        script = _guard_restore_script(directory)
+
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(argv=["mkdir", "-p", directory], become=True, timeout=15),
+                # One command per file rather than one `cp` with three sources:
+                # user6.rules is absent on a host with IPv6 disabled, and a
+                # combined copy would fail for all three because of it.
+                *[
+                    ssh.Command(
+                        argv=["cp", "-a", f"/etc/ufw/{name}", f"{directory}/{name}"],
+                        become=True,
+                        timeout=15,
+                    )
+                    for name in _UFW_SNAPSHOT_FILES
+                ],
+                ssh.Command(
+                    argv=["tee", f"{directory}/restore.sh"],
+                    stdin=script,
+                    become=True,
+                    timeout=15,
+                ),
+                ssh.Command(
+                    argv=[
+                        "systemd-run",
+                        f"--on-active={int(window_seconds)}",
+                        f"--unit={unit}",
+                        "--description=NetFleet firewall lockout guard",
+                        "/bin/sh",
+                        f"{directory}/restore.sh",
+                    ],
+                    become=True,
+                    timeout=30,
+                ),
+            ],
+        )
+        mkdir_r, *rest = batch.results
+        mkdir_r.check("creating the guard snapshot directory")
+        # The copies are best-effort by design; the restore script skips any
+        # file that was not captured. `ufw.conf` is the one that must exist.
+        write_r, arm_r = rest[-2], rest[-1]
+        write_r.check("writing the guard restore script")
+        arm_r.check("scheduling the guard restore timer")
+        return directory
+
+    async def ufw_guard_cancel(self, creds: DeviceCredentials, *, token: str) -> None:
+        """Disarm the timer and clean up. Safe to call more than once."""
+        _assert_safe_token(token)
+        unit = f"{_GUARD_UNIT_PREFIX}{token}"
+        directory = f"{_GUARD_DIR_PREFIX}{token}"
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(
+                    argv=["systemctl", "stop", f"{unit}.timer"],
+                    become=True,
+                    timeout=30,
+                ),
+                # A transient unit that already fired lingers as failed;
+                # clearing it keeps `systemctl --failed` honest on the host.
+                ssh.Command(
+                    argv=["systemctl", "reset-failed", f"{unit}.service"],
+                    become=True,
+                    timeout=20,
+                ),
+                ssh.Command(
+                    argv=["rm", "-rf", directory], become=True, timeout=20
+                ),
+            ],
+        )
+        # Only the stop is worth failing over: the host restoring a ruleset it
+        # was already going to keep is not an error worth surfacing.
+        batch.results[0].check("cancelling the guard timer")
+
+    async def ufw_guard_restore(self, creds: DeviceCredentials, *, token: str) -> None:
+        """Restore the snapshot now, rather than waiting for the timer."""
+        _assert_safe_token(token)
+        directory = f"{_GUARD_DIR_PREFIX}{token}"
+        result = await ssh.run(
+            creds, ["/bin/sh", f"{directory}/restore.sh"], become=True, timeout=60
+        )
+        result.check("restoring the firewall snapshot")
+        await self.ufw_guard_cancel(creds, token=token)
 
     # ------------------------------------------------- users and groups
 
@@ -1525,6 +1747,499 @@ def _parse_dnf_updates(text: str) -> list[PackageUpdate]:
                 architecture=arch or None,
             )
         )
+    return out
+
+
+# ------------------------------------------------------------------ ufw
+#
+# ufw's table is column-aligned but both the To and From columns can contain
+# spaces ("3000 on eth0", "Anywhere on eth1"), so every parser below splits on
+# the action keyword rather than by character offset.
+
+_UFW_NUMBERED_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
+# No IGNORECASE: ufw prints these uppercase in the table, and matching
+# case-insensitively would let a lowercase interface or hostname masquerade as
+# the action column.
+_UFW_ACTION_RE = re.compile(r"\s+(ALLOW|DENY|REJECT|LIMIT)(?:\s+(IN|OUT|FWD))?\s+")
+_UFW_DEFAULT_RE = re.compile(r"(\w+)\s+\((incoming|outgoing|routed)\)")
+_UFW_ON_RE = re.compile(r"^(.*?)\s+on\s+(\S+)$")
+_UFW_V6_MARKER = "(v6)"
+
+# The lockout guard. Both names carry the guard token, so both are validated
+# before interpolation — `rm -rf` runs against the directory one.
+_GUARD_DIR_PREFIX = "/var/tmp/netfleet-guard-"
+_GUARD_UNIT_PREFIX = "netfleet-guard-"
+_GUARD_TOKEN_RE = re.compile(r"^[a-f0-9]{16,64}$")
+# ufw.conf carries ENABLED=yes/no, so restoring it restores whether the
+# firewall was on. user6.rules is absent on hosts with IPv6 off.
+_UFW_SNAPSHOT_FILES = ("user.rules", "user6.rules", "ufw.conf")
+
+
+def _assert_safe_token(token: str) -> None:
+    if not _GUARD_TOKEN_RE.match(token or ""):
+        raise ValueError("guard token must be lowercase hex")
+
+
+def _guard_restore_script(directory: str) -> str:
+    """The dead-man script left on the host.
+
+    Restores the three ufw files and then puts the firewall back into the
+    on/off state the snapshot recorded — `ufw --force enable` regenerates the
+    live ruleset from the restored files, so this covers a rule change and an
+    enable/disable equally.
+
+    Written as POSIX sh, not bash: a minimal host image may have no bash, and
+    a restore script that cannot run is worse than no guard at all because it
+    looks like one.
+    """
+    return f"""#!/bin/sh
+# NetFleet lockout guard.
+#
+# Restores the ufw configuration this host had before NetFleet changed it.
+# Fires only if NetFleet does not cancel the timer in time — which is the
+# case where NetFleet can no longer reach this host to cancel it.
+set -e
+D={directory}
+UFW=$(command -v ufw 2>/dev/null || echo /usr/sbin/ufw)
+for f in {" ".join(_UFW_SNAPSHOT_FILES)}; do
+  if [ -f "$D/$f" ]; then
+    cp -a "$D/$f" /etc/ufw/"$f"
+  fi
+done
+if grep -q '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
+  "$UFW" --force enable
+else
+  "$UFW" --force disable
+fi
+rm -rf "$D"
+"""
+
+
+# ufw's own vocabulary. Anything outside these sets is rejected before it can
+# reach the CLI: the argv transport prevents shell injection, but not a
+# malformed rule that ufw half-accepts and renders as something else.
+_UFW_ACTIONS = frozenset({"allow", "deny", "reject", "limit"})
+_UFW_DIRECTIONS = frozenset({"in", "out", "fwd"})
+_UFW_PROTOCOLS = frozenset({"tcp", "udp"})
+_UFW_PORT_RE = re.compile(r"^\d{1,5}(:\d{1,5})?(,\d{1,5}(:\d{1,5})?)*$")
+_UFW_IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
+
+
+def _assert_safe_ufw_address(value: str, what: str) -> None:
+    """An address must be `any`, or parse as an IP or CIDR.
+
+    Hostnames are refused deliberately. ufw would resolve one at rule-creation
+    time and freeze the answer, so a rule that reads `allow from db.example`
+    silently stops matching the moment that name points somewhere else.
+    """
+    import ipaddress
+
+    if value == "any":
+        return
+    try:
+        ipaddress.ip_network(value, strict=False)
+    except ValueError as e:
+        raise ValueError(
+            f"{what} must be an IP address or CIDR range (or 'any'), not {value!r}"
+        ) from e
+
+
+def _assert_safe_ufw_spec(spec: UfwRuleSpec) -> None:
+    if spec.action not in _UFW_ACTIONS:
+        raise ValueError(f"unknown firewall action {spec.action!r}")
+    if spec.direction not in _UFW_DIRECTIONS:
+        raise ValueError(f"unknown direction {spec.direction!r}")
+    if spec.protocol is not None and spec.protocol not in _UFW_PROTOCOLS:
+        raise ValueError(f"unsupported protocol {spec.protocol!r}")
+    if spec.port is not None and not _UFW_PORT_RE.match(spec.port):
+        raise ValueError(
+            f"{spec.port!r} is not a port, port range (80:90) or list (80,443)"
+        )
+    if spec.interface is not None and not _UFW_IFACE_RE.match(spec.interface):
+        raise ValueError(f"{spec.interface!r} is not a valid interface name")
+    if spec.from_address:
+        _assert_safe_ufw_address(spec.from_address, "the source address")
+    if spec.to_address:
+        _assert_safe_ufw_address(spec.to_address, "the destination address")
+    if spec.comment is not None:
+        if any(ch in spec.comment for ch in "\r\n\x00"):
+            raise ValueError("a rule comment cannot contain line breaks")
+        if len(spec.comment) > 255:
+            raise ValueError("a rule comment cannot exceed 255 characters")
+    # ufw rejects a protocol with no port of its own accord, but its error
+    # ("Bad port") names the wrong thing and sends people hunting.
+    if spec.protocol and not spec.port:
+        raise ValueError("a protocol needs a port — ufw cannot match one alone")
+
+
+def _build_ufw_rule_argv(
+    spec: UfwRuleSpec, *, position: int | None = None
+) -> list[str]:
+    """Assemble `ufw …` in the extended grammar.
+
+    The extended form (`from … to … port … proto …`) is used even when the
+    short form would do, because the short form's meaning depends on argument
+    order and the extended form's does not.
+    """
+    _assert_safe_ufw_spec(spec)
+
+    argv = ["ufw"]
+    if position is not None:
+        if position < 1:
+            raise ValueError("a rule position is 1-based")
+        argv += ["insert", str(position)]
+    if spec.direction == "fwd":
+        argv.append("route")
+    argv.append(spec.action)
+    if spec.direction in {"in", "out"}:
+        argv.append(spec.direction)
+    if spec.interface:
+        argv += ["on", spec.interface]
+    argv += ["from", spec.from_address or "any"]
+    argv += ["to", spec.to_address or "any"]
+    if spec.port:
+        argv += ["port", spec.port]
+    if spec.protocol:
+        argv += ["proto", spec.protocol]
+    if spec.comment:
+        argv += ["comment", spec.comment]
+    return argv
+
+
+def _delete_argv_from_spec(spec: str) -> list[str]:
+    """Turn a `ufw show added` line into the command that removes it.
+
+    `ufw allow 22/tcp`            -> ufw --force delete allow 22/tcp
+    `ufw route allow from a to b` -> ufw --force route delete allow from a to b
+
+    `route` stays in front of `delete`: ufw's grammar is `ufw route delete
+    RULE`, and `ufw delete route …` is a different, invalid thing.
+    """
+    tokens = spec.split()
+    if not tokens or tokens[0] != "ufw":
+        raise ValueError("a rule specification must start with 'ufw'")
+    rest = tokens[1:]
+    if not rest:
+        raise ValueError("a rule specification needs a rule")
+
+    prefix = ["ufw", "--force"]
+    if rest[0] == "route":
+        prefix.append("route")
+        rest = rest[1:]
+    if not rest or rest[0] not in _UFW_ACTIONS:
+        raise ValueError(f"{spec!r} does not name a rule ufw can delete")
+    # The comment is part of the stored spec but not part of the rule's
+    # identity — ufw matches on the rule itself and rejects the trailing
+    # `comment` clause on a delete.
+    if "comment" in rest:
+        rest = rest[: rest.index("comment")]
+    return prefix + ["delete"] + rest
+
+
+def _ufw_port_of(destination: str) -> str | None:
+    """The port a ufw "To" column names, or None when it names everything.
+
+    "22/tcp" -> "22"   "80,443/tcp" -> "80,443"   "Anywhere" -> None
+    """
+    value = (destination or "").strip()
+    if not value or value.lower() in {"anywhere", "any"}:
+        return None
+    return value.split("/", 1)[0].strip() or None
+
+
+def _ufw_port_matches(port_spec: str, port: int) -> bool:
+    """ufw ports can be a list, a range, or both: "80,443", "1024:65535"."""
+    for part in port_spec.split(","):
+        part = part.strip()
+        if ":" in part:
+            low, _, high = part.partition(":")
+            try:
+                if int(low) <= port <= int(high):
+                    return True
+            except ValueError:
+                continue
+        elif part.isdigit() and int(part) == port:
+            return True
+    return False
+
+
+def _ufw_source_matches(source: str, address: str) -> bool:
+    import ipaddress
+
+    value = (source or "").strip()
+    if not value or value.lower() in {"anywhere", "any"}:
+        return True
+    try:
+        return ipaddress.ip_address(address) in ipaddress.ip_network(
+            value, strict=False
+        )
+    except ValueError:
+        # A source we cannot parse (a hostname ufw resolved once, say) is not
+        # claimed as coverage. Overstating protection is the dangerous
+        # direction: it makes a rule look redundant when it is the only one
+        # holding the door open.
+        return False
+
+
+def ufw_rule_covers_path(rule: UfwRule, path: ManagementPath) -> bool:
+    """Whether this rule is part of what keeps NetFleet able to reach the host.
+
+    Only inbound accepts count. `limit` counts alongside `allow`, because it
+    permits the connection and merely rate-limits new ones — treating it as a
+    deny would let the last real rule be deleted.
+    """
+    if not path.known:
+        return False
+    if rule.action not in {"allow", "limit"} or rule.direction != "in":
+        return False
+    port_spec = _ufw_port_of(rule.destination)
+    if port_spec is not None and not _ufw_port_matches(
+        port_spec, path.server_port or 0
+    ):
+        return False
+    return _ufw_source_matches(rule.source, path.client_address or "")
+
+
+def _parse_ssh_connection(text: str) -> ManagementPath:
+    """`SSH_CONNECTION` is "<client ip> <client port> <server ip> <server port>".
+
+    The client address here is what the host sees *after* any NAT, which is
+    the only address a firewall rule can usefully name.
+    """
+    parts = text.split()
+    if len(parts) < 4:
+        return ManagementPath()
+    port: int | None = None
+    try:
+        port = int(parts[3])
+    except ValueError:
+        port = None
+    return ManagementPath(
+        client_address=parts[0] or None,
+        server_address=parts[2] or None,
+        server_port=port,
+    )
+
+
+def _is_missing_command(result: ssh.CommandResult) -> bool:
+    """Distinguish "the tool is not installed" from "the tool failed".
+
+    Worth separating: a host with no ufw and a host whose ufw errored need
+    different words on screen. sudo reports a missing binary as rc 1 with
+    'command not found' on stderr rather than the 127 a shell would give, so
+    both are checked.
+    """
+    if result.ok:
+        return False
+    blob = f"{result.stderr} {result.stdout}".lower()
+    return (
+        result.rc == 127
+        or "command not found" in blob
+        or "no such file or directory" in blob
+    )
+
+
+def _split_ufw_on_interface(value: str) -> tuple[str, str | None]:
+    """Peel a trailing `on <iface>` off a To or From column."""
+    m = _UFW_ON_RE.match(value)
+    if m is None:
+        return value, None
+    return m.group(1).strip(), m.group(2)
+
+
+def _parse_ufw_rule_line(position: int, rest: str) -> UfwRule | None:
+    """One `[ 1] 22/tcp  ALLOW IN  Anywhere  # ssh` row."""
+    comment = None
+    body = rest
+    hash_at = body.find("#")
+    if hash_at != -1:
+        # Safe to cut on the first '#': no address, port spec or interface
+        # name can contain one, so the remainder is always the comment.
+        comment = body[hash_at + 1 :].strip() or None
+        body = body[:hash_at]
+
+    m = _UFW_ACTION_RE.search(body)
+    if m is None:
+        return None
+
+    destination = body[: m.start()].strip()
+    source = body[m.end() :].strip()
+    action = m.group(1).lower()
+    direction = (m.group(2) or "in").lower()
+
+    is_v6 = _UFW_V6_MARKER in destination or _UFW_V6_MARKER in source
+    destination = destination.replace(_UFW_V6_MARKER, "").strip()
+    source = source.replace(_UFW_V6_MARKER, "").strip()
+
+    destination, dest_iface = _split_ufw_on_interface(destination)
+    source, src_iface = _split_ufw_on_interface(source)
+
+    return UfwRule(
+        action=action,
+        direction=direction,
+        destination=destination,
+        source=source,
+        # A literal IPv6 address carries no "(v6)" marker, so the colon is the
+        # tell. Ports and interface names never contain one.
+        ip_version="v6" if is_v6 or ":" in destination or ":" in source else "v4",
+        position=position,
+        interface=dest_iface or src_iface,
+        comment=comment,
+    )
+
+
+def _pair_ufw_rules(rules: list[UfwRule]) -> list[UfwRule]:
+    """Fold each rule's IPv4 and IPv6 halves into a single entry.
+
+    `ufw allow 22/tcp` installs two numbered entries. Showing both makes every
+    ruleset look duplicated and invites deleting "the extra one", which
+    silently drops IPv6 access.
+    """
+    out: list[UfwRule] = []
+    seen: dict[tuple, UfwRule] = {}
+    for rule in rules:
+        key = (
+            rule.action,
+            rule.direction,
+            rule.destination,
+            rule.source,
+            rule.interface,
+            rule.comment,
+        )
+        existing = seen.get(key)
+        if existing is None:
+            seen[key] = rule
+            out.append(rule)
+            if rule.ip_version == "v6":
+                rule.position, rule.position_v6 = None, rule.position
+            continue
+        if rule.ip_version == "v6":
+            existing.position_v6 = rule.position
+        else:
+            existing.position = rule.position
+        existing.ip_version = "both"
+    return out
+
+
+def _parse_ufw_status(text: str) -> UfwStatus:
+    status = UfwStatus()
+    rules: list[UfwRule] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        low = stripped.lower()
+        if low.startswith("status:"):
+            status.active = stripped.split(":", 1)[1].strip().lower() == "active"
+            continue
+        if low.startswith("logging:"):
+            status.logging = stripped.split(":", 1)[1].strip() or None
+            continue
+        if low.startswith("default:"):
+            for policy, direction in _UFW_DEFAULT_RE.findall(stripped):
+                setattr(status, f"default_{direction}", policy.lower())
+            continue
+        m = _UFW_NUMBERED_RE.match(stripped)
+        if m is not None:
+            rule = _parse_ufw_rule_line(int(m.group(1)), m.group(2))
+            if rule is not None:
+                rules.append(rule)
+    status.rules = _pair_ufw_rules(rules)
+    return status
+
+
+def _parse_ufw_added(text: str) -> list[str]:
+    """The `ufw …` command lines from `ufw show added`.
+
+    These are the authoritative rule specifications — ufw renumbers on every
+    delete, so a position is not a stable identifier.
+    """
+    return [
+        line.strip() for line in text.splitlines() if line.strip().startswith("ufw ")
+    ]
+
+
+def _ufw_rule_from_spec(spec: str) -> UfwRule:
+    """Render one `ufw show added` line as a rule, for a firewall that is off.
+
+    Deliberately shallow. With ufw inactive there is no numbered table to
+    check the result against, so this fills the columns it can recognise and
+    keeps the original line in `spec` for everything else. Guessing harder
+    would produce a confident-looking rule that does not match what ufw would
+    actually install.
+    """
+    tokens = spec.split()
+    if tokens and tokens[0] == "ufw":
+        tokens = tokens[1:]
+
+    comment = None
+    if "comment" in tokens:
+        i = tokens.index("comment")
+        comment = " ".join(tokens[i + 1 :]).strip().strip("'\"") or None
+        tokens = tokens[:i]
+
+    direction = "in"
+    if tokens and tokens[0] == "route":
+        direction = "fwd"
+        tokens = tokens[1:]
+
+    action = tokens[0].lower() if tokens else "allow"
+    tokens = tokens[1:]
+    if tokens and tokens[0] in {"in", "out"}:
+        direction = tokens[0]
+        tokens = tokens[1:]
+
+    interface: str | None = None
+    source: str | None = None
+    destination: str | None = None
+    proto: str | None = None
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok == "on" and nxt:
+            interface, i = nxt, i + 2
+        elif tok == "from" and nxt:
+            source, i = nxt, i + 2
+        elif tok == "to" and nxt:
+            destination, i = nxt, i + 2
+        elif tok == "port" and nxt:
+            # "to any port 3000" — the port is the useful half; "any" is not.
+            destination = nxt if destination in (None, "any") else f"{destination} port {nxt}"
+            i += 2
+        elif tok == "proto" and nxt:
+            proto, i = nxt, i + 2
+        else:
+            # A bare token: a port spec, or the name of an app profile. Which
+            # one is not decided here — the caller has `ufw app list` and can
+            # match it without guessing.
+            destination, i = tok, i + 1
+
+    if proto and destination and "/" not in destination:
+        destination = f"{destination}/{proto}"
+
+    return UfwRule(
+        action=action,
+        direction=direction,
+        destination=destination or "Anywhere",
+        source=source or "Anywhere",
+        ip_version="v6" if ":" in f"{source or ''}{destination or ''}" else "v4",
+        interface=interface,
+        comment=comment,
+        spec=spec,
+    )
+
+
+def _parse_ufw_app_list(text: str) -> list[str]:
+    out: list[str] = []
+    started = False
+    for line in text.splitlines():
+        if line.strip().lower().startswith("available applications"):
+            started = True
+            continue
+        if started and line.strip():
+            out.append(line.strip())
     return out
 
 

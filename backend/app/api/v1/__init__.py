@@ -27,6 +27,7 @@ from app.api.v1 import (
     sites,
     system,
     tenants,
+    ufw,
     updates,
     users,
     vpn,
@@ -46,6 +47,7 @@ router.include_router(devices.router, prefix="/devices", tags=["devices"])
 router.include_router(device_ops.router, prefix="/devices", tags=["device-ops"])
 router.include_router(vpn.router, prefix="/devices", tags=["vpn"])
 router.include_router(firewall.router, prefix="/devices", tags=["firewall"])
+router.include_router(ufw.router, prefix="/devices", tags=["ufw"])
 router.include_router(router_system.router, prefix="/devices", tags=["router-system"])
 router.include_router(network.router, prefix="/devices", tags=["network"])
 router.include_router(queues.router, prefix="/devices", tags=["queues"])

@@ -50,6 +50,10 @@ class Capability(StrEnum):
     FIREWALL_FILTER = "firewall.filter"
     FIREWALL_NAT = "firewall.nat"
     FIREWALL_MANGLE = "firewall.mangle"
+    # ufw is its own capability rather than riding on FIREWALL_FILTER: it has
+    # no chains, its rules are ordered and positional, and the whole firewall
+    # has an on/off state that a RouterOS filter table does not.
+    FIREWALL_UFW = "firewall.ufw"
     # QoS
     QUEUE_SIMPLE = "queue.simple"
     QUEUE_TREE = "queue.tree"
@@ -333,6 +337,103 @@ class FilterRule:
     disabled: bool = False
     comment: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ManagementPath:
+    """How a managed host actually sees NetFleet connecting to it.
+
+    Read from `$SSH_CONNECTION` on the live session, so it survives NAT and
+    tunnels. This is the address a firewall rule must name to keep NetFleet
+    reachable — deliberately *not* the organisation's configured egress IP,
+    which a host behind a management VLAN or a WireGuard tunnel never sees.
+    """
+
+    client_address: str | None = None
+    server_address: str | None = None
+    server_port: int | None = None
+
+    @property
+    def known(self) -> bool:
+        return bool(self.client_address and self.server_port)
+
+
+@dataclass(slots=True)
+class UfwRule:
+    """One logical ufw rule.
+
+    ufw numbers its IPv4 and IPv6 entries separately, so a single
+    `ufw allow 22/tcp` appears twice in `ufw status numbered`. Both halves are
+    folded into one rule here and `ip_version` records which exist. Rendering
+    them as two rows reads as a duplicate and invites an operator to delete
+    "the extra one" — which silently drops IPv6 access.
+
+    Field names follow ufw's own columns: `destination` is its "To" (what is
+    being opened on this host), `source` its "From" (the remote).
+    """
+
+    action: str                             # allow | deny | reject | limit
+    direction: str                          # in | out | fwd
+    destination: str                        # "22/tcp", "Anywhere", "3000 on eth0"
+    source: str                             # "Anywhere", "10.0.0.0/8"
+    ip_version: str = "v4"                  # v4 | v6 | both
+    # Position in `ufw status numbered`, per address family. Both are None
+    # when the rules came from `ufw show added` on an inactive firewall,
+    # where no numbering exists.
+    position: int | None = None
+    position_v6: int | None = None
+    interface: str | None = None
+    app: str | None = None                  # app profile, when the rule uses one
+    comment: str | None = None
+    # The `ufw show added` command line, when we have it. This is the
+    # authoritative spec for deleting the rule later — ufw renumbers on every
+    # delete, so a position is not a stable identifier.
+    spec: str | None = None
+
+
+@dataclass(slots=True)
+class UfwRuleSpec:
+    """A rule to install, in the terms ufw's own grammar uses.
+
+    Separate from `UfwRule` on purpose: that one describes what ufw *reports*
+    (including positions and the v4/v6 split it invents), this one describes
+    what an operator asked for. Conflating them means round-tripping a parsed
+    display string back into a command, which is where a rule quietly becomes
+    a different rule.
+    """
+
+    action: str = "allow"                   # allow | deny | reject | limit
+    direction: str = "in"                   # in | out | fwd
+    from_address: str | None = None         # None == "any"
+    to_address: str | None = None           # None == "any"
+    port: str | None = None                 # "22", "80,443", "1024:65535"
+    protocol: str | None = None             # tcp | udp
+    interface: str | None = None
+    comment: str | None = None
+
+
+@dataclass(slots=True)
+class UfwStatus:
+    """What ufw reports about itself.
+
+    `installed=False` and `active=False` are deliberately distinct. A host
+    without ufw and a host whose ufw is switched off need different words on
+    screen, and conflating them makes an unprotected server look configured.
+    """
+
+    installed: bool = True
+    active: bool = False
+    logging: str | None = None              # "on (low)" | "off"
+    default_incoming: str | None = None
+    default_outgoing: str | None = None
+    default_routed: str | None = None
+    rules: list[UfwRule] = field(default_factory=list)
+    app_profiles: list[str] = field(default_factory=list)
+    # True when the rules were recovered from `ufw show added` because ufw is
+    # inactive. `ufw status` prints "Status: inactive" and no rules at all, so
+    # without this an configured-but-disabled firewall looks like an empty one
+    # — the single most dangerous thing this screen could get wrong.
+    rules_from_added: bool = False
 
 
 @dataclass(slots=True)
@@ -802,6 +903,7 @@ class VendorDriver(Protocol):
         self, creds: DeviceCredentials
     ) -> list[ScheduledJob]: ...
     async def packages_state(self, creds: DeviceCredentials) -> PackageState: ...
+    async def ufw_status(self, creds: DeviceCredentials) -> UfwStatus: ...
     async def packages_refresh(self, creds: DeviceCredentials) -> str: ...
     async def packages_upgrade(
         self,
