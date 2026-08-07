@@ -124,6 +124,44 @@ export async function deleteUfwRule(
   }
 }
 
+export async function editUfwRule(
+  deviceId: string,
+  spec: string,
+  rule: UfwRuleCreate,
+  force = false,
+): Promise<UfwWriteResult> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/firewall/ufw/rules/edit`, {
+        json: { ...rule, spec, force },
+        timeout: 120_000,
+      })
+      .json<UfwWriteResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
+/** ufw is first-match, so this changes behaviour even though nothing is
+ * added or removed. */
+export async function moveUfwRule(
+  deviceId: string,
+  spec: string,
+  position: number,
+  force = false,
+): Promise<UfwWriteResult> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/firewall/ufw/rules/move`, {
+        json: { spec, position, force },
+        timeout: 120_000,
+      })
+      .json<UfwWriteResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function listPendingGuards(
   deviceId: string,
 ): Promise<ChangeGuard[]> {

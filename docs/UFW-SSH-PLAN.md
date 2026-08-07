@@ -271,18 +271,58 @@ host restores itself and NetFleet says so.
 
 ---
 
-## Stage F4 — Rule edit + reorder (S)
+## Stage F4 — Rule edit + reorder (M) — **done**
 
-- [ ] Edit is `insert` at the old position, **then** delete the old rule — never
-      the reverse. The overlap window is harmless; the gap window is a lockout.
-- [ ] Move up / move down via the same primitive
-- [ ] Guard-wrapped; the probe in F2 covers the case where the edit itself is
-      what breaks access
-- [ ] `PATCH /devices/{id}/firewall/ufw/rules/{position}` and `.../move`
-- [ ] UI: inline edit, arrow buttons, optimistic ordering with rollback on error
+Sized S in the original plan. It became M because reordering needed a real
+first-match simulation, not the rule-counting F3 shipped with — see below.
 
-**Ships:** rules can be corrected without delete-and-retype.
-**Accept:** edit a rule's port and confirm both position and comment survive.
+- [x] **Edit** inserts the replacement, confirms it landed, **then** deletes the
+      original. Never the reverse: the overlap window is harmless, the gap
+      window is a lockout.
+- [x] Edit aborts if ufw *skipped* the insert. ufw refuses a duplicate with
+      "Skipping adding existing rule" and **exit status 0**, so the rule count
+      before and after is the only honest signal — deleting the original after
+      a skipped insert would remove the rule and leave nothing in its place.
+- [x] **Move deletes first and re-inserts**, the opposite order, because a move
+      produces a rule identical to one already installed and ufw refuses
+      duplicates. Both commands share one connection, so the window is a single
+      round trip, and the guard's snapshot covers it. This asymmetry is
+      deliberate and is the reason edit and move are separate driver methods
+      rather than one primitive.
+- [x] `route` precedes `insert` (`ufw route insert N RULE`), matching
+      `ufw route delete RULE`
+- [x] IPv6-only rules refuse to move, with the reason. `ufw insert N` numbers
+      the IPv4 list; a v6-only rule's number in the combined table is a
+      different one, and using it would reorder some unrelated rule.
+- [x] `POST /devices/{id}/firewall/ufw/rules/edit` and `.../rules/move`, both
+      identifying the rule by spec rather than by number
+- [x] UI: edit reuses the add form pre-filled, arrow buttons per row, both
+      disabled on a rule with no spec
+- [x] Tests: `backend/tests/test_ufw_order.py` (18)
+
+### The safety check became a simulation
+
+F3 refused a delete by counting how many rules covered the management path.
+That reasoning cannot see a reorder at all: moving a `deny` above the `allow`
+that keeps NetFleet reachable takes the host away while the count stays
+exactly the same.
+
+So the check was rewritten as `ufw_path_verdict` — walk the projected ruleset
+in order and return what ufw's first-match evaluation would do to NetFleet's
+own connection. Delete, edit and move now each supply a `project` function
+returning the ruleset they would leave behind, and share one verdict.
+Falling through to a default of `deny` counts as a lockout, because an empty
+ruleset on a host with the stock incoming policy is exactly as unreachable as
+an explicit deny.
+
+One deliberate escape hatch: if the *current* ruleset already reads as locked
+out while we are demonstrably talking to the host, the model is wrong about
+that host and is not allowed to block a change on the strength of it. That is
+logged, and the host-side guard remains the backstop.
+
+**Ships:** rules can be corrected and reordered without delete-and-retype.
+**Accept:** edit a rule's port and confirm both position and comment survive;
+move a deny above the SSH allow and confirm NetFleet refuses with the reason.
 
 ---
 

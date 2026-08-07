@@ -8,8 +8,10 @@ import {
   confirmGuard,
   createUfwRule,
   deleteUfwRule,
+  editUfwRule,
   getUfwStatus,
   listPendingGuards,
+  moveUfwRule,
   rollbackGuard,
   type ChangeGuard,
   type UfwRule,
@@ -30,6 +32,7 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<UfwRule | null>(null);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<UfwStatus>({
     queryKey: ["ufw", deviceId],
@@ -52,6 +55,16 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
     onError: (e: Error) => {
       invalidate();
       toast.error("Could not delete the rule", e.message);
+    },
+  });
+
+  const move = useMutation({
+    mutationFn: (v: { spec: string; position: number }) =>
+      moveUfwRule(deviceId, v.spec, v.position),
+    onSuccess: () => invalidate(),
+    onError: (e: Error) => {
+      invalidate();
+      toast.error("Could not move the rule", e.message);
     },
   });
 
@@ -90,20 +103,28 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
           {data?.installed && (
             <button
               type="button"
-              onClick={() => setShowForm((v) => !v)}
+              onClick={() => {
+                setEditing(null);
+                setShowForm((v) => !v);
+              }}
               className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
             >
-              {showForm ? "Cancel" : "Add rule"}
+              {showForm && !editing ? "Cancel" : "Add rule"}
             </button>
           )}
         </div>
       </div>
 
-      {showForm && data?.installed && (
-        <AddRuleForm
+      {(showForm || editing) && data?.installed && (
+        <RuleForm
+          // Remounts when the edited rule changes, so the form fields reset
+          // to the new rule instead of keeping the previous one's values.
+          key={editing?.spec ?? "new"}
           deviceId={deviceId}
+          editing={editing}
           onDone={() => {
             setShowForm(false);
+            setEditing(null);
             invalidate();
           }}
         />
@@ -159,7 +180,15 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
             <RuleTable
               rules={data.rules}
               numbered={!data.rules_from_added}
-              busy={remove.isPending}
+              busy={remove.isPending || move.isPending}
+              onEdit={(r) => {
+                setShowForm(false);
+                setEditing(r);
+              }}
+              onMove={(r, delta) => {
+                if (!r.spec || r.position === null) return;
+                move.mutate({ spec: r.spec, position: r.position + delta });
+              }}
               onDelete={(r) => {
                 if (!r.spec) return;
                 if (
@@ -214,43 +243,62 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
  * port — and hides the from/to/interface machinery behind a toggle rather
  * than presenting eight fields to someone who wants to allow 443.
  */
-function AddRuleForm({
+function RuleForm({
   deviceId,
+  editing,
   onDone,
 }: {
   deviceId: string;
+  editing?: UfwRule | null;
   onDone: () => void;
 }) {
   const toast = useToast();
-  const [advanced, setAdvanced] = useState(false);
-  const [action, setAction] = useState<UfwRuleCreate["action"]>("allow");
-  const [direction, setDirection] = useState<UfwRuleCreate["direction"]>("in");
-  const [port, setPort] = useState("");
-  const [protocol, setProtocol] = useState<"" | "tcp" | "udp">("tcp");
-  const [fromAddress, setFromAddress] = useState("");
+  const initial = splitDestination(editing?.destination);
+  const [advanced, setAdvanced] = useState(Boolean(editing));
+  const [action, setAction] = useState<UfwRuleCreate["action"]>(
+    (editing?.action as UfwRuleCreate["action"]) ?? "allow",
+  );
+  const [direction, setDirection] = useState<UfwRuleCreate["direction"]>(
+    (editing?.direction as UfwRuleCreate["direction"]) ?? "in",
+  );
+  const [port, setPort] = useState(initial.port);
+  const [protocol, setProtocol] = useState<"" | "tcp" | "udp">(initial.protocol);
+  const [fromAddress, setFromAddress] = useState(
+    anywhereToBlank(editing?.source),
+  );
   const [toAddress, setToAddress] = useState("");
-  const [iface, setIface] = useState("");
-  const [comment, setComment] = useState("");
-  const [position, setPosition] = useState("");
+  const [iface, setIface] = useState(editing?.interface ?? "");
+  const [comment, setComment] = useState(editing?.comment ?? "");
+  const [position, setPosition] = useState(
+    editing?.position ? String(editing.position) : "",
+  );
+
+  const body = (): UfwRuleCreate => ({
+    action,
+    direction,
+    port: port.trim() || null,
+    protocol: protocol || null,
+    from_address: fromAddress.trim() || null,
+    to_address: toAddress.trim() || null,
+    interface: iface.trim() || null,
+    comment: comment.trim() || null,
+    position: position.trim() ? Number(position) : null,
+  });
 
   const add = useMutation({
     mutationFn: () =>
-      createUfwRule(deviceId, {
-        action,
-        direction,
-        port: port.trim() || null,
-        protocol: protocol || null,
-        from_address: fromAddress.trim() || null,
-        to_address: toAddress.trim() || null,
-        interface: iface.trim() || null,
-        comment: comment.trim() || null,
-        position: position.trim() ? Number(position) : null,
-      }),
+      editing?.spec
+        ? editUfwRule(deviceId, editing.spec, body())
+        : createUfwRule(deviceId, body()),
     onSuccess: (r) => {
-      toast.success("Rule added", r.command);
+      toast.success(editing ? "Rule updated" : "Rule added", r.command);
       onDone();
     },
-    onError: (e: Error) => toast.error("Could not add the rule", e.message),
+    onError: (e: Error) =>
+      toast.error(
+        editing ? "Could not edit the rule" : "Could not add the rule",
+        e.message,
+      ),
   });
 
   return (
@@ -261,6 +309,13 @@ function AddRuleForm({
       }}
       className="space-y-3 rounded-lg border border-border bg-card p-3"
     >
+      {editing && (
+        <p className="text-xs text-muted-foreground">
+          Editing <span className="font-mono">{editing.spec}</span>. The
+          replacement is added before the original is removed, so the rule is
+          never briefly absent.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Action">
           <select
@@ -370,7 +425,18 @@ function AddRuleForm({
           disabled={add.isPending}
           className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
-          {add.isPending ? "Applying and verifying…" : "Add rule"}
+          {add.isPending
+            ? "Applying and verifying…"
+            : editing
+              ? "Save rule"
+              : "Add rule"}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+        >
+          Cancel
         </button>
         <p className="text-xs text-muted-foreground">
           The host arms a rollback before the change and NetFleet reconnects to
@@ -379,6 +445,27 @@ function AddRuleForm({
       </div>
     </form>
   );
+}
+
+/** "22/tcp" -> port 22, protocol tcp. "Anywhere" -> neither. */
+function splitDestination(destination?: string): {
+  port: string;
+  protocol: "" | "tcp" | "udp";
+} {
+  const value = (destination ?? "").trim();
+  if (!value || value.toLowerCase() === "anywhere") {
+    return { port: "", protocol: "" };
+  }
+  const [port, proto] = value.split("/");
+  return {
+    port: port ?? "",
+    protocol: proto === "tcp" || proto === "udp" ? proto : "",
+  };
+}
+
+function anywhereToBlank(source?: string): string {
+  const value = (source ?? "").trim();
+  return !value || value.toLowerCase() === "anywhere" ? "" : value;
 }
 
 const INPUT =
@@ -514,13 +601,23 @@ function RuleTable({
   rules,
   numbered,
   busy,
+  onEdit,
+  onMove,
   onDelete,
 }: {
   rules: UfwRule[];
   numbered: boolean;
   busy: boolean;
+  onEdit: (rule: UfwRule) => void;
+  onMove: (rule: UfwRule, delta: number) => void;
   onDelete: (rule: UfwRule) => void;
 }) {
+  // Order is behaviour, not presentation: ufw stops at the first rule that
+  // matches. Only rules ufw itself numbered can be reordered.
+  const ordered = rules.filter((r) => r.position !== null);
+  const firstPos = ordered.length ? ordered[0].position : null;
+  const lastPos = ordered.length ? ordered[ordered.length - 1].position : null;
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <table className="w-full text-sm">
@@ -532,7 +629,7 @@ function RuleTable({
             <th className="px-3 py-2 font-medium">From</th>
             <th className="px-3 py-2 font-medium">Interface</th>
             <th className="px-3 py-2 font-medium">Comment</th>
-            <th className="w-20 px-3 py-2" />
+            <th className="w-44 px-3 py-2" />
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -560,29 +657,86 @@ function RuleTable({
               <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
                 {r.comment ?? "—"}
               </td>
-              <td className="px-3 py-1.5 text-right">
-                <button
-                  type="button"
-                  onClick={() => onDelete(r)}
-                  // Without a spec there is no stable handle for this rule,
-                  // and deleting by position would remove whichever rule
-                  // happens to sit there now.
-                  disabled={busy || !r.spec}
-                  title={
-                    r.spec
-                      ? `Delete: ${r.spec}`
-                      : "NetFleet could not match this rule to a ufw specification, so it cannot delete it safely"
-                  }
-                  className="rounded border border-input px-2 py-0.5 text-[11px] font-medium hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-                >
-                  Delete
-                </button>
+              <td className="px-3 py-1.5">
+                <div className="flex items-center justify-end gap-1">
+                  <RowButton
+                    label="↑"
+                    title="Move up — ufw stops at the first matching rule"
+                    onClick={() => onMove(r, -1)}
+                    disabled={
+                      busy ||
+                      !r.spec ||
+                      r.position === null ||
+                      r.position === firstPos
+                    }
+                  />
+                  <RowButton
+                    label="↓"
+                    title="Move down — ufw stops at the first matching rule"
+                    onClick={() => onMove(r, 1)}
+                    disabled={
+                      busy ||
+                      !r.spec ||
+                      r.position === null ||
+                      r.position === lastPos
+                    }
+                  />
+                  <RowButton
+                    label="Edit"
+                    title={r.spec ? `Edit: ${r.spec}` : NO_SPEC}
+                    onClick={() => onEdit(r)}
+                    disabled={busy || !r.spec}
+                  />
+                  <RowButton
+                    label="Delete"
+                    danger
+                    // Without a spec there is no stable handle for this rule,
+                    // and acting by position would hit whichever rule happens
+                    // to sit there now.
+                    title={r.spec ? `Delete: ${r.spec}` : NO_SPEC}
+                    onClick={() => onDelete(r)}
+                    disabled={busy || !r.spec}
+                  />
+                </div>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+const NO_SPEC =
+  "NetFleet could not match this rule to a ufw specification, so it cannot " +
+  "change it safely";
+
+function RowButton({
+  label,
+  title,
+  onClick,
+  disabled,
+  danger,
+}: {
+  label: string;
+  title: string;
+  onClick: () => void;
+  disabled: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        "rounded border border-input px-2 py-0.5 text-[11px] font-medium disabled:opacity-40",
+        danger ? "hover:bg-destructive/10 hover:text-destructive" : "hover:bg-accent",
+      )}
+    >
+      {label}
+    </button>
   );
 }
 

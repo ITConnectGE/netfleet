@@ -71,6 +71,26 @@ class UfwRuleDelete(BaseModel):
     force: bool = False
 
 
+class UfwRuleEdit(UfwRuleCreate):
+    """Replace `spec` with the rule described by the inherited fields.
+
+    Carries the original's specification rather than its number for the same
+    reason a delete does: ufw renumbers constantly, a spec does not move.
+    """
+
+    spec: str = Field(min_length=5, max_length=512)
+    force: bool = False
+
+
+class UfwRuleMove(BaseModel):
+    """Reorder a rule. ufw is first-match, so this changes behaviour even
+    though nothing is added or removed."""
+
+    spec: str = Field(min_length=5, max_length=512)
+    position: int = Field(ge=1)
+    force: bool = False
+
+
 class UfwWriteResult(BaseModel):
     """What a guarded write did, and the guard that is watching it."""
 

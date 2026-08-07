@@ -26,6 +26,8 @@ from app.schemas.ufw import (
     ChangeGuardPublic,
     UfwRuleCreate,
     UfwRuleDelete,
+    UfwRuleEdit,
+    UfwRuleMove,
     UfwRulePublic,
     UfwStatusPublic,
     UfwWriteResult,
@@ -204,6 +206,73 @@ async def delete_ufw_rule(
             user.organization_id,
             device_id,
             spec=payload.spec,
+            force=payload.force,
+            started_by_user_id=user.id,
+        ),
+    )
+
+
+@router.post("/{device_id}/firewall/ufw/rules/edit", response_model=UfwWriteResult)
+async def edit_ufw_rule(
+    device_id: UUID,
+    payload: UfwRuleEdit,
+    request: Request,
+    user: User = Depends(require_permission("firewall.ufw", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> UfwWriteResult:
+    """Replace a rule. The replacement is inserted before the original is
+    removed, so there is never a moment with neither in place."""
+    spec = UfwRuleSpec(
+        action=payload.action,
+        direction=payload.direction,
+        from_address=payload.from_address,
+        to_address=payload.to_address,
+        port=payload.port,
+        protocol=payload.protocol,
+        interface=payload.interface,
+        comment=payload.comment,
+    )
+    return await _guarded_write(
+        session,
+        user,
+        request,
+        device_id,
+        action="rule_edit",
+        payload=payload.model_dump(),
+        run=lambda: ufw_svc.edit_rule(
+            session,
+            user.organization_id,
+            device_id,
+            old_spec=payload.spec,
+            spec=spec,
+            position=payload.position,
+            force=payload.force,
+            started_by_user_id=user.id,
+        ),
+    )
+
+
+@router.post("/{device_id}/firewall/ufw/rules/move", response_model=UfwWriteResult)
+async def move_ufw_rule(
+    device_id: UUID,
+    payload: UfwRuleMove,
+    request: Request,
+    user: User = Depends(require_permission("firewall.ufw", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> UfwWriteResult:
+    return await _guarded_write(
+        session,
+        user,
+        request,
+        device_id,
+        action="rule_move",
+        payload=payload.model_dump(),
+        run=lambda: ufw_svc.move_rule(
+            session,
+            user.organization_id,
+            device_id,
+            spec=payload.spec,
+            position=payload.position,
             force=payload.force,
             started_by_user_id=user.id,
         ),

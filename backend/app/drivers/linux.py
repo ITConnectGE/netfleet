@@ -820,6 +820,83 @@ class LinuxDriver(SupportsCapabilityFallback):
         result.check("adding the firewall rule")
         return " ".join(argv)
 
+    async def _ufw_added_count(self, creds: DeviceCredentials) -> int:
+        result = await ssh.run(
+            creds, ["ufw", "show", "added"], become=True, timeout=30
+        )
+        result.check("reading the configured rules")
+        return len(_parse_ufw_added(result.stdout))
+
+    async def ufw_rule_replace(
+        self,
+        creds: DeviceCredentials,
+        *,
+        old_spec: str,
+        new_spec: UfwRuleSpec,
+        position: int | None = None,
+    ) -> str:
+        """Edit a rule: insert the replacement, confirm it landed, remove the
+        original.
+
+        In that order, always. The reverse leaves a window with neither rule
+        present, and if the rule being edited is the one keeping NetFleet
+        reachable, that window is a lockout. Inserting first can at worst leave
+        two overlapping rules for a moment, which is harmless.
+        """
+        insert_argv = _build_ufw_rule_argv(new_spec, position=position)
+        delete_argv = _delete_argv_from_spec(old_spec)
+
+        before = await self._ufw_added_count(creds)
+        add_r = await ssh.run(creds, insert_argv, become=True, timeout=60)
+        add_r.check("adding the replacement rule")
+
+        # ufw refuses duplicates with "Skipping adding existing rule" and exit
+        # status 0, so the count is the only honest signal. Deleting the
+        # original after a skipped insert would remove the rule the operator
+        # meant to keep and leave nothing behind it.
+        if await self._ufw_added_count(creds) <= before:
+            raise ssh.SshError(
+                "ufw already has a rule identical to the edited one, so "
+                "nothing was changed and the original is still in place."
+            )
+
+        del_r = await ssh.run(creds, delete_argv, become=True, timeout=60)
+        del_r.check("removing the original rule")
+        return f"{' '.join(insert_argv)} ; {' '.join(delete_argv)}"
+
+    async def ufw_rule_move(
+        self, creds: DeviceCredentials, *, spec: str, position: int
+    ) -> str:
+        """Move a rule to a new position: delete, then re-insert.
+
+        The opposite order from an edit, and for a reason worth stating. A move
+        produces a rule byte-identical to one already installed, and ufw
+        refuses to add a duplicate — so insert-then-delete cannot work here.
+        The reversed order leaves a brief window with the rule absent; both
+        commands share one connection, so that window is a single round trip,
+        and the guard's snapshot covers it if anything goes wrong inside it.
+        """
+        if position < 1:
+            raise ValueError("a rule position is 1-based")
+        delete_argv = _delete_argv_from_spec(spec)
+
+        tokens = spec.split()[1:]
+        if tokens and tokens[0] == "route":
+            insert_argv = ["ufw", "route", "insert", str(position), *tokens[1:]]
+        else:
+            insert_argv = ["ufw", "insert", str(position), *tokens]
+
+        batch = await ssh.run_many(
+            creds,
+            [
+                ssh.Command(argv=delete_argv, become=True, timeout=60),
+                ssh.Command(argv=insert_argv, become=True, timeout=60),
+            ],
+        )
+        batch.results[0].check("removing the rule from its old position")
+        batch.results[1].check("re-inserting the rule at its new position")
+        return f"{' '.join(delete_argv)} ; {' '.join(insert_argv)}"
+
     async def ufw_rule_delete(self, creds: DeviceCredentials, *, spec: str) -> str:
         """Delete by rule specification, never by number.
 
@@ -1884,12 +1961,14 @@ def _build_ufw_rule_argv(
     _assert_safe_ufw_spec(spec)
 
     argv = ["ufw"]
+    # `route` precedes `insert`: ufw's grammar is `ufw route insert NUM RULE`,
+    # matching `ufw route delete RULE`.
+    if spec.direction == "fwd":
+        argv.append("route")
     if position is not None:
         if position < 1:
             raise ValueError("a rule position is 1-based")
         argv += ["insert", str(position)]
-    if spec.direction == "fwd":
-        argv.append("route")
     argv.append(spec.action)
     if spec.direction in {"in", "out"}:
         argv.append(spec.direction)
@@ -1981,16 +2060,12 @@ def _ufw_source_matches(source: str, address: str) -> bool:
         return False
 
 
-def ufw_rule_covers_path(rule: UfwRule, path: ManagementPath) -> bool:
-    """Whether this rule is part of what keeps NetFleet able to reach the host.
+def _ufw_rule_matches_path(rule: UfwRule, path: ManagementPath) -> bool:
+    """Whether this rule's selectors match NetFleet's own connection.
 
-    Only inbound accepts count. `limit` counts alongside `allow`, because it
-    permits the connection and merely rate-limits new ones — treating it as a
-    deny would let the last real rule be deleted.
+    Says nothing about whether it permits or blocks it — see `ufw_path_verdict`.
     """
-    if not path.known:
-        return False
-    if rule.action not in {"allow", "limit"} or rule.direction != "in":
+    if not path.known or rule.direction != "in":
         return False
     port_spec = _ufw_port_of(rule.destination)
     if port_spec is not None and not _ufw_port_matches(
@@ -1998,6 +2073,70 @@ def ufw_rule_covers_path(rule: UfwRule, path: ManagementPath) -> bool:
     ):
         return False
     return _ufw_source_matches(rule.source, path.client_address or "")
+
+
+def ufw_rule_covers_path(rule: UfwRule, path: ManagementPath) -> bool:
+    """Whether this rule permits NetFleet's own connection.
+
+    `limit` counts alongside `allow`, because it permits the connection and
+    merely rate-limits new ones — treating it as a deny would let the last
+    real rule be deleted.
+    """
+    return rule.action in {"allow", "limit"} and _ufw_rule_matches_path(rule, path)
+
+
+def ufw_spec_covers_path(spec: UfwRuleSpec, path: ManagementPath) -> bool:
+    """The same question about a rule that does not exist yet.
+
+    Needed before an edit: the replacement has to be checked, not the original,
+    or editing the one rule holding the door open sails straight through.
+    """
+    if not path.known or spec.direction != "in":
+        return False
+    if spec.action not in {"allow", "limit"}:
+        return False
+    if spec.port is not None and not _ufw_port_matches(
+        spec.port, path.server_port or 0
+    ):
+        return False
+    source = spec.from_address or "any"
+    return _ufw_source_matches(source, path.client_address or "")
+
+
+def ufw_path_verdict(rules: list[UfwRule], path: ManagementPath) -> str:
+    """What ufw would do with NetFleet's own connection, walking rules in order.
+
+    ufw is first-match. A deny placed *above* the allow that keeps NetFleet
+    reachable takes the host away without deleting anything at all, which is
+    why reordering needs this and not just a count of covering rules.
+
+    Returns "allow", "deny", or "default" when nothing matches.
+    """
+    for rule in rules:
+        if not _ufw_rule_matches_path(rule, path):
+            continue
+        return "allow" if rule.action in {"allow", "limit"} else "deny"
+    return "default"
+
+
+def ufw_would_lock_out(
+    rules_after: list[UfwRule], path: ManagementPath, default_incoming: str | None
+) -> bool:
+    """Whether this ruleset, in this order, would cut NetFleet off.
+
+    Falling through to a default of `deny` counts: an empty ruleset on a host
+    with the stock incoming policy is just as unreachable as an explicit deny.
+    """
+    if not path.known:
+        # Nothing observed, so nothing can be reasoned about. The host-side
+        # guard remains the backstop.
+        return False
+    verdict = ufw_path_verdict(rules_after, path)
+    if verdict == "allow":
+        return False
+    if verdict == "deny":
+        return True
+    return (default_incoming or "deny").lower() == "deny"
 
 
 def _parse_ssh_connection(text: str) -> ManagementPath:
