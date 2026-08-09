@@ -366,40 +366,60 @@ a disabled one and re-enable it, to see the drift note.
 
 ---
 
-## Stage F6 — Firewall enable / disable (M) — riskiest, therefore last
+## Stage F6 — Firewall enable / disable (M) — **done**
 
-- [ ] `ufw disable` — guarded, and warns that the host is unprotected **and
-      stays unprotected across reboot**
-- [ ] `ufw --force enable` — `--force` because plain `ufw enable` prompts
-      interactively and would hang a connection nobody can answer
+- [x] `ufw --force disable` — guarded, and the confirm says the host is
+      unprotected **and stays unprotected across reboot**
+- [x] `ufw --force enable` — `--force` because plain `ufw enable` asks
+      *"Command may disrupt existing ssh connections. Proceed with operation
+      (y|n)?"* and would hang on a channel nobody can answer
+- [x] Both gated on `firewall.ufw:execute` rather than `:write` — a bigger
+      hammer than editing a rule, and worth granting separately
+- [x] **The default policy is read from `/etc/default/ufw` too.** `ufw status
+      verbose` prints the `Default:` line only while ufw is *running*, so
+      without this the pre-flight would reason about a disabled firewall with
+      no idea what policy switching it on would apply. The file speaks
+      iptables targets (`DROP`/`ACCEPT`/`REJECT`) and ufw's output speaks
+      `deny`/`allow`/`reject`; translated at the boundary so one vocabulary
+      reaches the rest of the system. The running answer always wins where
+      both exist.
 
 ### The enable dialog
 
 Enable is not refused. It is explained, with the fix pre-filled — an operator
 on a console, or one who knows something we do not, is allowed to proceed.
 
-- [ ] `GET /devices/{id}/firewall/ufw/enable-preflight` returns what the dialog
+- [x] `GET /devices/{id}/firewall/ufw/enable-preflight` returns what the dialog
       renders: the detected management path (F2), the pending ruleset, and
-      whether anything in it already covers that path
-- [ ] **Two states, never one generic warning.** A dialog that looks identical
+      whether anything in it already covers that path. Read-only.
+- [x] **Two states, never one generic warning.** A dialog that looks identical
       whether or not the host is safe trains people to click through it.
-  - **Covered** — name the rule that protects them
-    ("`[3] 22/tcp ALLOW IN 10.20.0.4` covers this connection"). Ordinary
-    confirm. Primary button enables.
-  - **Not covered** — state the consequence, offer the fix as the **primary,
-    pre-filled** action: *"Allow `<observed_port>/tcp` from `<observed_ip>`,
-    then enable"*, executed as one guarded operation. Proceeding without it
-    stays available as a secondary action behind an explicit acknowledgement,
-    and is audited distinctly from the safe path.
-- [ ] **Accurate wording.** Not "you will lose your connection" — that is false
-      and gets the dialog dismissed as noise. The current session survives; what
-      breaks is NetFleet's *next* connection. The dialog says that.
-- [ ] Guard window shortened for this operation — the fresh-connection probe is
-      the real test here and it either passes in a second or does not. The
-      dialog is prevention; the guard is recovery. Neither replaces the other.
-- [ ] Edge case: no management path detectable (`$SSH_CONNECTION` unset, e.g. a
-      non-interactive path that strips it) ⇒ the fix cannot be pre-filled, so
-      the dialog says so plainly rather than guessing an address
+  - **Covered** — names the rule that protects them. Ordinary confirm, primary
+    button enables.
+  - **Not covered** — states the consequence and offers the fix as the
+    **primary, pre-filled** action: *"Allow `<observed_port>/tcp` from
+    `<observed_ip>`, then enable"*. Proceeding without it is a secondary
+    button, disabled until an *"I have another way into this host"* checkbox is
+    ticked, and audited as `enable_forced` so a forced enable is findable in
+    the log without reading payloads.
+- [x] **The rule goes in before the enable, in one batch.** That ordering is
+      the entire value of the offered fix — a rule added afterwards would have
+      to arrive over a connection that no longer works. The enable is not
+      attempted at all if the rule was rejected, so a bad rule surfaces as
+      itself rather than as a mysterious lockout.
+- [x] **Accurate wording.** Not "you will lose your connection" — that is false
+      and gets the dialog dismissed as noise. The dialog says the current
+      session survives because ufw keeps established connections, and that what
+      breaks is NetFleet's *next* one, on the next operation.
+- [x] Guard window shortened to 60s for this operation — the fresh-connection
+      probe is the real test and it either passes in a second or does not; a
+      longer window just means a longer outage before the host rescues itself.
+      The dialog is prevention, the guard is recovery, neither replaces the
+      other.
+- [x] Edge case: no management path detectable (`$SSH_CONNECTION` unset) ⇒
+      neither the fix nor the safety claim can be made, and the dialog says
+      exactly that rather than guessing an address or implying it is safe
+- [x] Tests: `backend/tests/test_ufw_enable.py` (9)
 
 **Ships:** full UFW control.
 **Accept:** on a host with no SSH rule, open the enable dialog and confirm it
@@ -480,9 +500,18 @@ Listed so no stage re-does them:
 
 ```
 F1 (read) ──► F2 (guard) ──► F3 (add/delete) ──► F4 (edit/reorder) ──► F5 (toggle) ──► F6 (enable/disable)
+   done         done            done                done                 done            done
 S1 (key rotation) ─────────── independent ───────────►
 S2 (authorized_keys) ──────── independent ───────────►
 ```
+
+Track F shipped across v0.51.0 – v0.54.0. Track S has not started.
+
+**The one thing no test can establish** is the live acceptance: apply a rule
+that blocks the management path on a real host and watch it restore itself
+inside the window. Every layer below that is covered by unit tests, and the
+orchestration in `run_guarded` (probe → confirm / rollback) is still covered
+by neither, because it needs a database.
 
 F1 first because it is harmless and visible. F2 next because everything after
 it is not. F6 last because it is the only operation that can take a host away

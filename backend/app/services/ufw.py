@@ -7,6 +7,7 @@ call the driver directly — see docs/UFW-SSH-PLAN.md before adding one.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from app.drivers.linux import (
     ufw_project_moved,
     ufw_project_replaced,
     ufw_projected_rule,
+    ufw_rule_covers_path,
     ufw_would_lock_out,
 )
 from app.models.change_guard import ChangeGuard
@@ -31,6 +33,11 @@ from app.services import change_guard as guard_svc
 from app.services.device import HostKeyNotPinned, _to_driver_creds, get_device
 
 log = structlog.get_logger(__name__)
+
+# Shorter than the default. For enable/disable the fresh-connection probe is
+# the real test and it either passes in a second or does not; a long window
+# here just means a longer outage before the host rescues itself.
+ENABLE_GUARD_WINDOW_SECONDS = 60
 
 
 class OperationError(Exception):
@@ -335,6 +342,137 @@ async def enable_rule(
             f"{position} it held when it was disabled]"
         )
     return guard, command
+
+
+@dataclass(slots=True)
+class EnablePreflight:
+    """What the enable dialog renders.
+
+    Deliberately two distinct states rather than one generic warning. A dialog
+    that looks identical whether or not the host is safe teaches people to
+    click through it, and then it protects nobody.
+    """
+
+    already_active: bool
+    # None when $SSH_CONNECTION was unavailable — the fix cannot be pre-filled
+    # and the dialog has to say so rather than guess an address.
+    management_address: str | None
+    management_port: int | None
+    default_incoming: str | None
+    # True when the ruleset that would take effect already permits NetFleet.
+    covered: bool
+    # The rule doing the covering, so the dialog can name it instead of
+    # asserting safety without evidence.
+    covering_rule_spec: str | None
+    covering_rule_summary: str | None
+    # The pre-filled fix, when one can be built.
+    suggested_rule: UfwRuleSpec | None
+
+
+async def enable_preflight(
+    session: AsyncSession, organization_id: UUID, device_id: UUID
+) -> EnablePreflight:
+    """Work out whether switching this firewall on would cut NetFleet off."""
+    path = await guard_svc.management_path(session, organization_id, device_id)
+    status = await get_status(session, organization_id, device_id)
+
+    covering = next(
+        (
+            r
+            for r in status.rules
+            if path.known and ufw_rule_covers_path(r, path)
+        ),
+        None,
+    )
+    covered = covering is not None and not ufw_would_lock_out(
+        status.rules, path, status.default_incoming
+    )
+
+    suggested = None
+    if path.known and not covered:
+        suggested = UfwRuleSpec(
+            action="allow",
+            direction="in",
+            port=str(path.server_port),
+            protocol="tcp",
+            from_address=path.client_address,
+            comment="NetFleet management",
+        )
+
+    return EnablePreflight(
+        already_active=status.active,
+        management_address=path.client_address if path.known else None,
+        management_port=path.server_port if path.known else None,
+        default_incoming=status.default_incoming,
+        covered=covered,
+        covering_rule_spec=covering.spec if covering else None,
+        covering_rule_summary=(
+            f"{covering.destination} {covering.action.upper()} "
+            f"{covering.direction.upper()} {covering.source}"
+            if covering
+            else None
+        ),
+        suggested_rule=suggested,
+    )
+
+
+async def set_enabled(
+    session: AsyncSession,
+    organization_id: UUID,
+    device_id: UUID,
+    *,
+    enabled: bool,
+    allow_management: bool = False,
+    force: bool = False,
+    started_by_user_id: UUID | None = None,
+) -> tuple[ChangeGuard, str]:
+    """Switch the whole firewall on or off.
+
+    The only operation here that can take a host away in a single click, so
+    enabling refuses by default when the pre-flight says the management path
+    would not survive. `allow_management` is the offered fix; `force` is the
+    acknowledged override.
+    """
+    device = await get_device(session, organization_id, device_id)
+    driver = get_driver(device.vendor)
+
+    if not enabled:
+        return await guard_svc.run_guarded(
+            session,
+            organization_id,
+            device_id,
+            kind="ufw.disable",
+            started_by_user_id=started_by_user_id,
+            apply=lambda creds: driver.ufw_disable(creds),
+            window_seconds=ENABLE_GUARD_WINDOW_SECONDS,
+        )
+
+    pre = await enable_preflight(session, organization_id, device_id)
+    allow_first = pre.suggested_rule if allow_management else None
+    if not pre.covered and allow_first is None and not force:
+        raise WouldLockOut(
+            "Switching the firewall on would stop NetFleet reaching this host"
+            + (
+                f" ({pre.management_address} → port {pre.management_port})"
+                if pre.management_address
+                else ""
+            )
+            + ". Nothing in the ruleset permits that connection and the default "
+            "incoming policy is "
+            + (pre.default_incoming or "deny")
+            + ". Enable the management rule alongside it, or repeat the request "
+            "with force if you have another way in."
+        )
+
+    return await guard_svc.run_guarded(
+        session,
+        organization_id,
+        device_id,
+        kind="ufw.enable",
+        started_by_user_id=started_by_user_id,
+        apply=lambda creds: driver.ufw_enable(creds, allow_first=allow_first),
+        window_seconds=ENABLE_GUARD_WINDOW_SECONDS,
+    )
 
 
 async def move_rule(

@@ -11,12 +11,15 @@ import {
   disableUfwRule,
   editUfwRule,
   enableUfwRule,
+  getEnablePreflight,
   getUfwStatus,
   listPendingGuards,
   moveUfwRule,
   rollbackGuard,
+  setUfwEnabled,
   type ChangeGuard,
   type UfwDisabledRule,
+  type UfwEnablePreflight,
   type UfwRule,
   type UfwRuleCreate,
   type UfwStatus,
@@ -37,6 +40,7 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
   const toast = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<UfwRule | null>(null);
+  const [showEnable, setShowEnable] = useState(false);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<UfwStatus>({
     queryKey: ["ufw", deviceId],
@@ -92,6 +96,18 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
     },
   });
 
+  const disableFirewall = useMutation({
+    mutationFn: () => setUfwEnabled(deviceId, { enabled: false }),
+    onSuccess: (r) => {
+      invalidate();
+      toast.success("Firewall turned off", r.command);
+    },
+    onError: (e: Error) => {
+      invalidate();
+      toast.error("Could not turn the firewall off", e.message);
+    },
+  });
+
   const { data: guards } = useQuery<ChangeGuard[]>({
     queryKey: ["ufw-guards", deviceId],
     queryFn: () => listPendingGuards(deviceId),
@@ -124,6 +140,33 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
           >
             {isFetching ? "Reading…" : "Reload"}
           </button>
+          {data?.installed && !data.active && (
+            <button
+              type="button"
+              onClick={() => setShowEnable(true)}
+              className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Turn firewall on
+            </button>
+          )}
+          {data?.installed && data.active && (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  !confirm(
+                    "Turn the firewall off?\n\nThis host will accept all inbound traffic, and will stay unprotected across a reboot until it is switched back on.",
+                  )
+                )
+                  return;
+                disableFirewall.mutate();
+              }}
+              disabled={disableFirewall.isPending}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-50"
+            >
+              Turn firewall off
+            </button>
+          )}
           {data?.installed && (
             <button
               type="button"
@@ -138,6 +181,10 @@ export function UfwFirewall({ deviceId }: { deviceId: string }) {
           )}
         </div>
       </div>
+
+      {showEnable && (
+        <EnableDialog deviceId={deviceId} onClose={() => setShowEnable(false)} />
+      )}
 
       {(showForm || editing) && data?.installed && (
         <RuleForm
@@ -828,6 +875,164 @@ function DisabledRules({
         </table>
       </div>
     </section>
+  );
+}
+
+/**
+ * The enable dialog.
+ *
+ * Two states, never one generic warning — the whole reason the pre-flight
+ * endpoint exists. When the host is already covered it names the rule doing
+ * the covering; when it is not, the fix is the primary button, pre-filled with
+ * the address the host actually sees NetFleet arriving from.
+ *
+ * Proceeding anyway stays available, because an operator at a console may know
+ * something NetFleet cannot see. It is a secondary action behind an explicit
+ * acknowledgement, and it is audited separately.
+ */
+function EnableDialog({
+  deviceId,
+  onClose,
+}: {
+  deviceId: string;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  const { data: pre, isLoading } = useQuery<UfwEnablePreflight>({
+    queryKey: ["ufw-preflight", deviceId],
+    queryFn: () => getEnablePreflight(deviceId),
+  });
+
+  const enable = useMutation({
+    mutationFn: (v: { allowManagement: boolean; force: boolean }) =>
+      setUfwEnabled(deviceId, {
+        enabled: true,
+        allowManagement: v.allowManagement,
+        force: v.force,
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["ufw", deviceId] });
+      qc.invalidateQueries({ queryKey: ["ufw-guards", deviceId] });
+      toast.success("Firewall enabled", r.command);
+      onClose();
+    },
+    onError: (e: Error) => {
+      qc.invalidateQueries({ queryKey: ["ufw", deviceId] });
+      toast.error("Could not enable the firewall", e.message);
+    },
+  });
+
+  const port = pre?.management_port;
+  const address = pre?.management_address;
+  const canPrefill = Boolean(pre?.suggested_rule);
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-3 text-sm">
+      <p className="font-medium text-amber-900">Turn the firewall on?</p>
+
+      {isLoading && (
+        <p className="mt-1 text-xs text-amber-900/80">
+          Checking how this host sees NetFleet…
+        </p>
+      )}
+
+      {pre && (
+        <>
+          {/* Deliberately not "you will lose your connection" — that is false,
+              and a dialog people learn is wrong gets dismissed as noise. The
+              session that runs the command survives; ufw accepts
+              ESTABLISHED,RELATED first. What breaks is the next one. */}
+          {pre.covered ? (
+            <p className="mt-1 text-xs text-amber-900/90">
+              This looks safe. Rule{" "}
+              <span className="font-mono">{pre.covering_rule_summary}</span>{" "}
+              already permits the connection NetFleet manages this host over (
+              {address} → port {port}), so it will still be reachable once the
+              firewall is enforcing.
+            </p>
+          ) : canPrefill ? (
+            <p className="mt-1 text-xs text-amber-900/90">
+              <strong>Nothing in the ruleset permits NetFleet</strong> ({address}{" "}
+              → port {port}), and the default incoming policy is{" "}
+              <span className="font-mono">{pre.default_incoming ?? "deny"}</span>
+              . Your current session will survive — ufw keeps established
+              connections — but NetFleet would not be able to reconnect
+              afterwards, and the failure would only show up on the next
+              operation.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-amber-900/90">
+              NetFleet could not determine which address this host sees it
+              arriving from, so it cannot pre-fill a rule to keep the path open
+              or tell you whether one already exists. Check the ruleset yourself
+              before enabling.
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+            >
+              Cancel
+            </button>
+
+            {pre.covered ? (
+              <button
+                type="button"
+                onClick={() =>
+                  enable.mutate({ allowManagement: false, force: false })
+                }
+                disabled={enable.isPending}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {enable.isPending ? "Enabling…" : "Enable firewall"}
+              </button>
+            ) : (
+              <>
+                {canPrefill && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      enable.mutate({ allowManagement: true, force: false })
+                    }
+                    disabled={enable.isPending}
+                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {enable.isPending
+                      ? "Applying…"
+                      : `Allow ${port}/tcp from ${address}, then enable`}
+                  </button>
+                )}
+                <label className="flex items-center gap-1.5 text-xs text-amber-900/90">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={(e) => setAcknowledged(e.target.checked)}
+                    className="size-3.5 rounded"
+                  />
+                  I have another way into this host
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    enable.mutate({ allowManagement: false, force: true })
+                  }
+                  disabled={!acknowledged || enable.isPending}
+                  className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-40"
+                >
+                  Enable without the rule
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

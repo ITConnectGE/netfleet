@@ -767,9 +767,15 @@ class LinuxDriver(SupportsCapabilityFallback):
                 ),
                 ssh.Command(argv=["ufw", "show", "added"], become=True, timeout=30),
                 ssh.Command(argv=["ufw", "app", "list"], become=True, timeout=20),
+                # `ufw status verbose` prints the Default line only while ufw
+                # is running. On a disabled firewall this file is the only way
+                # to know what policy would apply if it were switched on —
+                # which is exactly what the enable pre-flight has to reason
+                # about.
+                ssh.Command(argv=["cat", "/etc/default/ufw"], become=True, timeout=15),
             ],
         )
-        version, status_r, added_r, apps_r = batch.results
+        version, status_r, added_r, apps_r, defaults_r = batch.results
 
         if _is_missing_command(version):
             # Not an error: plenty of hosts legitimately have no ufw, and the
@@ -801,6 +807,8 @@ class LinuxDriver(SupportsCapabilityFallback):
             status.rules_from_added = True
 
         status.app_profiles = _parse_ufw_app_list(apps_r.stdout) if apps_r.ok else []
+        if defaults_r.ok:
+            _apply_ufw_default_policies(status, defaults_r.stdout)
         return status
 
     async def ufw_rule_add(
@@ -922,6 +930,46 @@ class LinuxDriver(SupportsCapabilityFallback):
         argv = _delete_argv_from_spec(spec)
         result = await ssh.run(creds, argv, become=True, timeout=60)
         result.check("deleting the firewall rule")
+        return " ".join(argv)
+
+    async def ufw_enable(
+        self,
+        creds: DeviceCredentials,
+        *,
+        allow_first: UfwRuleSpec | None = None,
+    ) -> str:
+        """Switch the firewall on, optionally installing a rule first.
+
+        Both commands go in one batch, rule first. That ordering is the whole
+        point: enabling with the stock `deny (incoming)` policy and no rule
+        permitting the management path takes the host away, and a rule added
+        afterwards would arrive over a connection that no longer works.
+
+        `--force` because plain `ufw enable` asks "Command may disrupt existing
+        ssh connections. Proceed with operation (y|n)?" and would hang on a
+        channel nobody can answer.
+        """
+        commands: list[ssh.Command] = []
+        if allow_first is not None:
+            commands.append(
+                ssh.Command(
+                    argv=_build_ufw_rule_argv(allow_first), become=True, timeout=60
+                )
+            )
+        commands.append(
+            ssh.Command(argv=["ufw", "--force", "enable"], become=True, timeout=60)
+        )
+
+        batch = await ssh.run_many(creds, commands)
+        if allow_first is not None:
+            batch.results[0].check("adding the management rule before enabling")
+        batch.results[-1].check("enabling the firewall")
+        return " ; ".join(" ".join(c.argv) for c in commands)
+
+    async def ufw_disable(self, creds: DeviceCredentials) -> str:
+        argv = ["ufw", "--force", "disable"]
+        result = await ssh.run(creds, argv, become=True, timeout=60)
+        result.check("disabling the firewall")
         return " ".join(argv)
 
     # -------------------------------------------------- the lockout guard
@@ -2470,6 +2518,39 @@ def _ufw_rule_from_spec(spec: str) -> UfwRule:
         comment=comment,
         spec=spec,
     )
+
+
+_UFW_POLICY_WORDS = {"drop": "deny", "reject": "reject", "accept": "allow"}
+_UFW_DEFAULT_KEYS = {
+    "DEFAULT_INPUT_POLICY": "default_incoming",
+    "DEFAULT_OUTPUT_POLICY": "default_outgoing",
+    "DEFAULT_FORWARD_POLICY": "default_routed",
+}
+
+
+def _apply_ufw_default_policies(status: UfwStatus, text: str) -> None:
+    """Fill in default policies from `/etc/default/ufw`.
+
+    Only where `ufw status verbose` did not already supply them: that command
+    reports what is *running*, this file reports what is *configured*, and the
+    running answer is the truthful one whenever there is one. On a disabled
+    firewall there is none, and this is all we have.
+
+    The file speaks iptables target names (DROP/ACCEPT/REJECT); ufw's own
+    output speaks deny/allow/reject. Translated here so one vocabulary reaches
+    the rest of the system.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        field = _UFW_DEFAULT_KEYS.get(key.strip())
+        if field is None or getattr(status, field) is not None:
+            continue
+        word = _UFW_POLICY_WORDS.get(value.strip().strip('"').strip("'").lower())
+        if word is not None:
+            setattr(status, field, word)
 
 
 def _parse_ufw_app_list(text: str) -> list[str]:

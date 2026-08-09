@@ -91,6 +91,46 @@ class UfwRuleMove(BaseModel):
     force: bool = False
 
 
+class UfwSuggestedRule(BaseModel):
+    """The pre-filled fix the enable dialog offers."""
+
+    action: str
+    direction: str
+    port: str | None
+    protocol: str | None
+    from_address: str | None
+    comment: str | None
+
+
+class UfwEnablePreflight(BaseModel):
+    """What the enable dialog renders.
+
+    Two distinct states, never one generic warning: a dialog that looks the
+    same whether or not the host is safe teaches people to click through it.
+    """
+
+    already_active: bool
+    # None when $SSH_CONNECTION was unavailable. The dialog then says the fix
+    # cannot be pre-filled rather than guessing an address.
+    management_address: str | None
+    management_port: int | None
+    default_incoming: str | None
+    covered: bool
+    covering_rule_spec: str | None
+    covering_rule_summary: str | None
+    suggested_rule: UfwSuggestedRule | None
+
+
+class UfwSetEnabled(BaseModel):
+    enabled: bool
+    # Install the management rule in the same operation, immediately before
+    # enabling. The offered fix.
+    allow_management: bool = False
+    # Proceed even though the pre-flight says the management path would not
+    # survive. Audited distinctly from the safe path.
+    force: bool = False
+
+
 class UfwWriteResult(BaseModel):
     """What a guarded write did, and the guard that is watching it."""
 

@@ -137,7 +137,7 @@ Detailed stage-by-stage breakdown: **[LINUX-PLAN.md](LINUX-PLAN.md)**.
 - [ ] L6 — Command runner + bulk execution across the fleet — M
 - [ ] L7 — Backups (`/etc` archive + package manifest, reuses Phase 7a retention) — M
 - [ ] L8 — Firewall with mandatory lockout guard + WireGuard — L
-  - [ ] L8a — UFW: view, enable/disable, rule add/edit/delete/toggle — see
+  - [x] L8a — UFW: view, enable/disable, rule add/edit/delete/toggle — see
         [UFW-SSH-PLAN.md](UFW-SSH-PLAN.md)
   - [ ] L8b — SSH keys: management-key rotation + per-user `authorized_keys` — same doc
   - [ ] L8c — nftables + WireGuard

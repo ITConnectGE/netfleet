@@ -1,8 +1,7 @@
-"""UFW firewall endpoints.
+"""UFW firewall endpoints — see docs/UFW-SSH-PLAN.md.
 
-Reads plus the change-guard controls (F1 and F2 of docs/UFW-SSH-PLAN.md).
-Every rule write added later must go through `change_guard.run_guarded` —
-read that document before adding one here.
+Every write goes through `change_guard.run_guarded`; none calls the driver
+directly, and none may start doing so. Read that document before adding one.
 """
 
 from __future__ import annotations
@@ -26,13 +25,16 @@ from app.models.user import User
 from app.schemas.ufw import (
     ChangeGuardPublic,
     UfwDisabledRulePublic,
+    UfwEnablePreflight,
     UfwRuleCreate,
     UfwRuleDelete,
     UfwRuleEdit,
     UfwRuleMove,
     UfwRulePublic,
     UfwRuleToggle,
+    UfwSetEnabled,
     UfwStatusPublic,
+    UfwSuggestedRule,
     UfwWriteResult,
 )
 from app.services import audit as audit_svc
@@ -366,6 +368,85 @@ async def enable_ufw_rule(
             device_id,
             disabled_rule_id=disabled_rule_id,
             force=force,
+            started_by_user_id=user.id,
+        ),
+    )
+
+
+# ---------------- The firewall itself ----------------
+
+
+@router.get(
+    "/{device_id}/firewall/ufw/enable-preflight",
+    response_model=UfwEnablePreflight,
+)
+async def get_enable_preflight(
+    device_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(db_session),
+) -> UfwEnablePreflight:
+    """Everything the enable dialog needs to be specific rather than generic.
+
+    Read-only — this changes nothing on the host.
+    """
+    try:
+        pre = await ufw_svc.enable_preflight(session, user.organization_id, device_id)
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ufw_svc.OperationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    return UfwEnablePreflight(
+        already_active=pre.already_active,
+        management_address=pre.management_address,
+        management_port=pre.management_port,
+        default_incoming=pre.default_incoming,
+        covered=pre.covered,
+        covering_rule_spec=pre.covering_rule_spec,
+        covering_rule_summary=pre.covering_rule_summary,
+        suggested_rule=(
+            UfwSuggestedRule(**_fields(pre.suggested_rule, drop={"to_address", "interface"}))
+            if pre.suggested_rule
+            else None
+        ),
+    )
+
+
+@router.post("/{device_id}/firewall/ufw/enabled", response_model=UfwWriteResult)
+async def set_ufw_enabled(
+    device_id: UUID,
+    payload: UfwSetEnabled,
+    request: Request,
+    user: User = Depends(require_permission("firewall.ufw", "execute")),
+    session: AsyncSession = Depends(db_session),
+) -> UfwWriteResult:
+    """Switch the whole firewall on or off.
+
+    `execute` rather than `write`: this is a bigger hammer than editing a rule
+    and worth being able to grant separately.
+    """
+    return await _guarded_write(
+        session,
+        user,
+        request,
+        device_id,
+        # Audited distinctly so a forced enable is findable in the log without
+        # reading payloads.
+        action=(
+            "enable_forced"
+            if payload.enabled and payload.force and not payload.allow_management
+            else "enable"
+            if payload.enabled
+            else "disable"
+        ),
+        payload=payload.model_dump(),
+        run=lambda: ufw_svc.set_enabled(
+            session,
+            user.organization_id,
+            device_id,
+            enabled=payload.enabled,
+            allow_management=payload.allow_management,
+            force=payload.force,
             started_by_user_id=user.id,
         ),
     )

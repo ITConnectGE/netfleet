@@ -118,6 +118,10 @@ def test_inactive_status_reports_no_rules():
 
 # ---------------- `ufw show added` ----------------
 
+# `ufw_status` reads /etc/default/ufw too, so the canned batches below carry a
+# fifth result. It is the only source of the default policy while ufw is off.
+DEFAULTS = 'DEFAULT_INPUT_POLICY="DROP"\nDEFAULT_OUTPUT_POLICY="ACCEPT"\n'
+
 ADDED = """Added user rules (see 'ufw status' for running firewall):
 ufw allow 22/tcp
 ufw allow 80,443/tcp comment 'web'
@@ -201,6 +205,7 @@ async def test_disabled_firewall_still_lists_its_rules(driver, creds, fake_ssh):
         ok("Status: inactive\n"),
         ok(ADDED),
         ok("Available applications:\n  OpenSSH\n"),
+        ok(DEFAULTS),
     )
     state = await driver.ufw_status(creds)
 
@@ -220,7 +225,11 @@ async def test_ufw_reads_are_escalated(driver, creds, fake_ssh):
     user — with a zero exit status on some versions, so the failure would be
     read as an empty ruleset."""
     fake_ssh.results(
-        ok("ufw 0.36.1\n"), ok(ACTIVE), ok(ADDED), ok("Available applications:\n")
+        ok("ufw 0.36.1\n"),
+        ok(ACTIVE),
+        ok(ADDED),
+        ok("Available applications:\n"),
+        ok(DEFAULTS),
     )
     await driver.ufw_status(creds)
     assert all(c.become for c in fake_ssh.sent())
@@ -229,7 +238,7 @@ async def test_ufw_reads_are_escalated(driver, creds, fake_ssh):
 @pytest.mark.asyncio
 async def test_host_without_ufw_reports_not_installed(driver, creds, fake_ssh):
     fake_ssh.results(
-        fail("sudo: ufw: command not found"), ok(""), ok(""), ok("")
+        fail("sudo: ufw: command not found"), ok(""), ok(""), ok(""), ok("")
     )
     state = await driver.ufw_status(creds)
     assert state.installed is False
@@ -249,6 +258,7 @@ async def test_specs_are_not_attached_when_the_counts_disagree(
         ok(ACTIVE),                       # 4 logical rules
         ok("ufw allow 22/tcp\n"),         # 1 spec
         ok(""),
+        ok(DEFAULTS),
     )
     state = await driver.ufw_status(creds)
     assert all(r.spec is None for r in state.rules)

@@ -222,6 +222,63 @@ export async function enableUfwRule(
   }
 }
 
+export interface UfwSuggestedRule {
+  action: string;
+  direction: string;
+  port: string | null;
+  protocol: string | null;
+  from_address: string | null;
+  comment: string | null;
+}
+
+/**
+ * Everything the enable dialog needs to be specific rather than generic.
+ *
+ * `covered` decides which of two states it shows. A dialog that looks the
+ * same whether or not the host is safe teaches people to click through it.
+ */
+export interface UfwEnablePreflight {
+  already_active: boolean;
+  /** Null when $SSH_CONNECTION was unavailable — the fix cannot be pre-filled. */
+  management_address: string | null;
+  management_port: number | null;
+  default_incoming: string | null;
+  covered: boolean;
+  covering_rule_spec: string | null;
+  covering_rule_summary: string | null;
+  suggested_rule: UfwSuggestedRule | null;
+}
+
+export async function getEnablePreflight(
+  deviceId: string,
+): Promise<UfwEnablePreflight> {
+  return api
+    .get(`devices/${deviceId}/firewall/ufw/enable-preflight`, {
+      timeout: 45_000,
+    })
+    .json<UfwEnablePreflight>();
+}
+
+export async function setUfwEnabled(
+  deviceId: string,
+  opts: { enabled: boolean; allowManagement?: boolean; force?: boolean },
+): Promise<UfwWriteResult> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/firewall/ufw/enabled`, {
+        json: {
+          enabled: opts.enabled,
+          allow_management: opts.allowManagement ?? false,
+          force: opts.force ?? false,
+        },
+        timeout: 120_000,
+      })
+      .json<UfwWriteResult>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 export async function listPendingGuards(
   deviceId: string,
 ): Promise<ChangeGuard[]> {
