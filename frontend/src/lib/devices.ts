@@ -165,3 +165,22 @@ export async function getOnboardingScript(
     throw new Error(await readErrorMessage(e));
   }
 }
+
+/**
+ * Replace the SSH key NetFleet manages a Linux host with.
+ *
+ * The new key is installed alongside the old one and proven on a fresh
+ * connection before the old one is retired, so a failure leaves the device
+ * exactly as it was. Only the fingerprint comes back — never the key.
+ */
+export async function rotateDeviceSshKey(
+  deviceId: string,
+): Promise<{ fingerprint: string }> {
+  try {
+    return await api
+      .post(`devices/${deviceId}/rotate-ssh-key`, { timeout: 90_000 })
+      .json<{ fingerprint: string }>();
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}

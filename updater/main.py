@@ -64,7 +64,7 @@ CHECK_CACHE_SECONDS = float(os.getenv("NETFLEET_CHECK_CACHE_SECONDS", "600"))
 # itself from `docker compose up` during an update so it cannot kill
 # itself mid-upgrade — which also means it never picks up its own fixes.
 # Reporting the version lets the UI say so out loud.
-__version__ = "0.54.0"
+__version__ = "0.55.0"
 
 
 def _normalize_image_tag(version: str) -> str:

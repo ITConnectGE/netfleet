@@ -340,6 +340,27 @@ class FilterRule:
 
 
 @dataclass(slots=True)
+class AuthorizedKey:
+    """One line of a user's `~/.ssh/authorized_keys`."""
+
+    key_type: str                           # ssh-ed25519, ssh-rsa, …
+    # The base64 body. The only field that identifies a key uniquely —
+    # comments do not, and during a key rotation two of NetFleet's own keys
+    # carry the same comment at once.
+    blob: str
+    comment: str | None = None
+    fingerprint: str | None = None          # SHA256:… as ssh-keygen renders it
+    # Options prefixed before the key type (command=…, from=…, no-pty…).
+    # Carried so the UI can show that a key is restricted rather than
+    # presenting it as equivalent to an unrestricted one.
+    options: str | None = None
+    # True for the key NetFleet manages this host with. Removing it through
+    # the per-user endpoint is refused — that is the rotation endpoint's job,
+    # which verifies the replacement before dropping the old one.
+    is_netfleet: bool = False
+
+
+@dataclass(slots=True)
 class ManagementPath:
     """How a managed host actually sees NetFleet connecting to it.
 

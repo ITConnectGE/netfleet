@@ -89,6 +89,25 @@ def public_key_from_private_pem(private_pem: str, comment: str = "netfleet") -> 
     return f"{body} {comment}"
 
 
+def key_blob(public_openssh: str) -> str:
+    """The base64 body of an `ssh-ed25519 AAAA... comment` line.
+
+    This is the only field that identifies a key uniquely. Comments do not:
+    during a rotation two NetFleet keys are in `authorized_keys` at once and
+    both carry the same `netfleet-<device id>` comment, so anything matching
+    on comments would remove the wrong one — or both.
+    """
+    parts = (public_openssh or "").split()
+    if len(parts) < 2:
+        raise ValueError("not an OpenSSH public key line")
+    return parts[1]
+
+
+def fingerprint_from_public_openssh(public_openssh: str) -> str:
+    """`SHA256:…` for a public key line, matching `ssh-keygen -lf`."""
+    return fingerprint_from_key_bytes(base64.b64decode(key_blob(public_openssh)))
+
+
 def fingerprint_from_key_bytes(key_bytes: bytes) -> str:
     """Render an SSH key's fingerprint the way OpenSSH does:
     ``SHA256:<base64 of the sha256 digest, padding stripped>``.

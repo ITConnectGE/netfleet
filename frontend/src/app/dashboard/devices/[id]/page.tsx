@@ -16,6 +16,7 @@ import { downloadAuthed } from "@/lib/api";
 import {
   deleteDevice,
   getDevice,
+  rotateDeviceSshKey,
   testDeviceConnection,
   updateDevice,
   type Device,
@@ -83,6 +84,17 @@ export default function DeviceDetailPage() {
   const test = useMutation<TestConnectionResult>({
     mutationFn: () => testDeviceConnection(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["device", id] }),
+  });
+
+  const rotateKey = useMutation({
+    mutationFn: () => rotateDeviceSshKey(id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["device", id] });
+      // The fingerprint, not the key. It is what an operator compares against
+      // `ssh-keygen -lf` on the host if they want to check the swap landed.
+      toast.success("SSH key rotated", `New key: ${r.fingerprint}`);
+    },
+    onError: (e: Error) => toast.error("Could not rotate the key", e.message),
   });
 
   const del = useMutation({
@@ -176,6 +188,25 @@ export default function DeviceDetailPage() {
           >
             Onboarding .{device.device_class === "server" ? "sh" : "rsc"}
           </button>
+          {isServer && (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  !confirm(
+                    `Rotate the SSH key NetFleet manages "${device.name}" with?\n\nThe new key is installed alongside the current one and tested on a fresh connection before the old one is removed. If it does not work, nothing changes.`,
+                  )
+                )
+                  return;
+                rotateKey.mutate();
+              }}
+              disabled={rotateKey.isPending}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:bg-accent disabled:opacity-50"
+              title="Generate a new management keypair, install it, verify it, and retire the old one"
+            >
+              {rotateKey.isPending ? "Rotating…" : "Rotate SSH key"}
+            </button>
+          )}
           <button
             onClick={() => {
               if (confirm(`Delete device "${device.name}"? This cannot be undone.`)) {

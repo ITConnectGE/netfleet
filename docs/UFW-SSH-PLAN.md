@@ -430,27 +430,49 @@ throwaway host, proceed *without* the fix and confirm the F2 guard reverts it.
 
 ---
 
-## Stage S1 — Management SSH key rotation (M) — parallel track
+## Stage S1 — Management SSH key rotation (M) — **done**
 
 Closes the open L1 item *"Device edit UI: rotate SSH key"*
 (`LINUX-PLAN.md:126`).
 
-- [ ] `POST /devices/{id}/rotate-ssh-key`, `require_permission("devices", "write")`
-- [ ] Sequence, in this order and no other:
+- [x] `POST /devices/{id}/rotate-ssh-key`, `require_permission("devices", "write")`
+- [x] Sequence, in this order and no other:
   1. generate a new Ed25519 pair (`services/ssh_keys.generate_ed25519_keypair`)
   2. append the new public half to the management user's `authorized_keys`,
      **alongside** the existing one
   3. open a **new** connection authenticating with the new key only
-  4. only on success, store the new private half and remove the old line
+  4. only on success, store the new private half and remove the old line —
+     over the *new* connection, the one just proven
   5. on any failure, remove the new line and keep the old key — the device is
      exactly as it was
-- [ ] Key comment stays `netfleet-<device.id>`, and the `authorized_keys` write
-      keeps all four defences from the security invariants
-      (`LINUX-PLAN.md:47`): UUID-derived comment, `_check_comment`, schema
-      control-character rejection, single-line cap
-- [ ] Audited as a credential operation; the private half never enters the audit
-      payload (`_CREDENTIAL_FIELDS`, `audit._redact`)
-- [ ] UI: button on the device edit page, with the result stated plainly
+- [x] The probe clears the **password** as well as the old key. A device
+      configured with both would otherwise fall back to password auth and
+      report a successful rotation for a key the host never accepted.
+- [x] Keys are identified by their base64 **blob**, never by comment. Mid-
+      rotation both of NetFleet's keys carry the same `netfleet-<device id>`
+      comment, so matching on comments would remove the wrong one or both.
+- [x] `authorized_keys` writes set `~/.ssh` to 0700, the file to 0600 and the
+      ownership to the target user, every time. sshd ignores a file it
+      considers too open **silently** — no error to the client, nothing in the
+      log at default verbosity — so this is the failure the modes prevent.
+      Removal copies the filtered file back rather than `mv`-ing it, which
+      would hand over the temp file's ownership and produce the same silent
+      failure from the other direction.
+- [x] Key comment stays `netfleet-<device.id>`, and the write keeps the four
+      defences from the security invariants (`LINUX-PLAN.md:47`). The remote
+      scripts are **constants**: every caller-supplied value arrives as a
+      positional argument (`sh -c SCRIPT sh "$1" "$2"`) or on stdin, so
+      nothing is ever spliced into the text of a shell command. Home
+      directories come from `getent passwd`, not `~user`, since tilde
+      expansion is a shell feature and an account's home need not be in /home.
+- [x] Audited as a credential operation. The response and the audit record
+      carry the **fingerprint** — what an operator compares against
+      `ssh-keygen -lf` — and never the key.
+- [x] A failed rotation returns 409, not 502: nothing broke, the operation
+      declined to complete and the device is untouched.
+- [x] UI: button on the device page for servers, with the new fingerprint in
+      the result
+- [x] Tests: `backend/tests/test_ssh_keys.py` (19)
 
 **Ships:** rotate a host's management key without touching the host by hand.
 **Accept:** rotate, then run Test connection; break it deliberately (wrong

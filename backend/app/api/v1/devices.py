@@ -15,6 +15,7 @@ from app.schemas.device import DeviceCreate, DevicePublic, DeviceUpdate, TestCon
 from app.services import audit as audit_svc
 from app.services import device as device_svc
 from app.services import device_onboarding as onboarding_svc
+from app.services import ssh_key_rotation as rotation_svc
 
 router = APIRouter()
 
@@ -177,6 +178,50 @@ async def test_device_connection(
     )
     await session.commit()
     return result
+
+
+@router.post("/{device_id}/rotate-ssh-key", response_model=dict)
+async def rotate_ssh_key(
+    device_id: UUID,
+    request: Request,
+    user: User = Depends(require_permission("devices", "write")),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
+    """Replace this host's NetFleet management key.
+
+    The new key is installed alongside the old one and proven on a fresh
+    connection before the old one is retired, so a failure leaves the device
+    exactly as it was. No response ever carries the private half — only the
+    fingerprint, which is what an operator compares against `ssh-keygen -lf`.
+    """
+    try:
+        fingerprint = await rotation_svc.rotate_management_key(
+            session, user.organization_id, device_id
+        )
+    except device_svc.DeviceNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except rotation_svc.RotationFailedButSafe as e:
+        # 409, not 502: nothing broke. The operation declined to complete and
+        # the device is untouched.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except rotation_svc.RotationError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="devices",
+        action="rotate_ssh_key",
+        outcome=AuditOutcome.OK,
+        device_id=device_id,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        # The fingerprint identifies the key without being the key.
+        response_meta={"fingerprint": fingerprint},
+    )
+    await session.commit()
+    return {"fingerprint": fingerprint}
 
 
 @router.get(

@@ -27,6 +27,7 @@ import structlog
 from app.drivers import ssh_transport as ssh
 from app.drivers.base import (
     ArpEntry,
+    AuthorizedKey,
     Capability,
     DeviceClock,
     DeviceCredentials,
@@ -971,6 +972,63 @@ class LinuxDriver(SupportsCapabilityFallback):
         result = await ssh.run(creds, argv, become=True, timeout=60)
         result.check("disabling the firewall")
         return " ".join(argv)
+
+    # ------------------------------------------------- authorized_keys
+
+    async def authorized_keys_list(
+        self, creds: DeviceCredentials, *, username: str
+    ) -> list[AuthorizedKey]:
+        _assert_safe_account_name(username)
+        result = await ssh.run(
+            creds,
+            ["sh", "-c", _AUTHORIZED_KEYS_READ, "sh", username],
+            become=True,
+            timeout=20,
+        )
+        result.check(f"reading authorized_keys for {username}")
+        return _parse_authorized_keys(result.stdout)
+
+    async def authorized_key_add(
+        self, creds: DeviceCredentials, *, username: str, public_key: str
+    ) -> None:
+        """Append a key, and set the ownership and modes sshd insists on.
+
+        Those modes are the whole difficulty. sshd ignores an `authorized_keys`
+        that is group- or world-writable, or whose directory is, and it does so
+        *silently* — no error to the client, nothing in the log at default
+        verbosity. A key that simply does not work, with no explanation
+        anywhere, is the failure this method exists to prevent, so every write
+        sets them explicitly rather than assuming what was there.
+        """
+        _assert_safe_account_name(username)
+        line = _assert_safe_public_key(public_key)
+        result = await ssh.run(
+            creds,
+            ["sh", "-c", _AUTHORIZED_KEYS_APPEND, "sh", username],
+            become=True,
+            stdin=line + "\n",
+            timeout=20,
+        )
+        result.check(f"adding an SSH key for {username}")
+
+    async def authorized_key_remove(
+        self, creds: DeviceCredentials, *, username: str, blob: str
+    ) -> None:
+        """Remove by key blob, never by comment or line number.
+
+        During a rotation both of NetFleet's keys carry the same comment, so
+        matching on comments would remove the wrong one or both.
+        """
+        _assert_safe_account_name(username)
+        if not _SSH_KEY_BLOB_RE.match(blob or ""):
+            raise ValueError("not a valid SSH key blob")
+        result = await ssh.run(
+            creds,
+            ["sh", "-c", _AUTHORIZED_KEYS_REMOVE, "sh", username, blob],
+            become=True,
+            timeout=20,
+        )
+        result.check(f"removing an SSH key for {username}")
 
     # -------------------------------------------------- the lockout guard
 
@@ -2287,6 +2345,132 @@ def ufw_would_lock_out(
     if verdict == "deny":
         return True
     return (default_incoming or "deny").lower() == "deny"
+
+
+# ------------------------------------------------------ authorized_keys
+#
+# These scripts are constants. Every variable part arrives as a positional
+# argument after the `sh` placeholder — `sh -c SCRIPT sh "$1" "$2"` — so no
+# caller-supplied value is ever spliced into the text of a shell command.
+# The home directory comes from `getent passwd` rather than `~user`, because
+# tilde expansion is a shell feature and the account may have a home that is
+# not under /home.
+
+_AUTHORIZED_KEYS_READ = """
+u="$1"
+home=$(getent passwd "$u" | cut -d: -f6)
+if [ -z "$home" ]; then exit 0; fi
+f="$home/.ssh/authorized_keys"
+if [ -f "$f" ]; then cat "$f"; fi
+"""
+
+_AUTHORIZED_KEYS_APPEND = """
+set -e
+u="$1"
+home=$(getent passwd "$u" | cut -d: -f6)
+if [ -z "$home" ]; then echo "no such user: $u" >&2; exit 2; fi
+d="$home/.ssh"
+f="$d/authorized_keys"
+mkdir -p "$d"
+if [ ! -f "$f" ]; then : > "$f"; fi
+# A file not ending in a newline would have the new key concatenated onto the
+# last one, and then neither works.
+if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\\n' >> "$f"; fi
+cat >> "$f"
+chmod 700 "$d"
+chmod 600 "$f"
+chown -R "$u": "$d"
+"""
+
+_AUTHORIZED_KEYS_REMOVE = """
+set -e
+u="$1"
+blob="$2"
+home=$(getent passwd "$u" | cut -d: -f6)
+if [ -z "$home" ]; then echo "no such user: $u" >&2; exit 2; fi
+f="$home/.ssh/authorized_keys"
+if [ ! -f "$f" ]; then exit 0; fi
+tmp=$(mktemp)
+awk -v b="$blob" 'index($0, b) == 0' "$f" > "$tmp"
+# Copied back rather than moved: `mv` would give the file the temp file's
+# ownership and mode, and sshd silently ignores an authorized_keys it does
+# not like the look of.
+cat "$tmp" > "$f"
+rm -f "$tmp"
+chmod 600 "$f"
+chown "$u": "$f"
+"""
+
+# base64, as it appears between the key type and the comment.
+_SSH_KEY_BLOB_RE = re.compile(r"^[A-Za-z0-9+/]{32,}={0,3}$")
+_SSH_KEY_TYPE_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-\S+|sk-\S+)$")
+
+
+def _assert_safe_public_key(line: str) -> str:
+    """Validate a public key before it is written into `authorized_keys`.
+
+    A newline is the attack that matters: quoting does not stop one, and a
+    key line containing one appends a *second*, caller-chosen key. Same
+    reasoning as the onboarding script's four defences
+    (`docs/LINUX-PLAN.md`), applied at the other place keys get written.
+    """
+    value = (line or "").strip()
+    if not value:
+        raise ValueError("an SSH public key is required")
+    if any(ch in value for ch in "\r\n\x00"):
+        raise ValueError("an SSH public key cannot contain line breaks")
+    if len(value) > 8192:
+        raise ValueError("that SSH public key is implausibly long")
+
+    parts = value.split()
+    # Options may precede the key type. They are accepted but not parsed —
+    # an operator pasting a restricted key should keep its restrictions.
+    offset = 0 if _SSH_KEY_TYPE_RE.match(parts[0]) else 1
+    if len(parts) < offset + 2:
+        raise ValueError("that does not look like an SSH public key")
+    if not _SSH_KEY_TYPE_RE.match(parts[offset]):
+        raise ValueError(f"unsupported SSH key type {parts[offset]!r}")
+    if not _SSH_KEY_BLOB_RE.match(parts[offset + 1]):
+        raise ValueError("the key body is not valid base64")
+    return value
+
+
+def _parse_authorized_keys(text: str) -> list[AuthorizedKey]:
+    from app.services.ssh_keys import fingerprint_from_key_bytes
+
+    out: list[AuthorizedKey] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        offset = 0 if _SSH_KEY_TYPE_RE.match(parts[0]) else 1
+        if len(parts) < offset + 2:
+            continue
+        key_type, blob = parts[offset], parts[offset + 1]
+        if not _SSH_KEY_BLOB_RE.match(blob):
+            continue
+        comment = " ".join(parts[offset + 2 :]) or None
+
+        fingerprint = None
+        try:
+            import base64
+
+            fingerprint = fingerprint_from_key_bytes(base64.b64decode(blob))
+        except Exception:  # noqa: BLE001 - a bad blob is the host's problem
+            pass
+
+        out.append(
+            AuthorizedKey(
+                key_type=key_type,
+                blob=blob,
+                comment=comment,
+                fingerprint=fingerprint,
+                options=" ".join(parts[:offset]) or None,
+                is_netfleet=bool(comment and comment.startswith("netfleet-")),
+            )
+        )
+    return out
 
 
 def _parse_ssh_connection(text: str) -> ManagementPath:
