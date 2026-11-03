@@ -282,9 +282,13 @@ async def rotate_refresh_token(
         # Rotated moments ago: two tabs refreshed with the same cookie, or
         # the response carrying the new cookie never reached the browser
         # (reload, network blip, API restart). Treating that as theft
-        # logged the operator out of every session. Fall through and mint
-        # a sibling token; the chain stays revocable as a whole on logout
-        # of each tab and by password change.
+        # logged the operator out of every session, so a sibling may be
+        # minted — but only while the session this token belongs to is
+        # still alive. Logout and revoke-all (password change, reuse
+        # detection) kill the live tip of the chain without a successor;
+        # a recently rotated ancestor must not be able to resurrect it.
+        if not await _chain_is_live(session, rt):
+            raise AuthError("refresh token revoked")
     if rt.expires_at <= datetime.now(UTC):
         raise AuthError("refresh token expired")
 
@@ -295,6 +299,9 @@ async def rotate_refresh_token(
     # Rotate
     new_raw, new_hash = new_refresh_token()
     new_expires = datetime.now(UTC) + timedelta(seconds=settings.REFRESH_TOKEN_TTL)
+    if rt.revoked_at is not None:
+        # A grace-window sibling never outlives the token it came from.
+        new_expires = min(new_expires, rt.expires_at)
     new_rt = RefreshToken(
         user_id=user.id,
         token_hash=new_hash,
@@ -311,6 +318,29 @@ async def rotate_refresh_token(
         await session.flush()
 
     return user, new_raw, new_expires
+
+
+# Rotation chains are one hop per refresh; a live chain more than a few
+# hops past a token rotated under a minute ago is not a real session.
+_MAX_CHAIN_HOPS = 32
+
+
+async def _chain_is_live(session: AsyncSession, rt: RefreshToken) -> bool:
+    """Follow `replaced_by_id` from a rotated token to the newest token of
+    its session. The session is live only if that newest token is
+    unrevoked and unexpired. A token revoked without a successor (logout,
+    revoke-all) ends the chain dead."""
+    current = rt
+    for _ in range(_MAX_CHAIN_HOPS):
+        if current.revoked_at is None:
+            return current.expires_at > datetime.now(UTC)
+        if current.replaced_by_id is None:
+            return False
+        nxt = await session.get(RefreshToken, current.replaced_by_id)
+        if nxt is None:
+            return False
+        current = nxt
+    return False
 
 
 async def revoke_refresh_token(session: AsyncSession, presented_raw: str) -> None:
