@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers import get_driver
@@ -61,7 +60,7 @@ def _gateway(coro):
 @router.get("/{device_id}/routes", response_model=list[IpRoutePublic])
 async def list_routes(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.route", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[IpRoutePublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -169,7 +168,7 @@ async def delete_route(
 @router.get("/{device_id}/addresses", response_model=list[IpAddressPublic])
 async def list_addresses(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.address", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[IpAddressPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -242,7 +241,7 @@ async def create_address(
 @router.get("/{device_id}/arp", response_model=list[ArpPublic])
 async def list_arp(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.address", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[ArpPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -271,7 +270,7 @@ async def list_arp(
 @router.get("/{device_id}/bridge-hosts", response_model=list[BridgeHostPublic])
 async def list_bridge_hosts(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("interface.list", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[BridgeHostPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -301,7 +300,7 @@ async def list_bridge_hosts(
 )
 async def get_neighbor_discovery(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.neighbor", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> NeighborDiscoveryPublic:
     device = await get_device(session, user.organization_id, device_id)
@@ -363,7 +362,7 @@ async def set_neighbor_discovery(
 @router.get("/{device_id}/neighbors", response_model=list[NeighborPublic])
 async def list_neighbors(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.neighbor", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[NeighborPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -397,7 +396,7 @@ async def list_neighbors(
 @router.get("/{device_id}/interfaces", response_model=list[InterfacePublic])
 async def list_interfaces(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("interface.list", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[InterfacePublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -465,7 +464,7 @@ async def reset_interface_counters(
 )
 async def list_interface_lists(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("interface.list", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[InterfaceListPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -495,7 +494,7 @@ async def list_interface_lists(
 )
 async def list_interface_list_members(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("interface.list", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[InterfaceListMemberPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -524,7 +523,7 @@ async def list_interface_list_members(
 @router.get("/{device_id}/vlans", response_model=list[VlanPublic])
 async def list_vlans(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("interface.list", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[VlanPublic]:
     device = await get_device(session, user.organization_id, device_id)

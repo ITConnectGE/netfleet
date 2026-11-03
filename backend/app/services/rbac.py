@@ -163,6 +163,102 @@ async def require(
         raise PermissionError(f"denied: {section}:{action}")
 
 
+# ---------------- Visibility (fleet lists) ----------------
+
+
+class Visibility:
+    """Which tenants / sites / devices a user can see in fleet lists.
+
+    `everything` is True for super-admins and for anyone holding any
+    role at organization scope. Otherwise visibility follows the scopes of
+    the user's (unexpired) role assignments: a tenant assignment shows the
+    tenant and everything under it, a site assignment the site and its
+    devices, a device assignment the device — plus the site and tenant it
+    sits in, so it can be navigated to.
+    """
+
+    def __init__(self) -> None:
+        self.everything = False
+        self.tenant_ids: set[UUID] = set()
+        self.site_ids: set[UUID] = set()
+        self.device_ids: set[UUID] = set()
+
+    def device(self, device_id: UUID, site_id: UUID, tenant_id: UUID | None) -> bool:
+        return (
+            self.everything
+            or device_id in self.device_ids
+            or site_id in self.site_ids
+            or (tenant_id is not None and tenant_id in self.tenant_ids)
+        )
+
+
+async def visibility(session: AsyncSession, user: User) -> Visibility:
+    v = Visibility()
+    if user.is_admin:
+        v.everything = True
+        return v
+    stmt = (
+        select(RoleAssignment)
+        .where(RoleAssignment.user_id == user.id)
+        .options(selectinload(RoleAssignment.role).selectinload(Role.permissions))
+    )
+    now = datetime.now(UTC)
+    for a in (await session.execute(stmt)).scalars():
+        if a.expires_at is not None and a.expires_at <= now:
+            continue
+        if not a.role.permissions:
+            continue
+        if a.scope_type == AssignmentScope.ORGANIZATION:
+            v.everything = True
+            return v
+        if a.scope_type == AssignmentScope.TENANT and a.scope_id:
+            v.tenant_ids.add(a.scope_id)
+        elif a.scope_type == AssignmentScope.SITE and a.scope_id:
+            v.site_ids.add(a.scope_id)
+        elif a.scope_type == AssignmentScope.DEVICE and a.scope_id:
+            v.device_ids.add(a.scope_id)
+    return v
+
+
+async def visible_ids(
+    session: AsyncSession, user: User
+) -> tuple[set[UUID], set[UUID], set[UUID]] | None:
+    """(tenant_ids, site_ids, device_ids) the user may see, or None for all.
+
+    Expands each assignment downward (tenant → its sites → their devices)
+    and upward (a device's site and tenant, a site's tenant) so lists stay
+    navigable without exposing siblings.
+    """
+    v = await visibility(session, user)
+    if v.everything:
+        return None
+    tenants, sites, devices = set(v.tenant_ids), set(v.site_ids), set(v.device_ids)
+    rows = (
+        await session.execute(
+            select(Device.id, Device.site_id, Site.tenant_id)
+            .join(Site, Site.id == Device.site_id)
+            .where(Device.organization_id == user.organization_id)
+        )
+    ).all()
+    for dev_id, site_id, tenant_id in rows:
+        if v.device(dev_id, site_id, tenant_id):
+            devices.add(dev_id)
+            sites.add(site_id)
+            if tenant_id is not None:
+                tenants.add(tenant_id)
+    site_rows = (
+        await session.execute(
+            select(Site.id, Site.tenant_id).where(Site.organization_id == user.organization_id)
+        )
+    ).all()
+    for site_id, tenant_id in site_rows:
+        if tenant_id in v.tenant_ids:
+            sites.add(site_id)
+        if site_id in v.site_ids and tenant_id is not None:
+            tenants.add(tenant_id)
+    return tenants, sites, devices
+
+
 # ---------------- helpers ----------------
 
 

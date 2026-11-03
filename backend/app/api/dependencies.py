@@ -85,17 +85,44 @@ def require_permission(
     ) -> User:
         site_id: UUID | None = None
         device_id: UUID | None = None
+        tenant_id: UUID | None = None
         if scope is not None:
             site_id, device_id = await scope(request)
+        else:
+            # Scope the check to the resource in the path. Without this every
+            # check was organization-scoped, so tenant/site/device-scoped
+            # roles never matched anything. rbac.can() fills in the site
+            # and tenant above a device or site itself.
+            device_id = _path_uuid(request, "device_id")
+            site_id = _path_uuid(request, "site_id")
+            tenant_id = _path_uuid(request, "tenant_id")
         try:
             await rbac.require(
-                session, user, section, action, site_id=site_id, device_id=device_id
+                session,
+                user,
+                section,
+                action,
+                site_id=site_id,
+                device_id=device_id,
+                tenant_id=tenant_id,
             )
         except PermissionError as e:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
         return user
 
     return _dep
+
+
+def _path_uuid(request: Request, name: str) -> UUID | None:
+    raw = request.path_params.get(name)
+    if raw is None:
+        return None
+    if isinstance(raw, UUID):
+        return raw
+    try:
+        return UUID(str(raw))
+    except ValueError:
+        return None
 
 
 def client_ip(request: Request) -> str | None:

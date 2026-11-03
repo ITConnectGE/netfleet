@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers import get_driver
@@ -80,7 +79,7 @@ async def reboot_device(
 @router.get("/{device_id}/ip-services", response_model=list[IpServicePublic])
 async def list_ip_services(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ip.service", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[IpServicePublic]:
     try:
@@ -147,7 +146,7 @@ async def update_ip_service(
 @router.get("/{device_id}/system-users", response_model=list[DeviceUserPublic])
 async def list_device_users(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.user", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[DeviceUserPublic]:
     try:
@@ -384,7 +383,7 @@ async def set_device_user_groups(
 @router.get("/{device_id}/system-groups", response_model=list[DeviceGroupPublic])
 async def list_device_groups(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.user", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[DeviceGroupPublic]:
     try:

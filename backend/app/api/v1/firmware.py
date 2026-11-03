@@ -45,7 +45,7 @@ async def fleet_firmware_summary(
 )
 async def get_device_firmware(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.firmware", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> FirmwareStatusPublic:
     try:
@@ -180,7 +180,7 @@ async def trigger_firmware_upgrade(
 )
 async def get_upgrade_status(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.firmware", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> FirmwareUpgradeStatus:
     try:
@@ -205,7 +205,7 @@ async def get_upgrade_status(
 )
 async def get_auto_upgrade_policy(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.firmware", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> AutoUpgradePolicyPublic:
     try:

@@ -47,6 +47,17 @@ async def update_smtp(
     org = await get_organization(session, organization_id)
     data = payload.model_dump(exclude_unset=True)
 
+    # Moving the account to another server without re-entering the password
+    # would hand the stored one to whoever runs that server on the next
+    # "send test email". Changing the host therefore drops it.
+    new_host = data.get("smtp_host")
+    if (
+        "smtp_password" not in data
+        and new_host is not None
+        and (new_host or "").strip().lower() != (org.smtp_host or "").strip().lower()
+    ):
+        org.smtp_password_encrypted = None
+
     # Password handling: empty string clears, non-empty encrypts, missing leaves untouched.
     if "smtp_password" in data:
         raw = data.pop("smtp_password")

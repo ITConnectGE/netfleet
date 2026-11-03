@@ -13,7 +13,6 @@ log = structlog.get_logger(__name__)
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers.base import FilterRule as DriverFilterRule
@@ -52,7 +51,7 @@ router = APIRouter()
 @router.get("/{device_id}/firewall/filter", response_model=list[FilterRulePublic])
 async def list_filter(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("firewall.filter", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[FilterRulePublic]:
     try:
@@ -310,7 +309,7 @@ async def move_filter(
 @router.get("/{device_id}/firewall/nat", response_model=list[NatRulePublic])
 async def list_nat(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("firewall.nat", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[NatRulePublic]:
     try:
@@ -513,7 +512,7 @@ async def list_logs(
     device_id: UUID,
     topics: str | None = Query(default=None, max_length=128),
     limit: int = Query(default=200, ge=1, le=2000),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[LogEntryPublic]:
     try:

@@ -24,7 +24,7 @@ from typing import Any, Literal
 import httpx
 import structlog
 from authlib.integrations.starlette_client import OAuth
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -195,15 +195,20 @@ async def upsert_user_from_claims(
     if not sub:
         raise OidcError("OIDC provider returned no 'sub' claim")
 
-    # Match by oidc_sub first (the durable identity). Fall back to
-    # email so an existing local account gets linked on its first SSO.
-    stmt = select(User).where(User.oidc_sub == sub)
-    user = (await session.execute(stmt)).scalar_one_or_none()
-
     provider_label = _PROVIDER_LABELS[provider]
+
+    # Match by oidc_sub first (the durable identity), within the same
+    # provider — two IdPs' subject spaces are unrelated.
+    stmt = select(User).where(
+        User.oidc_sub == sub,
+        or_(User.oidc_provider == provider_label, User.oidc_provider.is_(None)),
+    )
+    user = (await session.execute(stmt)).scalar_one_or_none()
 
     if user is None:
         org = await _load_org(session)
+        if not email:
+            raise OidcError("the identity provider returned no email for this account")
         existing = (
             await session.execute(
                 select(User).where(
@@ -212,11 +217,24 @@ async def upsert_user_from_claims(
             )
         ).scalar_one_or_none()
         if existing is not None:
+            # Linking hands an existing account (possibly an admin's) to
+            # whoever holds this IdP identity, so the email must be one the
+            # IdP vouches for — otherwise anyone who can set an arbitrary
+            # email on an IdP account takes the NetFleet account over.
+            if not _email_is_vouched(claims, provider, org):
+                raise OidcError(
+                    "an account with this email already exists, but the identity "
+                    "provider did not confirm the email — ask an admin to link it"
+                )
             existing.oidc_sub = sub
             existing.oidc_provider = provider_label
             existing.auth_method = AuthMethod.OIDC
             user = existing
         else:
+            if not await _may_auto_provision(session, claims, provider, org, email):
+                raise OidcError(
+                    "this account is not allowed to sign in — ask an admin to invite you"
+                )
             user = User(
                 organization_id=org.id,
                 email=email,
@@ -238,6 +256,59 @@ async def upsert_user_from_claims(
     user.last_login_at = datetime.now(UTC)
     await session.flush()
     return user
+
+
+_MULTI_TENANT = {"", "common", "organizations", "consumers"}
+
+
+def _microsoft_single_tenant(claims: dict[str, Any], org: Organization) -> bool:
+    tenant = (org.microsoft_oidc_tenant_id or "").strip().lower()
+    if tenant in _MULTI_TENANT:
+        return False
+    tid = str(claims.get("tid") or "").lower()
+    # A tenant configured by domain name has no tid to compare; the issuer
+    # check in authlib already pins the token to that tenant.
+    return not tid or "." in tenant or tid == tenant
+
+
+def _email_is_vouched(claims: dict[str, Any], provider: Provider, org: Organization) -> bool:
+    """True when the IdP itself stands behind the email claim."""
+    if provider == "google":
+        return claims.get("email_verified") is True
+    # Entra's `email` claim is not verified, but within a single tenant
+    # the directory admin is the only one who can set it.
+    return _microsoft_single_tenant(claims, org)
+
+
+async def _may_auto_provision(
+    session: AsyncSession,
+    claims: dict[str, Any],
+    provider: Provider,
+    org: Organization,
+    email: str,
+) -> bool:
+    """Whether a first-time SSO identity may get a NetFleet account.
+
+    Microsoft: only from the configured tenant. Google: only Workspace
+    accounts (`hd` claim) with a verified email on a domain this
+    organization already uses — without that, any Google account in the
+    world could create itself a login.
+    """
+    if not _email_is_vouched(claims, provider, org):
+        return False
+    if provider == "microsoft":
+        return True
+    hd = str(claims.get("hd") or "").lower()
+    if not hd or not email.endswith("@" + hd):
+        return False
+    known = (
+        await session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.organization_id == org.id, User.email.ilike("%@" + hd))
+        )
+    ).scalar_one()
+    return int(known) > 0
 
 
 def random_state() -> str:

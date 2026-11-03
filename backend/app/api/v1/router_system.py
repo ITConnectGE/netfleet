@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.api.v1._dataclasses import fields as _fields
@@ -71,7 +70,7 @@ def _wrap_driver(coro):
 @router.get("/{device_id}/ntp", response_model=NtpClientPublic)
 async def get_ntp(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> NtpClientPublic:
     device = await get_device(session, user.organization_id, device_id)
@@ -137,7 +136,7 @@ async def update_ntp(
 @router.get("/{device_id}/ntp-server", response_model=NtpServerPublic)
 async def get_ntp_server(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> NtpServerPublic:
     device = await get_device(session, user.organization_id, device_id)
@@ -195,7 +194,7 @@ async def update_ntp_server(
 @router.get("/{device_id}/clock", response_model=DeviceClockPublic)
 async def get_device_clock(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> DeviceClockPublic:
     device = await get_device(session, user.organization_id, device_id)
@@ -252,7 +251,7 @@ async def update_device_clock(
 @router.get("/{device_id}/snmp", response_model=SnmpPublic)
 async def get_snmp(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> SnmpPublic:
     device = await get_device(session, user.organization_id, device_id)
@@ -311,7 +310,7 @@ async def update_snmp(
 )
 async def list_snmp_communities(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[SnmpCommunityPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -478,7 +477,7 @@ def _rule_to_public(r) -> LoggingRulePublic:
 )
 async def list_logging_rules(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[LoggingRulePublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -638,7 +637,7 @@ def _action_to_public(a) -> LoggingActionPublic:
 )
 async def list_logging_actions(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[LoggingActionPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -746,7 +745,7 @@ async def delete_logging_action(
 @router.get("/{device_id}/resources", response_model=SystemResourcesPublic)
 async def get_resources(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> SystemResourcesPublic:
     """Live CPU / memory / uptime, read from the device on request.
@@ -787,7 +786,7 @@ async def get_resources(
 @router.get("/{device_id}/disks", response_model=list[DiskUsagePublic])
 async def get_disks(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[DiskUsagePublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -818,7 +817,7 @@ async def get_disks(
 async def get_disk_tree(
     device_id: UUID,
     path: str = Query(default="/", max_length=4096),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[DirEntryUsagePublic]:
     """Recursive sizes of one directory's immediate children.
@@ -876,7 +875,7 @@ async def sync_ntp_now(
 @router.get("/{device_id}/interface-configs", response_model=list[InterfaceConfigPublic])
 async def get_interface_configs(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[InterfaceConfigPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -893,7 +892,7 @@ async def get_interface_configs(
 async def get_processes(
     device_id: UUID,
     limit: int = Query(default=40, ge=1, le=200),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[ProcessPublic]:
     device = await get_device(session, user.organization_id, device_id)
@@ -911,7 +910,7 @@ async def get_processes(
 @router.get("/{device_id}/scheduled-jobs", response_model=list[ScheduledJobPublic])
 async def get_scheduled_jobs(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.info", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[ScheduledJobPublic]:
     """Everything scheduled on the host — crontabs and systemd timers.

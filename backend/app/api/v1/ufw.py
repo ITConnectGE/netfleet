@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.api.v1._dataclasses import fields as _fields
@@ -48,7 +47,7 @@ router = APIRouter()
 @router.get("/{device_id}/firewall/ufw", response_model=UfwStatusPublic)
 async def get_ufw_status(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("firewall.ufw", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> UfwStatusPublic:
     try:
@@ -382,7 +381,7 @@ async def enable_ufw_rule(
 )
 async def get_enable_preflight(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("firewall.ufw", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> UfwEnablePreflight:
     """Everything the enable dialog needs to be specific rather than generic.
@@ -463,7 +462,7 @@ async def set_ufw_enabled(
 @router.get("/{device_id}/firewall/guards", response_model=list[ChangeGuardPublic])
 async def list_pending_guards(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("firewall.ufw", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[ChangeGuardPublic]:
     guards = await guard_svc.list_pending(session, user.organization_id, device_id)

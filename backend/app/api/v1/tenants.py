@@ -17,6 +17,7 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.tenant import TenantCreate, TenantPublic, TenantUpdate
 from app.services import audit as audit_svc
+from app.services import rbac
 from app.services import tenant as tenant_svc
 
 router = APIRouter()
@@ -34,6 +35,9 @@ async def list_tenants(
     session: AsyncSession = Depends(db_session),
 ) -> list[TenantPublic]:
     items = await tenant_svc.list_tenants(session, user.organization_id)
+    visible = await rbac.visible_ids(session, user)
+    if visible is not None:
+        items = [row for row in items if row[0].id in visible[0]]
     return [_to_public(t, sc, dc) for t, sc, dc in items]
 
 
@@ -70,6 +74,11 @@ async def get_tenant(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(db_session),
 ) -> TenantPublic:
+    # Same visibility as the fleet lists: a user scoped to one device can
+    # still open the site and tenant it lives in, but nothing else.
+    visible = await rbac.visible_ids(session, user)
+    if visible is not None and tenant_id not in visible[0]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     try:
         t = await tenant_svc.get_tenant(session, user.organization_id, tenant_id)
     except tenant_svc.TenantNotFound as e:

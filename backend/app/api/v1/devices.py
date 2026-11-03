@@ -13,9 +13,9 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.device import DeviceCreate, DevicePublic, DeviceUpdate, TestConnectionResult
 from app.services import audit as audit_svc
-from app.services import rbac
 from app.services import device as device_svc
 from app.services import device_onboarding as onboarding_svc
+from app.services import rbac
 from app.services import ssh_key_rotation as rotation_svc
 
 router = APIRouter()
@@ -39,6 +39,9 @@ async def list_devices(
     session: AsyncSession = Depends(db_session),
 ) -> list[DevicePublic]:
     items = await device_svc.list_devices(session, user.organization_id, site_id=site_id)
+    visible = await rbac.visible_ids(session, user)
+    if visible is not None:
+        items = [d for d in items if d.id in visible[2]]
     return [device_svc.to_public(d) for d in items]
 
 
@@ -80,7 +83,7 @@ async def create_device(
 @router.get("/{device_id}", response_model=DevicePublic)
 async def get_device(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("devices", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> DevicePublic:
     try:
@@ -156,7 +159,7 @@ async def delete_device(
 async def test_device_connection(
     device_id: UUID,
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("devices", "execute")),
     session: AsyncSession = Depends(db_session),
 ) -> TestConnectionResult:
     try:

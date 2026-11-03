@@ -70,7 +70,13 @@ function LoginPageInner() {
     "totp",
   );
 
-  const [error, setError] = useState<string | null>(null);
+  // An SSO sign-in the server refused comes back as ?error=oidc&message=…
+  // React renders the message as text, so it cannot inject markup.
+  const [error, setError] = useState<string | null>(() =>
+    searchParams.get("error") === "oidc"
+      ? (searchParams.get("message") ?? "Single sign-on failed.").slice(0, 300)
+      : null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const [providers, setProviders] = useState<OidcProvider[]>([]);

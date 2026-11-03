@@ -13,7 +13,6 @@ from pydantic import BaseModel
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers import get_driver
@@ -65,7 +64,7 @@ class WgSubnetSuggestion(BaseModel):
 @router.get("/{device_id}/ppp-secrets", response_model=list[PppSecretPublic])
 async def list_ppp_secrets(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("ppp.secret", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[PppSecretPublic]:
     try:
@@ -277,7 +276,7 @@ async def reveal_ppp_secret(
 )
 async def list_wg_interfaces(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("vpn.wireguard.interface", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[WireguardInterfacePublic]:
     try:
@@ -399,7 +398,7 @@ async def delete_wg_interface(
 async def list_wg_peers(
     device_id: UUID,
     interface: str | None = Query(default=None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("vpn.wireguard.peer", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[WireguardPeerPublic]:
     try:

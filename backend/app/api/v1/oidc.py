@@ -19,6 +19,7 @@ Legacy auto-dispatch (back-compat — bookmarked links, old IdP entries):
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -94,9 +95,21 @@ async def _callback(
             detail=f"OIDC callback failed: {e}",
         ) from e
 
-    user = await oidc_svc.upsert_user_from_claims(
-        session, claims=claims, provider=provider
-    )
+    try:
+        user = await oidc_svc.upsert_user_from_claims(
+            session, claims=claims, provider=provider
+        )
+    except oidc_svc.OidcError as e:
+        # Refused identities land back on the login page with the reason.
+        return RedirectResponse(
+            url=f"{settings.PUBLIC_URL.rstrip('/')}/login?"
+            + urlencode({"error": "oidc", "message": str(e)})
+        )
+    if not user.is_active:
+        return RedirectResponse(
+            url=f"{settings.PUBLIC_URL.rstrip('/')}/login?"
+            + urlencode({"error": "oidc", "message": "this account is disabled"})
+        )
     access, _exp = auth_svc.issue_access_token(user)
     refresh_raw, _ = await auth_svc.issue_refresh_token(
         session,

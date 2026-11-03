@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.api.v1._dataclasses import fields as _fields
@@ -40,7 +39,7 @@ router = APIRouter()
 @router.get("/{device_id}/packages", response_model=PackageStatePublic)
 async def get_packages(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("pkg.manager", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> PackageStatePublic:
     try:
@@ -68,7 +67,7 @@ async def get_packages(
 async def list_package_runs(
     device_id: UUID,
     limit: int = Query(default=20, ge=1, le=100),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("pkg.manager", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[PackageRunPublic]:
     runs = await pkg_svc.list_runs(

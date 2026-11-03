@@ -8,6 +8,7 @@ Uses `librouteros` for the native API (works on 6.x and 7.x). REST API support
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1645,6 +1646,7 @@ class MikrotikDriver(SupportsCapabilityFallback):
         """
         from librouteros.exceptions import TrapError
 
+        pin = _HostKeyPin(creds.host_key_fingerprint)
         ts = datetime.now(UTC)
         name = f"netfleet-{ts.strftime('%Y%m%d-%H%M%S')}"
         backup_filename = f"{name}.backup"
@@ -1674,6 +1676,7 @@ class MikrotikDriver(SupportsCapabilityFallback):
                 port=ssh_port,
                 username=creds.username,
                 password=creds.password or "",
+            pin=pin,
                 remote_name=backup_filename,
             )
         except Exception as e:
@@ -1696,6 +1699,7 @@ class MikrotikDriver(SupportsCapabilityFallback):
                 port=ssh_port,
                 username=creds.username,
                 password=creds.password or "",
+            pin=pin,
                 remote_name=rsc_filename,
             )
             rsc_text = rsc_bytes.decode("utf-8", errors="replace")
@@ -1711,11 +1715,14 @@ class MikrotikDriver(SupportsCapabilityFallback):
                     port=ssh_port,
                     username=creds.username,
                     password=creds.password or "",
+                pin=pin,
                     remote_name=fname,
                 )
             except Exception:
                 pass
 
+        if pin.observed:
+            creds.host_key_fingerprint = pin.observed  # caller persists the new pin
         return BackupArtifact(
             backup_bytes=backup_bytes, rsc_text=rsc_text, timestamp_iso=ts.isoformat()
         )
@@ -1737,15 +1744,20 @@ class MikrotikDriver(SupportsCapabilityFallback):
         name_only = remote_filename.removesuffix(".backup")
 
         # SSH/SFTP upload is blocking + uses a separate library — push it to a thread.
+        pin = _HostKeyPin(creds.host_key_fingerprint)
         await asyncio.to_thread(
             _sftp_put,
             host=creds.host,
             port=ssh_port,
             username=creds.username,
             password=creds.password or "",
+            pin=pin,
             local_path=str(local_backup_path),
             remote_name=remote_filename,
         )
+
+        if pin.observed:
+            creds.host_key_fingerprint = pin.observed  # caller persists the new pin
 
         # Fire the load command. The device starts rebooting almost immediately —
         # the API connection drops mid-reply, which is expected. Wrap it in a
@@ -1776,12 +1788,21 @@ class MikrotikDriver(SupportsCapabilityFallback):
     ) -> list[dict[str, Any]]:
         from librouteros import connect
 
+        kwargs: dict[str, Any] = {}
+        if creds.port == API_SSL_PORT:
+            # API-SSL. librouteros' login sends the password in the clear,
+            # so on 8728 anyone on the path reads it on every call. 8729
+            # wraps the session in TLS; verify_tls checks the router's
+            # certificate (RouterOS ships self-signed ones, so operators
+            # without a proper cert turn verification off for the device).
+            kwargs["ssl_wrapper"] = _tls_context(creds.verify_tls, creds.host)
         conn = connect(
             host=creds.host,
             port=creds.port,
             username=creds.username,
             password=creds.password or "",
             timeout=10,
+            **kwargs,
         )
         try:
             cmd_parts = path.strip("/").split("/")
@@ -1814,6 +1835,19 @@ class MikrotikDriver(SupportsCapabilityFallback):
 
 # ---------------- helpers ----------------
 
+API_SSL_PORT = 8729
+
+
+def _tls_context(verify: bool, host: str) -> Callable[[Any], Any]:
+    import ssl
+
+    ctx = ssl.create_default_context()
+    if not verify:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return lambda sock: ctx.wrap_socket(sock, server_hostname=host)
+
+
 
 def _sftp_put(
     *,
@@ -1821,6 +1855,7 @@ def _sftp_put(
     port: int,
     username: str,
     password: str,
+    pin: _HostKeyPin,
     local_path: str,
     remote_name: str,
 ) -> None:
@@ -1830,7 +1865,7 @@ def _sftp_put(
     are supported there), so `remote_name` is just a basename like
     ``netfleet-20260527-153012.backup``.
     """
-    with _sftp_session(host, port, username, password) as sftp:
+    with _sftp_session(host, port, username, password, pin) as sftp:
         sftp.put(local_path, remote_name)
 
 
@@ -1840,6 +1875,7 @@ def _sftp_get(
     port: int,
     username: str,
     password: str,
+    pin: _HostKeyPin,
     remote_name: str,
 ) -> bytes:
     """Blocking SFTP download — must be called via asyncio.to_thread.
@@ -1854,7 +1890,7 @@ def _sftp_get(
     import io
     import time
 
-    with _sftp_session(host, port, username, password) as sftp:
+    with _sftp_session(host, port, username, password, pin) as sftp:
         last_err: Exception | None = None
         for attempt in range(5):
             try:
@@ -1874,18 +1910,34 @@ def _sftp_remove(
     port: int,
     username: str,
     password: str,
+    pin: _HostKeyPin,
     remote_name: str,
 ) -> None:
     """Blocking SFTP remove — must be called via asyncio.to_thread."""
-    with _sftp_session(host, port, username, password) as sftp:
+    with _sftp_session(host, port, username, password, pin) as sftp:
         try:
             sftp.remove(remote_name)
         except FileNotFoundError:
             pass
 
 
+class _HostKeyPin:
+    """The SSH host key a RouterOS device is pinned to, shared by every
+    SFTP session of one operation.
+
+    `expected` is the stored fingerprint (None until first contact). The
+    first session of an unpinned device records what it saw in `observed`
+    and later sessions in the same operation must match it; the caller
+    persists `observed` so every later operation is checked against it.
+    """
+
+    def __init__(self, expected: str | None) -> None:
+        self.expected = expected
+        self.observed: str | None = None
+
+
 @contextmanager
-def _sftp_session(host: str, port: int, username: str, password: str):
+def _sftp_session(host: str, port: int, username: str, password: str, pin: _HostKeyPin):
     """Open an SFTP session as a context manager. Closes both SFTP and the
     underlying SSH transport cleanly even on exceptions.
 
@@ -1898,8 +1950,14 @@ def _sftp_session(host: str, port: int, username: str, password: str):
     """
     import paramiko  # imported lazily so the rest of the driver still loads on hosts without it
 
+    from app.drivers.ssh_transport import _make_policy
+
+    # Trust on first use, then pin. AutoAddPolicy accepted any key, so a
+    # machine in the path could pose as the router and collect the admin
+    # password on every scheduled backup.
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    policy = _make_policy(pin.expected or pin.observed)
+    client.set_missing_host_key_policy(policy)
     client.connect(
         hostname=host,
         port=port,
@@ -1912,6 +1970,8 @@ def _sftp_session(host: str, port: int, username: str, password: str):
         # SHA-1-based variants that RouterOS still depends on.
         disabled_algorithms={"pubkeys": [], "keys": [], "kex": []},
     )
+    if policy.observed and not (pin.expected or pin.observed):
+        pin.observed = policy.observed
     try:
         sftp = client.open_sftp()
         try:

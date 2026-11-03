@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers import get_driver
@@ -22,6 +21,7 @@ from app.schemas.backups import DeviceBackupPublic
 from app.services import audit as audit_svc
 from app.services import backups as backup_svc
 from app.services import device as device_svc
+from app.services import rbac
 from app.services.device import _to_driver_creds
 
 router = APIRouter()
@@ -48,7 +48,7 @@ def _to_public(row) -> DeviceBackupPublic:
 async def list_device_backups(
     device_id: UUID,
     limit: int = Query(default=50, ge=1, le=500),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("system.backup", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[DeviceBackupPublic]:
     rows = await backup_svc.list_history(
@@ -111,6 +111,13 @@ async def download_backup_file(
     """kind = 'backup' (binary RouterOS .backup) | 'rsc' (text /export script)."""
     if kind not in ("backup", "rsc"):
         raise HTTPException(status_code=400, detail="kind must be 'backup' or 'rsc'")
+    # Both files carry the router's secrets in the clear: the .backup is
+    # saved without a password, and /export on RouterOS 6 includes PPP,
+    # IPsec and Wi-Fi secrets. Reading them is a secret reveal.
+    try:
+        await rbac.require(session, user, "secret.reveal", "execute", device_id=device_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
 
     rows = await backup_svc.list_history(session, user.organization_id, device_id=device_id, limit=500)
     row = next((r for r in rows if r.id == backup_id), None)
@@ -182,13 +189,16 @@ async def restore_backup(
         raise HTTPException(status_code=404, detail=str(e)) from e
 
     error_message: str | None = None
+    creds = _to_driver_creds(device)
     try:
         await get_driver(device.vendor).system_restore(
-            _to_driver_creds(device),
+            creds,
             local_backup_path=local_path,
+            ssh_port=device.ssh_port or 22,
         )
     except Exception as e:  # noqa: BLE001
         error_message = str(e)
+    backup_svc.remember_host_key(device, creds.host_key_fingerprint)
 
     await audit_svc.write_audit(
         session,

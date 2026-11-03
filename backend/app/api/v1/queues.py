@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import (
     client_ip,
     db_session,
-    get_current_user,
     require_permission,
 )
 from app.drivers import get_driver
@@ -28,7 +27,7 @@ router = APIRouter()
 @router.get("/{device_id}/queues/simple", response_model=list[SimpleQueuePublic])
 async def list_simple_queues(
     device_id: UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("queue.simple", "read")),
     session: AsyncSession = Depends(db_session),
 ) -> list[SimpleQueuePublic]:
     device = await get_device(session, user.organization_id, device_id)

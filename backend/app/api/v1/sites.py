@@ -12,6 +12,7 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.site import SiteCreate, SitePublic, SiteUpdate
 from app.services import audit as audit_svc
+from app.services import rbac
 from app.services import site as site_svc
 from app.services import tenant as tenant_svc
 
@@ -31,6 +32,9 @@ async def list_sites(
     session: AsyncSession = Depends(db_session),
 ) -> list[SitePublic]:
     items = await site_svc.list_sites(session, user.organization_id, tenant_id=tenant_id)
+    visible = await rbac.visible_ids(session, user)
+    if visible is not None:
+        items = [row for row in items if row[0].id in visible[1]]
     return [_to_public(s, tname, c) for s, tname, c in items]
 
 
@@ -70,6 +74,11 @@ async def get_site(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(db_session),
 ) -> SitePublic:
+    # Same visibility as the fleet lists: a user scoped to one device can
+    # still open the site and tenant it lives in, but nothing else.
+    visible = await rbac.visible_ids(session, user)
+    if visible is not None and site_id not in visible[1]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     try:
         site = await site_svc.get_site(session, user.organization_id, site_id)
     except site_svc.SiteNotFound as e:

@@ -93,6 +93,15 @@ async def get_org(session: AsyncSession, organization_id: UUID) -> Organization:
     return org
 
 
+def _url_origin(url: str | None) -> tuple[str, str]:
+    from urllib.parse import urlsplit
+
+    if not url:
+        return ("", "")
+    parts = urlsplit(url.strip())
+    return (parts.scheme.lower(), parts.netloc.lower())
+
+
 async def update_sms(
     session: AsyncSession,
     organization_id: UUID,
@@ -100,6 +109,13 @@ async def update_sms(
 ) -> Organization:
     org = await get_org(session, organization_id)
     data = payload.model_dump(exclude_unset=True)
+
+    # The key is substituted into the gateway URL on send. Pointing the URL
+    # at a different host without re-entering the key would deliver the
+    # stored key there on the next test send, so a host change drops it.
+    if "sms_api_key" not in data and "sms_api_url" in data:
+        if _url_origin(data["sms_api_url"]) != _url_origin(org.sms_api_url):
+            org.sms_api_key_encrypted = None
 
     if "sms_api_key" in data:
         raw = data.pop("sms_api_key")

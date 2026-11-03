@@ -57,9 +57,11 @@ async def run_backup(
     )
 
     try:
+        creds = _to_driver_creds(device)
         artefact = await get_driver(device.vendor).system_backup(
-            _to_driver_creds(device), ssh_port=device.ssh_port or 22
+            creds, ssh_port=device.ssh_port or 22
         )
+        remember_host_key(device, creds.host_key_fingerprint)
         dir_ = _device_dir(device_id)
         backup_path = dir_ / f"{base_name}.backup"
         rsc_path = dir_ / f"{base_name}.rsc"
@@ -81,6 +83,12 @@ async def run_backup(
         await session.flush()
 
     return row
+
+
+def remember_host_key(device, fingerprint: str | None) -> None:
+    """Pin the SSH host key a driver saw on first contact (RouterOS SFTP)."""
+    if fingerprint and device.ssh_host_key_fingerprint is None:
+        device.ssh_host_key_fingerprint = fingerprint[:128]
 
 
 async def list_history(
