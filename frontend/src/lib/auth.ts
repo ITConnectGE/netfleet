@@ -1,4 +1,4 @@
-import { api, readErrorMessage } from "@/lib/api";
+import { api, isHttpError, readErrorMessage } from "@/lib/api";
 import { authStorage } from "@/lib/auth-storage";
 
 export interface UserPublic {
@@ -193,11 +193,16 @@ export async function logout(): Promise<void> {
   }
 }
 
+/** The signed-in user, or null when there is no valid session.
+ *  Only a 401 means "logged out". Any other failure (network, timeout, a
+ *  502 while the API restarts) is thrown so the caller retries rather
+ *  than treating a blip as a logout. */
 export async function fetchMe(): Promise<UserPublic | null> {
   try {
     return await api.get("auth/me").json<UserPublic>();
-  } catch {
-    return null;
+  } catch (e) {
+    if (isHttpError(e) && e.response.status === 401) return null;
+    throw e;
   }
 }
 

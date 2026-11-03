@@ -63,6 +63,22 @@ export default function BulkPage() {
         </span>
       </Link>
 
+      <Link
+        href="/dashboard/bulk/firmware"
+        className="mt-2 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 transition hover:bg-accent/40"
+      >
+        <span className="text-sm">
+          <span className="font-medium">Firmware upgrade all</span>
+          <span className="ml-2 text-xs text-muted-foreground">
+            upgrade RouterOS on many routers at once, grouped by model and
+            version
+          </span>
+        </span>
+        <span aria-hidden className="text-muted-foreground">
+          →
+        </span>
+      </Link>
+
       <div className="mt-6 inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
         {TABS.map((t) => (
           <button

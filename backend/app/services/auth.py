@@ -249,6 +249,12 @@ async def issue_refresh_token(
     return raw, expires_at
 
 
+# How long a just-rotated refresh token is still accepted. Long enough to
+# cover parallel tabs and a lost response, short enough that a stolen
+# token replayed later still trips reuse detection.
+REFRESH_REUSE_GRACE_SECONDS = 60
+
+
 async def rotate_refresh_token(
     session: AsyncSession,
     *,
@@ -263,9 +269,22 @@ async def rotate_refresh_token(
     if rt is None:
         raise AuthError("unknown refresh token")
     if rt.revoked_at is not None:
-        # Reuse of a revoked token — possible theft. Revoke everything for this user.
-        await _revoke_all_for_user(session, rt.user_id)
-        raise AuthError("refresh token reuse detected; all sessions revoked")
+        if rt.replaced_by_id is None:
+            # Revoked by logout / password change, not by rotation. Not a
+            # theft signal — just a dead session.
+            raise AuthError("refresh token revoked")
+        age = (datetime.now(UTC) - rt.revoked_at).total_seconds()
+        if age > REFRESH_REUSE_GRACE_SECONDS:
+            # A token rotated away long ago is being replayed — possible
+            # theft. Revoke everything for this user.
+            await _revoke_all_for_user(session, rt.user_id)
+            raise AuthError("refresh token reuse detected; all sessions revoked")
+        # Rotated moments ago: two tabs refreshed with the same cookie, or
+        # the response carrying the new cookie never reached the browser
+        # (reload, network blip, API restart). Treating that as theft
+        # logged the operator out of every session. Fall through and mint
+        # a sibling token; the chain stays revocable as a whole on logout
+        # of each tab and by password change.
     if rt.expires_at <= datetime.now(UTC):
         raise AuthError("refresh token expired")
 
@@ -286,9 +305,10 @@ async def rotate_refresh_token(
     session.add(new_rt)
     await session.flush()
 
-    rt.revoked_at = datetime.now(UTC)
-    rt.replaced_by_id = new_rt.id
-    await session.flush()
+    if rt.revoked_at is None:
+        rt.revoked_at = datetime.now(UTC)
+        rt.replaced_by_id = new_rt.id
+        await session.flush()
 
     return user, new_raw, new_expires
 

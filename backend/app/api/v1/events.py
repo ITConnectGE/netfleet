@@ -12,6 +12,7 @@ from app.api.dependencies import (
     client_ip,
     db_session,
     get_current_user,
+    require_admin,
     require_permission,
 )
 from app.models.audit_log import AuditOutcome
@@ -91,6 +92,29 @@ async def acknowledge_events(
         response_meta={"updated": updated},
     )
     await session.commit()
+
+
+@router.post("/clear")
+async def clear_events(
+    request: Request,
+    user: User = Depends(require_admin),
+    session: AsyncSession = Depends(db_session),
+) -> dict[str, int]:
+    """Admin only: empty the event inbox for the whole organization."""
+    cleared = await events_svc.clear_events(session, user.organization_id)
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="events",
+        action="clear_all",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"cleared": cleared},
+    )
+    await session.commit()
+    return {"cleared": cleared}
 
 
 @router.get("/summary")

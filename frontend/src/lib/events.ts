@@ -91,6 +91,16 @@ export async function acknowledgeEvents(ids: string[]): Promise<void> {
   }
 }
 
+/** Admin only: hide every event in the inbox. Returns how many. */
+export async function clearAllEvents(): Promise<number> {
+  try {
+    const r = await api.post("events/clear").json<{ cleared: number }>();
+    return r.cleared;
+  } catch (e) {
+    throw new Error(await readErrorMessage(e));
+  }
+}
+
 /** Unacknowledged-event count per site, broken down by severity. The
  *  fleet map calls this to flip a site's pin to dark red whenever the
  *  `critical` slot is > 0. */

@@ -85,7 +85,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { data: me, isLoading } = useQuery<UserPublic | null>({
     queryKey: ["me"],
     queryFn: fetchMe,
-    retry: false,
+    // fetchMe only throws on transient failures (a 401 resolves to null),
+    // so keep retrying those instead of dropping the session.
+    retry: (count) => count < 5,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
   });
   const { data: health } = useQuery<HealthResponse>({
     queryKey: ["health"],
@@ -118,6 +121,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (isLoading) {
     return <ShellSkeleton />;
   }
+  // `undefined` here means /auth/me keeps failing for reasons other than
+  // a 401 (API unreachable). Hold the shell rather than blank the page or
+  // claim the user was logged out.
+  if (me === undefined) return <ShellSkeleton />;
   if (!me) return null;
   const passwordChangeRequired = me.must_change_password;
   const onLogout = async () => {

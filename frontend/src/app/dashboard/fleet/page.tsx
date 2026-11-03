@@ -1,19 +1,25 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { StatusPill } from "@/components/status-pill";
+import { useToast } from "@/components/toast";
 import { VendorIcon } from "@/components/vendor-icon";
-import { listDevices, type Device } from "@/lib/devices";
+import { listDevices, testDeviceConnection, type Device } from "@/lib/devices";
+import { checkDeviceFirmware } from "@/lib/firmware";
+import { normFw, runPool } from "@/lib/pool";
 import { listSites, type Site } from "@/lib/sites";
 import { listTenants, type Tenant } from "@/lib/tenants";
 
-function normFw(v: string | null | undefined): string {
-  if (!v) return "";
-  return v.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
+/** Per-device progress of an "Update all" run. */
+type RefreshState = "queued" | "running" | "ok" | "error";
+
+// Routers are contacted in parallel, but not all at once: each refresh is
+// a live session on a production device, and the API host has finite
+// sockets.
+const REFRESH_CONCURRENCY = 6;
 
 type Row = {
   key: string;
@@ -108,6 +114,62 @@ export default function FleetPage() {
 
   const [filter, setFilter] = useState("");
 
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [refresh, setRefresh] = useState<Map<string, RefreshState>>(new Map());
+  const refreshing = [...refresh.values()].some(
+    (v) => v === "queued" || v === "running",
+  );
+  const refreshDone = [...refresh.values()].filter(
+    (v) => v === "ok" || v === "error",
+  ).length;
+
+  async function updateAll() {
+    const targets = (devices ?? []).filter((d) => d.is_enabled);
+    if (targets.length === 0) return;
+    const state = new Map<string, RefreshState>(
+      targets.map((d) => [d.id, "queued"]),
+    );
+    const mark = (id: string, v: RefreshState) => {
+      state.set(id, v);
+      setRefresh(new Map(state));
+    };
+    setRefresh(new Map(state));
+
+    let failed = 0;
+    await runPool(targets, REFRESH_CONCURRENCY, async (d) => {
+      mark(d.id, "running");
+      try {
+        // test-connection refreshes status, last-seen, model, firmware
+        // and OS facts in one round trip.
+        const res = await testDeviceConnection(d.id);
+        // Then ask the router what's published upstream. Servers have no
+        // firmware channel (kernels come through Packages), so skip them.
+        if (res.ok && d.device_class !== "server") {
+          await checkDeviceFirmware(d.id);
+        }
+        if (!res.ok) failed++;
+        mark(d.id, res.ok ? "ok" : "error");
+      } catch {
+        failed++;
+        mark(d.id, "error");
+      }
+    });
+
+    await queryClient.invalidateQueries({ queryKey: ["devices"] });
+    if (failed === 0) {
+      toast.success("Fleet updated", `${targets.length} device(s) refreshed.`);
+    } else {
+      toast.warning(
+        "Fleet updated with errors",
+        `${targets.length - failed} ok, ${failed} unreachable or failed — see the Status column.`,
+      );
+    }
+    // Keep the per-row markers briefly so the operator sees what failed,
+    // then fall back to the regular status pills.
+    setTimeout(() => setRefresh(new Map()), 4000);
+  }
+
   const filtered = useMemo<Row[]>(() => {
     const needle = filter.trim().toLowerCase();
     if (!needle) return rows;
@@ -172,6 +234,22 @@ export default function FleetPage() {
             site{totalSites === 1 ? "" : "s"} · {totalDevices} device
             {totalDevices === 1 ? "" : "s"}
           </div>
+          <button
+            type="button"
+            onClick={updateAll}
+            disabled={refreshing || !devices || devices.length === 0}
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+            title="Reconnect to every enabled device: refresh status, model, version and check for new firmware"
+          >
+            {refreshing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Spinner />
+                Updating {refreshDone}/{refresh.size}…
+              </span>
+            ) : (
+              "⟳ Update all"
+            )}
+          </button>
           <Link
             href="/dashboard/wg-s2s/new"
             className="rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10"
@@ -221,7 +299,12 @@ export default function FleetPage() {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <FleetRow key={r.key} row={r} highlight={filter.toLowerCase()} />
+                <FleetRow
+                  key={r.key}
+                  row={r}
+                  highlight={filter.toLowerCase()}
+                  refreshState={r.device ? refresh.get(r.device.id) : undefined}
+                />
               ))}
             </tbody>
           </table>
@@ -267,7 +350,24 @@ function EmptyFleetState({ hasFilter }: { hasFilter: boolean }) {
   );
 }
 
-function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block size-3 animate-spin rounded-full border-2 border-current border-r-transparent"
+    />
+  );
+}
+
+function FleetRow({
+  row,
+  highlight,
+  refreshState,
+}: {
+  row: Row;
+  highlight: string;
+  refreshState?: RefreshState;
+}) {
   const { tenant, site, device, tenantFirst, siteFirst } = row;
   const fwUpgrade =
     device?.firmware_available &&
@@ -390,11 +490,18 @@ function FleetRow({ row, highlight }: { row: Row; highlight: string }) {
       </td>
       <td className="whitespace-nowrap px-3 py-2 align-top">
         {device ? (
-          <StatusPill
-            status={device.status}
-            lastSeenAt={device.last_seen_at}
-            error={device.status_error}
-          />
+          refreshState === "queued" || refreshState === "running" ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              {refreshState === "running" ? <Spinner /> : null}
+              {refreshState === "running" ? "Refreshing…" : "Queued"}
+            </span>
+          ) : (
+            <StatusPill
+              status={device.status}
+              lastSeenAt={device.last_seen_at}
+              error={device.status_error}
+            />
+          )
         ) : null}
       </td>
       <td className="whitespace-nowrap px-3 py-2 align-top text-right">

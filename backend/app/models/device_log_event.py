@@ -95,6 +95,10 @@ class DeviceLogEvent(IdMixin, Base):
     dedup_key: Mapped[str] = mapped_column(String(64), nullable=False)
 
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set by an admin's "Clear all". Cleared rows are hidden everywhere but
+    # kept until retention prunes them: their dedup_key is what stops the
+    # next scan from re-importing lines still in the device's log buffer.
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     acknowledged_by_user_id: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )

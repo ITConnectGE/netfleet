@@ -58,7 +58,10 @@ export const api: KyInstance = ky.create({
         if (skip) return response;
         const refreshed = await tryRefresh();
         if (!refreshed) {
-          authStorage.clear();
+          // Only forget the session when the server actually rejected the
+          // refresh. A timeout or a 502 while the API restarts says nothing
+          // about the session; wiping it there bounced people to /login.
+          if (lastRefreshRejected) authStorage.clear();
           return response;
         }
         request.headers.set("Authorization", `Bearer ${refreshed}`);
@@ -69,22 +72,40 @@ export const api: KyInstance = ky.create({
 });
 
 let refreshInFlight: Promise<string | null> | null = null;
+/** True when the last refresh failed because the server said no (401),
+ *  as opposed to a network error or 5xx. */
+let lastRefreshRejected = false;
+
+async function doRefresh(): Promise<string | null> {
+  try {
+    const json = await ky
+      .post(`${API_BASE}/auth/refresh`, {
+        json: {},
+        credentials: "include",
+        retry: { limit: 0 },
+      })
+      .json<{ access_token: string; expires_at: string }>();
+    lastRefreshRejected = false;
+    authStorage.setAccessToken(json.access_token, json.expires_at);
+    return json.access_token;
+  } catch (e) {
+    lastRefreshRejected = e instanceof HTTPError && e.response.status === 401;
+    return null;
+  }
+}
 
 async function tryRefresh(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
-      const json = await ky
-        .post(`${API_BASE}/auth/refresh`, {
-          json: {},
-          credentials: "include",
-          retry: { limit: 0 },
-        })
-        .json<{ access_token: string; expires_at: string }>();
-      authStorage.setAccessToken(json.access_token, json.expires_at);
-      return json.access_token;
-    } catch {
-      return null;
+      // Every tab holds its own access token but they share one refresh
+      // cookie, and each refresh rotates it. Serialise refreshes across
+      // tabs so the second tab presents the cookie the first one just
+      // received instead of the one it just retired.
+      if (typeof navigator !== "undefined" && navigator.locks) {
+        return await navigator.locks.request("netfleet-auth-refresh", doRefresh);
+      }
+      return await doRefresh();
     } finally {
       refreshInFlight = null;
     }

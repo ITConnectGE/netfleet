@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { fetchMe, type UserPublic } from "@/lib/auth";
 import {
   acknowledgeEvents,
+  clearAllEvents,
   listEvents,
   type EventListResponse,
   type EventRow,
@@ -99,6 +101,21 @@ export default function EventsPage() {
     mutationFn: (ids: string[]) => acknowledgeEvents(ids),
     onSuccess: () => {
       setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["events"] });
+    },
+  });
+
+  const { data: me } = useQuery<UserPublic | null>({
+    queryKey: ["me"],
+    queryFn: fetchMe,
+  });
+  const [confirmClear, setConfirmClear] = useState(false);
+  const clearAll = useMutation({
+    mutationFn: clearAllEvents,
+    onSuccess: () => {
+      setConfirmClear(false);
+      setSelected(new Set());
+      setPage(0);
       qc.invalidateQueries({ queryKey: ["events"] });
     },
   });
@@ -248,11 +265,49 @@ export default function EventsPage() {
             {ack.isPending ? "Acking…" : `Acknowledge ${selected.size > 0 ? `(${selected.size})` : ""}`}
           </button>
         </div>
+        {me?.is_admin && (
+          <div className="flex items-end gap-2 pb-1">
+            {confirmClear ? (
+              <>
+                <span className="text-xs text-destructive">
+                  Clear every event for all devices?
+                </span>
+                <button
+                  disabled={clearAll.isPending}
+                  onClick={() => clearAll.mutate()}
+                  className="rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {clearAll.isPending ? "Clearing…" : "Yes, clear all"}
+                </button>
+                <button
+                  disabled={clearAll.isPending}
+                  onClick={() => setConfirmClear(false)}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent/60"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmClear(true)}
+                title="Admin only: remove every event from the inbox"
+                className="rounded-md border border-destructive/50 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/10"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
         <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {(error as Error).message}
+        </div>
+      )}
+      {clearAll.error && (
+        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Clear failed: {(clearAll.error as Error).message}
         </div>
       )}
       {ack.error && (

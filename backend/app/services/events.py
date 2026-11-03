@@ -203,7 +203,10 @@ async def list_events(
         .outerjoin(Tenant, Tenant.id == DeviceLogEvent.tenant_id)
         .outerjoin(Site, Site.id == DeviceLogEvent.site_id)
         .outerjoin(User, User.id == DeviceLogEvent.acknowledged_by_user_id)
-        .where(DeviceLogEvent.organization_id == organization_id)
+        .where(
+            DeviceLogEvent.organization_id == organization_id,
+            DeviceLogEvent.cleared_at.is_(None),
+        )
     )
 
     if severities:
@@ -263,6 +266,7 @@ async def list_events(
     unack_stmt = select(func.count()).where(
         DeviceLogEvent.organization_id == organization_id,
         DeviceLogEvent.acknowledged_at.is_(None),
+        DeviceLogEvent.cleared_at.is_(None),
     )
     unack_total = int((await session.execute(unack_stmt)).scalar_one())
 
@@ -271,6 +275,7 @@ async def list_events(
         .where(
             DeviceLogEvent.organization_id == organization_id,
             DeviceLogEvent.acknowledged_at.is_(None),
+            DeviceLogEvent.cleared_at.is_(None),
         )
         .group_by(DeviceLogEvent.severity)
     )
@@ -308,6 +313,26 @@ async def acknowledge_events(
     return int(result.rowcount or 0)
 
 
+async def clear_events(session: AsyncSession, organization_id: UUID) -> int:
+    """Hide every visible event in the org. Returns how many were cleared.
+
+    A soft clear on purpose: deleting the rows would also delete their
+    dedup keys, and the next scan would re-import every line still in the
+    routers' log buffers — the inbox would refill within minutes.
+    Retention deletes cleared rows on its normal schedule.
+    """
+    stmt = (
+        update(DeviceLogEvent)
+        .where(
+            DeviceLogEvent.organization_id == organization_id,
+            DeviceLogEvent.cleared_at.is_(None),
+        )
+        .values(cleared_at=datetime.now(UTC))
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)
+
+
 async def per_site_unack_summary(
     session: AsyncSession, organization_id: UUID
 ) -> dict[str, dict[str, int]]:
@@ -324,6 +349,7 @@ async def per_site_unack_summary(
         .where(
             DeviceLogEvent.organization_id == organization_id,
             DeviceLogEvent.acknowledged_at.is_(None),
+            DeviceLogEvent.cleared_at.is_(None),
             DeviceLogEvent.site_id.is_not(None),
         )
         .group_by(DeviceLogEvent.site_id, DeviceLogEvent.severity)

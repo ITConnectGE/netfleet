@@ -166,26 +166,11 @@ export default function AuditPage() {
               ? "0 events"
               : `${data.offset + 1}–${Math.min(data.offset + data.items.length, data.total)} of ${data.total}`}
           </span>
-          <div className="flex gap-2">
-            <button
-              disabled={data.offset === 0}
-              onClick={() =>
-                setFilters({ ...filters, offset: Math.max(0, (filters.offset ?? 0) - PAGE_SIZE) })
-              }
-              className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-accent disabled:opacity-50"
-            >
-              ← Previous
-            </button>
-            <button
-              disabled={data.offset + data.items.length >= data.total}
-              onClick={() =>
-                setFilters({ ...filters, offset: (filters.offset ?? 0) + PAGE_SIZE })
-              }
-              className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-accent disabled:opacity-50"
-            >
-              Next →
-            </button>
-          </div>
+          <Pager
+            offset={data.offset}
+            total={data.total}
+            onOffset={(offset) => setFilters({ ...filters, offset })}
+          />
         </div>
       )}
     </div>
@@ -264,6 +249,63 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
     <div className="py-1.5">
       <div className="text-xs font-medium text-muted-foreground">{label}</div>
       <div className="mt-0.5">{children}</div>
+    </div>
+  );
+}
+
+const PAGER_BTN =
+  "rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-accent disabled:opacity-50";
+
+function Pager({
+  offset,
+  total,
+  onOffset,
+}: {
+  offset: number;
+  total: number;
+  onOffset: (offset: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const current = Math.floor(offset / PAGE_SIZE) + 1;
+  const go = (page: number) =>
+    onOffset((Math.min(Math.max(page, 1), pages) - 1) * PAGE_SIZE);
+  const [draft, setDraft] = useState<string | null>(null);
+  const atFirst = current <= 1;
+  const atLast = current >= pages;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button disabled={atFirst} onClick={() => go(1)} className={PAGER_BTN} title="First page">
+        « First
+      </button>
+      <button disabled={atFirst} onClick={() => go(current - 1)} className={PAGER_BTN}>
+        ← Previous
+      </button>
+      <form
+        className="flex items-center gap-1 text-xs text-muted-foreground"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const n = Number.parseInt(draft ?? "", 10);
+          if (Number.isFinite(n)) go(n);
+          setDraft(null);
+        }}
+      >
+        <span>Page</span>
+        <input
+          aria-label="Go to page"
+          inputMode="numeric"
+          value={draft ?? String(current)}
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+          onBlur={() => setDraft(null)}
+          className="w-12 rounded-md border border-input bg-background px-1.5 py-1 text-center text-xs text-foreground"
+        />
+        <span>of {pages}</span>
+      </form>
+      <button disabled={atLast} onClick={() => go(current + 1)} className={PAGER_BTN}>
+        Next →
+      </button>
+      <button disabled={atLast} onClick={() => go(pages)} className={PAGER_BTN} title="Last page">
+        Last »
+      </button>
     </div>
   );
 }
