@@ -1863,12 +1863,22 @@ def _assert_not_protected(name: str, management_user: str | None, action: str) -
         )
 
 
+# Characters that end a chpasswd record (CR, LF, NUL).
+_RECORD_BREAKERS = (chr(13), chr(10), chr(0))
+
+
 def _chpasswd(username: str, password: str) -> ssh.Command:
     """Set a password without it ever appearing in a command line.
 
     `chpasswd` reads `user:password` from stdin, so the secret never lands
     in argv where every process on the box can read it out of /proc.
+
+    It also reads *every* line as a record, so a newline in either field
+    would set a second account's password (root's, say) under sudo. The
+    API schemas already refuse this; the check here covers every caller.
     """
+    if any(c in s for s in (username, password) for c in _RECORD_BREAKERS) or ":" in username:
+        raise ValueError("username/password contains a forbidden character")
     return ssh.Command(
         argv=["chpasswd"],
         become=True,

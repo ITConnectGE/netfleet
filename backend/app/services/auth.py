@@ -5,6 +5,7 @@ Endpoints stay thin; this module owns the business logic and makes it testable.
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -148,6 +149,20 @@ def verify_totp(secret_plain: str, code: str) -> bool:
     return pyotp.TOTP(secret_plain).verify(code, valid_window=1)
 
 
+TOTP_MAX_FAILED_ATTEMPTS = 5
+TOTP_LOCKOUT = timedelta(minutes=15)
+
+
+def matching_totp_step(secret_plain: str, code: str, now: datetime) -> int | None:
+    """The 30 s time step `code` is valid for (±1 step of drift), or None."""
+    totp = pyotp.TOTP(secret_plain)
+    base = totp.timecode(now)
+    for offset in (0, -1, 1):
+        if hmac.compare_digest(totp.at(now, counter_offset=offset), code):
+            return base + offset
+    return None
+
+
 async def verify_totp_for_user(
     session: AsyncSession,
     *,
@@ -165,10 +180,29 @@ async def verify_totp_for_user(
     if user is None or not user.totp_enrolled or not user.totp_secret_encrypted:
         raise AuthError("totp not configured for this user")
 
-    secret = decrypt_field(user.totp_secret_encrypted)
-    if not verify_totp(secret, code):
-        raise AuthError("invalid TOTP code")
+    now = datetime.now(UTC)
+    if user.totp_locked_until and user.totp_locked_until > now:
+        minutes = int((user.totp_locked_until - now).total_seconds() // 60) + 1
+        raise AuthError(f"too many wrong codes — try again in {minutes} min")
 
+    # Callers must commit even when this raises, so failed attempts stick.
+    secret = decrypt_field(user.totp_secret_encrypted)
+    step = matching_totp_step(secret, code.strip(), now)
+    if step is None:
+        user.totp_failed_attempts += 1
+        if user.totp_failed_attempts >= TOTP_MAX_FAILED_ATTEMPTS:
+            user.totp_failed_attempts = 0
+            user.totp_locked_until = now + TOTP_LOCKOUT
+            log.warning("auth.totp_locked", user_id=str(user.id))
+        await session.flush()
+        raise AuthError("invalid TOTP code")
+    if user.totp_last_step is not None and step <= user.totp_last_step:
+        raise AuthError("this code was already used — wait for the next one")
+
+    user.totp_last_step = step
+    user.totp_failed_attempts = 0
+    user.totp_locked_until = None
+    await session.flush()
     return user
 
 

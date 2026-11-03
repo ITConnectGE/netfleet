@@ -8,10 +8,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import client_ip, db_session, require_permission
 from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.secret_audit import RiskReport, UnrotatedSecretPublic
 from app.schemas.user import (
@@ -26,10 +28,55 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import audit as audit_svc
+from app.services import rbac
 from app.services import secret_audit as secret_audit_svc
 from app.services import user as user_svc
 
 router = APIRouter()
+
+
+# `users:write` is delegable to non-admins. Without these checks it was a
+# ladder to everything: set is_admin on yourself, reset a super-admin's
+# password and log in as them, or grant yourself any role in the org.
+
+
+def _forbid(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+async def _guard_admin_target(session: AsyncSession, actor: User, user_id: UUID) -> None:
+    """Only a super-admin may modify a super-admin account."""
+    if actor.is_admin:
+        return
+    try:
+        target = await user_svc.get_user(session, actor.organization_id, user_id)
+    except user_svc.UserNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    if target.is_admin:
+        raise _forbid("only a super-admin can modify a super-admin account")
+
+
+async def _guard_grantable_roles(
+    session: AsyncSession, actor: User, role_ids: list[UUID]
+) -> None:
+    """A non-admin may only grant roles whose every permission they hold
+    themselves (at organization scope)."""
+    if actor.is_admin or not role_ids:
+        return
+    roles = (
+        await session.execute(
+            select(Role)
+            .where(Role.id.in_(role_ids), Role.organization_id == actor.organization_id)
+            .options(selectinload(Role.permissions))
+        )
+    ).scalars()
+    for role in roles:
+        for perm in role.permissions:
+            if not await rbac.can(session, actor, perm.section, perm.action):
+                raise _forbid(
+                    f"cannot grant role '{role.name}': it includes "
+                    f"{perm.section}:{perm.action}, which you do not have"
+                )
 
 
 def _to_list_item(u: User, count: int) -> UserListItem:
@@ -54,6 +101,9 @@ async def create_user(
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> UserInviteResponse:
+    if payload.is_admin and not actor.is_admin:
+        raise _forbid("only a super-admin can create a super-admin")
+    await _guard_grantable_roles(session, actor, payload.role_ids)
     try:
         new_user, generated = await user_svc.create_user(
             session, actor.organization_id, payload
@@ -123,6 +173,10 @@ async def update_user(
             detail="you cannot remove your own super-admin rights — ask another admin",
         )
 
+    if payload.is_admin is not None and not actor.is_admin:
+        raise _forbid("only a super-admin can change super-admin rights")
+    await _guard_admin_target(session, actor, user_id)
+
     try:
         updated = await user_svc.update_user(session, actor.organization_id, user_id, payload)
     except user_svc.UserNotFound as e:
@@ -153,6 +207,7 @@ async def reset_user_password(
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> None:
+    await _guard_admin_target(session, actor, user_id)
     try:
         await user_svc.reset_password(session, actor.organization_id, user_id, payload.new_password)
     except user_svc.UserNotFound as e:
@@ -214,6 +269,7 @@ async def create_assignment(
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> AssignmentPublic:
+    await _guard_grantable_roles(session, actor, [payload.role_id])
     try:
         assignment = await user_svc.create_assignment(
             session, actor.organization_id, user_id, payload
@@ -268,6 +324,7 @@ async def bulk_create_assignments(
     actor: User = Depends(require_permission("users", "write")),
     session: AsyncSession = Depends(db_session),
 ) -> AssignmentBulkResult:
+    await _guard_grantable_roles(session, actor, [payload.role_id])
     try:
         created, skipped = await user_svc.bulk_create_assignments(
             session, actor.organization_id, user_id, payload

@@ -45,8 +45,18 @@ function LoginPageInner() {
   const next = useMemo(() => {
     const raw = searchParams.get("next");
     if (!raw) return "/dashboard";
-    // Only follow same-origin relative paths to avoid open-redirect.
-    return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
+    // Only follow same-origin paths. A prefix check is not enough: the URL
+    // parser drops tabs/newlines and reads "\" as "/", so "/\tevil.com"
+    // or "/\evil.com" pass `startsWith("/")` and still leave the origin.
+    // Parse it the way the router will, and keep only the path part.
+    if (typeof window === "undefined") return "/dashboard";
+    try {
+      const u = new URL(raw, window.location.origin);
+      if (u.origin !== window.location.origin) return "/dashboard";
+      return `${u.pathname}${u.search}${u.hash}`;
+    } catch {
+      return "/dashboard";
+    }
   }, [searchParams]);
   const [phase, setPhase] = useState<Phase>("password");
 

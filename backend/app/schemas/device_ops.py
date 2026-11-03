@@ -1,13 +1,24 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator
+
+
+def _no_control_chars(v: str | None) -> str | None:
+    """Device passwords travel as single records (Linux `chpasswd` reads one
+    `user:password` per line). A newline would smuggle in a second record —
+    e.g. a new password for root — so control characters are refused."""
+    if v is not None and any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+        raise ValueError("password must not contain control characters or line breaks")
+    return v
+
+
+DevicePassword = Annotated[str, AfterValidator(_no_control_chars)]
 
 
 # ---------------- IP services ----------------
-
 
 class IpServicePublic(BaseModel):
     name: str
@@ -56,7 +67,7 @@ class DeviceGroupPublic(BaseModel):
 
 class DeviceUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=32)
-    password: str | None = Field(default=None, max_length=512)
+    password: DevicePassword | None = Field(default=None, max_length=512)
     groups: list[str] = Field(default_factory=list)
     shell: str | None = Field(default=None, max_length=128)
     comment: str | None = Field(default=None, max_length=255)
@@ -72,7 +83,7 @@ class DeviceGroupCreate(BaseModel):
 
 
 class DeviceUserPasswordReset(BaseModel):
-    new_password: str = Field(min_length=8, max_length=512)
+    new_password: DevicePassword = Field(min_length=8, max_length=512)
 
 
 class DeviceUserDisableRequest(BaseModel):
@@ -85,7 +96,7 @@ class DeviceUserDisableRequest(BaseModel):
 class BulkPasswordResetRequest(BaseModel):
     device_ids: list[UUID] = Field(min_length=1, max_length=500)
     username: str = Field(min_length=1, max_length=64)
-    new_password: str = Field(min_length=8, max_length=512)
+    new_password: DevicePassword = Field(min_length=8, max_length=512)
 
 
 class BulkOperationResult(BaseModel):

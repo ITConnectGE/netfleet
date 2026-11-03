@@ -31,6 +31,7 @@ from app.schemas.vpn import (
     WireguardPeerPublic,
 )
 from app.services import audit as audit_svc
+from app.services import rbac
 from app.services import device as device_svc
 from app.services import vpn as vpn_svc
 from app.services import wireguard as wg
@@ -640,7 +641,12 @@ async def generate_wg_client_config(
                 detail=f"interface '{peer.interface}' has no public key on the device",
             )
 
-        # PSK is server-stored; reveal it (audited).
+        # PSK is server-stored; revealing it takes the same permission as the
+        # dedicated reveal endpoint, not just read access to peers.
+        try:
+            await rbac.require(session, user, "secret.reveal", "execute")
+        except PermissionError as e:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
         keys = await vpn_svc.reveal_wg_peer_keys(
             session,
             user.organization_id,

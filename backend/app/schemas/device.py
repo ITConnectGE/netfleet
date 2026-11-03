@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.device import BecomeMethod, DeviceClass, DeviceStatus, DeviceTransport
+from app.schemas.device_ops import DevicePassword
 
 # Vendors whose devices are servers rather than network gear. Kept here
 # rather than derived from the driver so validation does not depend on
@@ -63,14 +64,14 @@ class DeviceCreate(DeviceBase):
     site_id: UUID
     vendor: str = Field(min_length=1, max_length=32)
     username: str = Field(min_length=1, max_length=64)
-    password: str | None = Field(default=None, max_length=512)
+    password: DevicePassword | None = Field(default=None, max_length=512)
     api_key: str | None = Field(default=None, max_length=512)
     # SSH hosts: leave both credential fields empty and NetFleet generates
     # a keypair, handing the public half to the onboarding script.
     generate_ssh_key: bool = False
     ssh_private_key: str | None = Field(default=None, max_length=16384)
     become_method: BecomeMethod = BecomeMethod.NONE
-    become_password: str | None = Field(default=None, max_length=512)
+    become_password: DevicePassword | None = Field(default=None, max_length=512)
 
     @model_validator(mode="after")
     def _validate_credentials(self) -> DeviceCreate:
@@ -118,11 +119,11 @@ class DeviceUpdate(BaseModel):
     transport: DeviceTransport | None = None
     verify_tls: bool | None = None
     username: str | None = Field(default=None, min_length=1, max_length=64)
-    password: str | None = Field(default=None, max_length=512)
+    password: DevicePassword | None = Field(default=None, max_length=512)
     api_key: str | None = Field(default=None, max_length=512)
     ssh_private_key: str | None = Field(default=None, max_length=16384)
     become_method: BecomeMethod | None = None
-    become_password: str | None = Field(default=None, max_length=512)
+    become_password: DevicePassword | None = Field(default=None, max_length=512)
     # Clears the pinned host key so the next connection re-pins. Used after
     # a legitimate host rebuild.
     reset_host_key: bool = False

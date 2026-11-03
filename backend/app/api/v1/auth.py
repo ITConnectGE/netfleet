@@ -198,6 +198,10 @@ async def otp_verify(
             session, mfa_temp_token=body.mfa_temp_token, code=body.code
         )
     except auth_svc.AuthError as e:
+        # Persist the failed-attempt counter / lockout before answering:
+        # the request session is otherwise rolled back, and the limit
+        # would never be reached.
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
     return await _finalize_login(session, response, request, user)
 
@@ -228,6 +232,10 @@ async def totp_verify(
             session, mfa_temp_token=body.mfa_temp_token, code=body.code
         )
     except auth_svc.AuthError as e:
+        # Persist the failed-attempt counter / lockout before answering:
+        # the request session is otherwise rolled back, and the limit
+        # would never be reached.
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
 
     return await _finalize_login(session, response, request, user)

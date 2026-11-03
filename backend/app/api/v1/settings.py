@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import client_ip, db_session, require_permission
+from app.api.dependencies import client_ip, db_session, require_admin, require_permission
 from app.core.config import settings as app_settings
 from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
@@ -335,7 +335,9 @@ async def update_authorization(
 
 @router.get("/system-backup")
 async def list_system_backups(
-    _: User = Depends(require_permission("settings", "read")),
+    # Admin only: a bundle is a full database dump (every password hash)
+    # plus every device's unencrypted RouterOS backup.
+    _: User = Depends(require_admin),
 ) -> dict:
     return {
         "bundles": sysbackup_svc.list_system_backups(),
@@ -347,7 +349,7 @@ async def list_system_backups(
 @router.post("/system-backup", status_code=status.HTTP_201_CREATED)
 async def create_system_backup(
     request: Request,
-    user: User = Depends(require_permission("settings", "write")),
+    user: User = Depends(require_admin),
     session: AsyncSession = Depends(db_session),
 ) -> dict:
     try:
@@ -390,7 +392,7 @@ async def create_system_backup(
 async def download_system_backup(
     filename: str,
     request: Request,
-    user: User = Depends(require_permission("settings", "read")),
+    user: User = Depends(require_admin),
     session: AsyncSession = Depends(db_session),
 ) -> FileResponse:
     try:
@@ -421,7 +423,7 @@ async def download_system_backup(
 async def delete_system_backup(
     filename: str,
     request: Request,
-    user: User = Depends(require_permission("settings", "write")),
+    user: User = Depends(require_admin),
     session: AsyncSession = Depends(db_session),
 ) -> None:
     try:

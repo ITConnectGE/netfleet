@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,13 @@ class User(IdMixin, TimestampsMixin, TableNameMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255))
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512))
     totp_enrolled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Brute-force and replay guards for the login TOTP step. The code space
+    # is only 10^6 with three codes valid at once, so without a counter a
+    # known password plus a loop is an account takeover.
+    totp_failed_attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+    totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 30 s time step of the last accepted code; a code is never accepted twice.
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
 
     # SMS / email one-time-code at login. Independent of TOTP; when both
     # are configured TOTP wins (per the user's "ჯერ აგდებდეს two

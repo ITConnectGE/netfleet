@@ -13,6 +13,7 @@ from app.models.audit_log import AuditOutcome
 from app.models.user import User
 from app.schemas.device import DeviceCreate, DevicePublic, DeviceUpdate, TestConnectionResult
 from app.services import audit as audit_svc
+from app.services import rbac
 from app.services import device as device_svc
 from app.services import device_onboarding as onboarding_svc
 from app.services import ssh_key_rotation as rotation_svc
@@ -246,6 +247,10 @@ async def get_onboarding_script(
     ?include_password=false to leave a placeholder instead (audited either
     way as a credential reveal). Linux onboarding is key-based and never
     embeds a secret."""
+    # The embedded password is a credential reveal: without secret.reveal
+    # the script gets the placeholder instead.
+    if include_password and not await rbac.can(session, user, "secret.reveal", "execute"):
+        include_password = False
     try:
         text, extension = await onboarding_svc.generate_script(
             session,
