@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.request_context import current_session_id
 from app.models.audit_log import AuditLog, AuditOutcome
 
 # Keys we strip from payloads before persisting — never write secrets to audit_log.
@@ -78,6 +79,7 @@ async def write_audit(
     request_payload: dict[str, Any] | None = None,
     response_meta: dict[str, Any] | None = None,
     error_message: str | None = None,
+    session_id: UUID | None = None,
 ) -> None:
     session.add(
         AuditLog(
@@ -93,6 +95,7 @@ async def write_audit(
             request_payload=_redact(request_payload) if request_payload else None,
             response_meta=response_meta,
             error_message=error_message[:1024] if error_message else None,
+            session_id=session_id or current_session_id.get(),
         )
     )
     await session.flush()

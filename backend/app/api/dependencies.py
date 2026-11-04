@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
+from app.core.request_context import current_session_id
 from app.core.security import decode_jwt
 from app.models.user import User
 from app.services import rbac
@@ -53,6 +54,12 @@ async def get_current_user(
 
     # Stash for downstream audit logging
     request.state.user = user
+    sid = payload.get("sid")
+    if sid:
+        try:
+            current_session_id.set(UUID(sid))
+        except (ValueError, TypeError):
+            pass
     return user
 
 

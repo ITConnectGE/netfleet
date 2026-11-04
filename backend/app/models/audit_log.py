@@ -49,3 +49,6 @@ class AuditLog(IdMixin, Base):
     request_payload: Mapped[dict | None] = mapped_column(JSONB)
     response_meta: Mapped[dict | None] = mapped_column(JSONB)
     error_message: Mapped[str | None] = mapped_column(String(1024))
+    # Sign-in session the action was taken in (NULL for background jobs
+    # and for rows written before sessions were tracked).
+    session_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), index=True)

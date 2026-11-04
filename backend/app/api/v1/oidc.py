@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import client_ip, db_session
 from app.api.v1.auth import _set_refresh_cookie
 from app.core.config import settings
+from app.models.audit_log import AuditOutcome
+from app.services import audit as audit_svc
 from app.services import auth as auth_svc
 from app.services import oidc as oidc_svc
 
@@ -35,6 +37,10 @@ router = APIRouter()
 
 
 Provider = Literal["microsoft", "google"]
+
+
+def _provider_label(provider: Provider) -> str:
+    return {"microsoft": "Microsoft SSO", "google": "Google SSO"}.get(provider, provider)
 
 
 async def _resolve_legacy_provider(session: AsyncSession) -> Provider:
@@ -110,12 +116,23 @@ async def _callback(
             url=f"{settings.PUBLIC_URL.rstrip('/')}/login?"
             + urlencode({"error": "oidc", "message": "this account is disabled"})
         )
-    access, _exp = auth_svc.issue_access_token(user)
     refresh_raw, _ = await auth_svc.issue_refresh_token(
         session,
         user=user,
         user_agent=request.headers.get("user-agent"),
         ip_address=client_ip(request),
+    )
+    access, _exp = auth_svc.issue_access_token(user)
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="auth",
+        action="login",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"method": _provider_label(provider)},
     )
     await session.commit()
 

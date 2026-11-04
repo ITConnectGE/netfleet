@@ -26,7 +26,7 @@ export function ResourcesCard({
    *  and every read will be refused, so we do not poll into a wall. */
   pinned?: string | null;
 }) {
-  const { data, isLoading, error, refetch, isFetching } =
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
     useQuery<SystemResources>({
       queryKey: ["resources", deviceId],
       queryFn: () => getResources(deviceId),
@@ -118,6 +118,9 @@ export function ResourcesCard({
               <p className="text-lg font-semibold tabular-nums">
                 {formatUptime(data.uptime_seconds)}
               </p>
+              {data.uptime_seconds != null && dataUpdatedAt > 0 && (
+                <UptimeSince at={dataUpdatedAt - data.uptime_seconds * 1000} />
+              )}
               {data.os_version && (
                 <p className="text-[11px] text-muted-foreground">
                   {data.os_version}
@@ -129,5 +132,18 @@ export function ResourcesCard({
         </>
       )}
     </section>
+  );
+}
+
+/** "since 2026-09-23 23:41": when the host last booted, from the uptime it
+ *  reported and the moment that reading was fetched. */
+function UptimeSince({ at }: { at: number }) {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const label = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return (
+    <p className="text-[11px] text-muted-foreground">
+      since <time dateTime={d.toISOString()}>{label}</time>
+    </p>
   );
 }

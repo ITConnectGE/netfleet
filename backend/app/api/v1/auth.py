@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import client_ip, db_session, get_current_user
 from app.core.config import settings
+from app.core.request_context import current_session_id
 from app.models.audit_log import AuditOutcome
 from app.models.organization import Organization
 from app.models.user import User
@@ -93,7 +94,7 @@ async def login(
 
     # Zero methods → straight to the finalised session.
     if not methods:
-        return await _finalize_login(session, response, request, user)
+        return await _finalize_login(session, response, request, user, method="password")
 
     # Always issue a temp token first; both paths below need it.
     temp, exp = auth_svc.issue_mfa_temp_token_for_id(
@@ -203,7 +204,7 @@ async def otp_verify(
         # would never be reached.
         await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
-    return await _finalize_login(session, response, request, user)
+    return await _finalize_login(session, response, request, user, method="password + email code")
 
 
 def _mask_destination(channel: str, user: User) -> str:
@@ -238,7 +239,7 @@ async def totp_verify(
         await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
 
-    return await _finalize_login(session, response, request, user)
+    return await _finalize_login(session, response, request, user, method="password + TOTP")
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -403,11 +404,13 @@ async def change_password(
 
     # Mint a fresh refresh + access token so the active session is not
     # killed by the bulk revoke we just performed.
+    # Same sign-in session as before: the password changed, not the login.
     refresh_raw, _ = await auth_svc.issue_refresh_token(
         session,
         user=user,
         user_agent=request.headers.get("user-agent"),
         ip_address=client_ip(request),
+        session_id=current_session_id.get(),
     )
     _set_refresh_cookie(response, refresh_raw)
     access, access_exp = auth_svc.issue_access_token(user)
@@ -449,13 +452,26 @@ async def _finalize_login(
     response: Response,
     request: Request,
     user: User,
+    *,
+    method: str,
 ) -> LoginResponseFinal:
-    access, access_exp = auth_svc.issue_access_token(user)
     refresh_raw, _ = await auth_svc.issue_refresh_token(
         session,
         user=user,
         user_agent=request.headers.get("user-agent"),
         ip_address=client_ip(request),
+    )
+    access, access_exp = auth_svc.issue_access_token(user)
+    await audit_svc.write_audit(
+        session,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        section="auth",
+        action="login",
+        outcome=AuditOutcome.OK,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        response_meta={"method": method},
     )
     _set_refresh_cookie(response, refresh_raw)
     await session.commit()

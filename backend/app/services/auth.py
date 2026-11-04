@@ -8,6 +8,7 @@ from __future__ import annotations
 import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from uuid import UUID, uuid4
 
 import pyotp
 import structlog
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.request_context import current_session_id
 from app.core.security import (
     decode_jwt,
     decrypt_field,
@@ -251,12 +253,18 @@ def issue_mfa_temp_token_for_id(user_id: str, organization_id: str) -> tuple[str
     )
 
 
-def issue_access_token(user: User) -> tuple[str, datetime]:
+def issue_access_token(user: User, session_id: UUID | None = None) -> tuple[str, datetime]:
+    """Access token for `user`. It carries the sign-in session as `sid` —
+    the one passed in, else the one this request started or belongs to."""
+    sid = session_id or current_session_id.get()
+    claims: dict[str, object] = {"adm": user.is_admin}
+    if sid is not None:
+        claims["sid"] = str(sid)
     return issue_jwt(
         subject=user.id,
         organization_id=user.organization_id,
         token_type="access",
-        extra_claims={"adm": user.is_admin},
+        extra_claims=claims,
     )
 
 
@@ -266,9 +274,15 @@ async def issue_refresh_token(
     user: User,
     user_agent: str | None,
     ip_address: str | None,
+    session_id: UUID | None = None,
 ) -> tuple[str, datetime]:
+    """Start a sign-in session (or continue `session_id`) with a fresh
+    refresh token. The session id becomes the request's current session,
+    so the access token and audit rows issued next carry it."""
     raw, h = new_refresh_token()
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.REFRESH_TOKEN_TTL)
+    sid = session_id or uuid4()
+    current_session_id.set(sid)
     session.add(
         RefreshToken(
             user_id=user.id,
@@ -276,6 +290,7 @@ async def issue_refresh_token(
             expires_at=expires_at,
             user_agent=user_agent,
             ip_address=ip_address,
+            session_id=sid,
         )
     )
     user.last_login_at = datetime.now(UTC)
@@ -336,12 +351,16 @@ async def rotate_refresh_token(
     if rt.revoked_at is not None:
         # A grace-window sibling never outlives the token it came from.
         new_expires = min(new_expires, rt.expires_at)
+    # Tokens minted before sessions were tracked start one on first refresh.
+    sid = rt.session_id or uuid4()
+    current_session_id.set(sid)
     new_rt = RefreshToken(
         user_id=user.id,
         token_hash=new_hash,
         expires_at=new_expires,
         user_agent=user_agent,
         ip_address=ip_address,
+        session_id=sid,
     )
     session.add(new_rt)
     await session.flush()

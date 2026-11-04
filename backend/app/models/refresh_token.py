@@ -40,4 +40,8 @@ class RefreshToken(IdMixin, TimestampsMixin, TableNameMixin, Base):
     user_agent: Mapped[str | None] = mapped_column(String(512))
     ip_address: Mapped[str | None] = mapped_column(String(64))
 
+    # Sign-in session this token belongs to. Minted at login and carried
+    # across every rotation, so one login is one session id.
+    session_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), index=True)
+
     user: Mapped[User] = relationship("User", back_populates="refresh_tokens")
