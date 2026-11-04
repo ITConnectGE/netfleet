@@ -185,10 +185,13 @@ export default function FleetMap({
                     <p className="mt-1 text-xs text-zinc-500">{s.address}</p>
                   )}
                   {siteUnack && siteUnack.critical > 0 && (
-                    <p className="mt-1 text-xs font-medium text-red-700">
+                    <Link
+                      href={`/dashboard/events?severity=critical&site=${s.id}`}
+                      className="mt-1 block text-xs font-medium text-red-700 hover:underline"
+                    >
                       {siteUnack.critical} unacknowledged critical event
-                      {siteUnack.critical === 1 ? "" : "s"}
-                    </p>
+                      {siteUnack.critical === 1 ? "" : "s"} →
+                    </Link>
                   )}
                   <div className="mt-2 space-y-0.5 text-xs">
                     {siteDevices.length === 0 && (

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { Pager, TIME_RANGES, fullWhen, rangeStart, shortWhen } from "@/components/pager";
@@ -47,22 +47,26 @@ export default function EventsPage() {
   const qc = useQueryClient();
   const router = useRouter();
 
+  // Links from elsewhere (the fleet map's "1 unacknowledged critical
+  // event") open the inbox pre-filtered: ?severity=critical&site=<id>.
+  const params = useSearchParams();
+  const initialSeverity = (params.get("severity") ?? "")
+    .split(",")
+    .filter((x): x is Severity => (SEVERITIES as string[]).includes(x));
+
   // Default to "show everything" — events page is a unified log inbox,
   // not just an alert console. Operators who only want red flags can
   // un-tick info / warning; we don't want a fresh visit to look empty.
-  const [severity, setSeverity] = useState<Severity[]>([
-    "critical",
-    "error",
-    "warning",
-    "info",
-  ]);
+  const [severity, setSeverity] = useState<Severity[]>(
+    initialSeverity.length > 0 ? initialSeverity : [...SEVERITIES],
+  );
   const [showAcked, setShowAcked] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
-  const [tenantId, setTenantId] = useState("");
-  const [siteId, setSiteId] = useState("");
-  const [deviceId, setDeviceId] = useState("");
+  const [tenantId, setTenantId] = useState(params.get("tenant") ?? "");
+  const [siteId, setSiteId] = useState(params.get("site") ?? "");
+  const [deviceId, setDeviceId] = useState(params.get("device") ?? "");
   const [range, setRange] = useState("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
