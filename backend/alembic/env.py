@@ -1,12 +1,14 @@
 import asyncio
+import contextlib
 from logging.config import fileConfig
 
-from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from app.core.config import settings
+from app.core.migration_locks import end_stale_blockers
 from app.models import Base  # noqa: F401  imports register all models on Base.metadata
 
 config = context.config
@@ -47,7 +49,15 @@ async def run_migrations_online() -> None:
     cfg["sqlalchemy.url"] = _resolve_url()
     connectable = async_engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+        migration_pid = (await connection.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        await connection.commit()
+        watcher = asyncio.create_task(end_stale_blockers(connectable, migration_pid))
+        try:
+            await connection.run_sync(do_run_migrations)
+        finally:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
     await connectable.dispose()
 
 

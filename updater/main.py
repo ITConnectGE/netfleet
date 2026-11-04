@@ -53,7 +53,10 @@ RECREATE_SERVICES = ["api", "worker", "web"]
 API_HEALTH_URL = os.getenv(
     "NETFLEET_API_HEALTH_URL", "http://api:8000/api/v1/health"
 )
-HEALTH_TIMEOUT_SECONDS = 180
+# api runs `alembic upgrade head` before it serves anything, so its first
+# healthy answer can be minutes away on a large migration. Generous on
+# purpose: giving up early is what used to leave worker/web never started.
+HEALTH_TIMEOUT_SECONDS = int(os.getenv("NETFLEET_UPDATE_HEALTH_TIMEOUT", "900"))
 
 # How long a release-check answer stays good. Long enough that routine
 # UI polling costs ~6 GitHub calls an hour instead of 180; short enough
@@ -64,7 +67,7 @@ CHECK_CACHE_SECONDS = float(os.getenv("NETFLEET_CHECK_CACHE_SECONDS", "600"))
 # itself from `docker compose up` during an update so it cannot kill
 # itself mid-upgrade — which also means it never picks up its own fixes.
 # Reporting the version lets the UI say so out loud.
-__version__ = "0.58.0"
+__version__ = "0.58.1"
 
 
 def _normalize_image_tag(version: str) -> str:
@@ -423,6 +426,33 @@ async def _persist_version(version: str) -> None:
     _state.append_log(f"persisted VERSION={version} to .env")
 
 
+# ---------------- Recovery ----------------
+
+
+async def _start_stranded_containers() -> None:
+    """Start any of our services left in "Created"/"Exited" by a failed run.
+
+    `docker compose up` stops and recreates a container before it waits on
+    that container's dependencies, so a failure there strands it stopped.
+    Plain `docker start` ignores compose's depends_on, which is what we want
+    here: a running UI on whatever version is better than a 502."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "compose", "-f", str(COMPOSE_FILE),
+            "ps", "-a", "--status", "created", "--status", "exited", "-q",
+            *RECREATE_SERVICES,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        ids = out.decode().split()
+        if ids:
+            _state.append_log(f"starting {len(ids)} stranded container(s)")
+            await _run(["docker", "start", *ids])
+    except Exception as e:
+        _state.append_log(f"could not start stranded containers: {e}")
+
+
 # ---------------- Health check ----------------
 
 
@@ -467,19 +497,27 @@ async def _run_update(target_version: str, backup: bool) -> None:
         _state.set_state(UpdateState.PULLING, log_line=f"Pulling images @ {image_tag}…")
         await _docker_compose(["pull", *RECREATE_SERVICES], env=env)
 
-        _state.set_state(UpdateState.RECREATING, log_line="Recreating api/worker/web…")
-        # --no-deps so we don't touch postgres/redis (stateful) or updater (us).
-        await _docker_compose(
-            ["up", "-d", "--no-deps", *RECREATE_SERVICES], env=env
-        )
+        # api first, alone. worker and web depend on api being healthy, and
+        # recreating all three in one `up` used to stop the running
+        # worker/web, then abandon them in "Created" when compose gave up
+        # waiting on a slow migration -- the UI went 502 for hours. Until
+        # api is healthy on the new version, the old worker/web keep running.
+        _state.set_state(UpdateState.RECREATING, log_line="Recreating api…")
+        await _docker_compose(["up", "-d", "--no-deps", "api"], env=env)
 
         _state.set_state(
             UpdateState.HEALTH_CHECKING,
-            log_line="Waiting for api to come back healthy…",
+            log_line="Waiting for api to come back healthy (migrations run first)…",
         )
         await _wait_for_health(HEALTH_TIMEOUT_SECONDS)
 
+        # api and the database are on the new version now; record it before
+        # anything else can fail, so a later `docker compose up` cannot
+        # bring back an older api against the migrated schema.
         await _persist_version(image_tag)
+
+        _state.set_state(UpdateState.RECREATING, log_line="Recreating worker/web…")
+        await _docker_compose(["up", "-d", "--no-deps", "worker", "web"], env=env)
 
         # House-keeping — reclaim disk from the previous-version images so the
         # host doesn't slowly fill up after a string of upgrades. A 72h `until`
@@ -500,6 +538,7 @@ async def _run_update(target_version: str, backup: bool) -> None:
         _state.finished_at_iso = datetime.now(UTC).isoformat()
         _state.set_state(UpdateState.FAILED, log_line=f"FAILED: {e}")
         log.exception("update.failed", error=str(e))
+        await _start_stranded_containers()
 
 
 # ---------------- Auth ----------------
