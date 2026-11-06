@@ -188,6 +188,13 @@ only"* does today.
 curl -fsSL https://raw.githubusercontent.com/ITConnectGE/netfleet/main/install.sh | sudo bash
 ```
 
+It asks for the domain NetFleet will be served on. To skip the question
+(for example in automation), pass it in:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ITConnectGE/netfleet/main/install.sh | sudo NETFLEET_DOMAIN=netfleet.example.com bash
+```
+
 The installer will:
 
 1. Install Docker and Docker Compose if missing

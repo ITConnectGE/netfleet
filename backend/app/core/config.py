@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from cryptography.fernet import Fernet
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,21 @@ class Settings(BaseSettings):
     # to fail open (Bertie 2026-06-01). For an already-set-up org the token
     # is irrelevant: the endpoint 409s on state alone.
     BOOTSTRAP_TOKEN: str = ""
+
+    @field_validator("FERNET_KEY")
+    @classmethod
+    def _fernet_key_is_valid(cls, v: str) -> str:
+        # Fail with a message that says what to fix, instead of a traceback
+        # from deep inside the import of app.core.security.
+        try:
+            Fernet(v.encode())
+        except ValueError as e:
+            raise ValueError(
+                "NETFLEET_FERNET_KEY is not a valid Fernet key (it must be 32 "
+                "url-safe base64-encoded bytes, 44 characters ending in '='). "
+                "Generate one with: openssl rand 32 | base64 | tr '+/' '-_'"
+            ) from e
+        return v
 
     # --- Database & cache ---
     DATABASE_URL: str

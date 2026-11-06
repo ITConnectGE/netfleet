@@ -52,11 +52,41 @@ chown -R 70:70 "$INSTALL_DIR/data/postgres"
 
 # --- secrets ---
 gen_hex() { openssl rand -hex 32; }
-gen_fernet() {
-  python3 - <<'PY' 2>/dev/null || openssl rand -base64 32 | tr -d '=' | head -c 44
-from cryptography.fernet import Fernet
-print(Fernet.generate_key().decode())
-PY
+# Fernet keys are 32 random bytes in url-safe base64, padding included
+# (44 characters ending in "="). No Python needed: a fresh Ubuntu often
+# has no `cryptography` module, and the old openssl fallback produced a
+# 43-character standard-base64 string that Fernet rejects, so the API
+# crashed on its first start.
+gen_fernet() { openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'; }
+valid_fernet() { [[ "$1" =~ ^[A-Za-z0-9_-]{43}=$ ]]; }
+valid_domain() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; }
+env_get() { grep -m1 "^$1=" "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d "\"'\r" || true; }
+
+# The domain comes from $NETFLEET_DOMAIN, else from the terminal. Under
+# `curl ... | sudo bash` stdin is the script itself, so a plain `read`
+# would swallow the next line of this file as the "domain".
+ask_domain() {
+  local d="${NETFLEET_DOMAIN:-}"
+  if [[ -z "$d" ]] && { exec 3</dev/tty; } 2>/dev/null; then
+    read -rp "Enter the domain that will serve NetFleet (e.g. netfleet.example.com): " d <&3 || true
+    exec 3<&-
+  fi
+  if [[ -z "$d" ]]; then
+    d="localhost"
+    warn "no domain given (set NETFLEET_DOMAIN=... to choose one); using localhost"
+  fi
+  valid_domain "$d" || die "'$d' is not a valid domain name or IP address"
+  DOMAIN="$d"
+}
+
+set_domain() {
+  sed -i \
+    -e "s|^NETFLEET_DOMAIN=.*|NETFLEET_DOMAIN=$DOMAIN|" \
+    -e "s|^NETFLEET_PUBLIC_URL=.*|NETFLEET_PUBLIC_URL=https://$DOMAIN|" \
+    -e "s|^NETFLEET_OIDC_REDIRECT_URI=.*|NETFLEET_OIDC_REDIRECT_URI=https://$DOMAIN/api/v1/auth/oidc/callback|" \
+    -e "s|^NETFLEET_CORS_ORIGINS=.*|NETFLEET_CORS_ORIGINS=https://$DOMAIN|" \
+    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://$DOMAIN/api/v1|" \
+    "$INSTALL_DIR/.env"
 }
 
 if [[ ! -f "$INSTALL_DIR/.env" ]]; then
@@ -74,27 +104,34 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
   # we don't delete the .env line. See backend/app/api/v1/setup.py.
   BOOTSTRAP_TOKEN=$(gen_hex)
 
-  read -rp "Enter the domain that will serve NetFleet (e.g. netfleet.example.com): " DOMAIN
-  DOMAIN="${DOMAIN:-localhost}"
+  ask_domain
 
   sed -i \
-    -e "s|^NETFLEET_DOMAIN=.*|NETFLEET_DOMAIN=$DOMAIN|" \
-    -e "s|^NETFLEET_PUBLIC_URL=.*|NETFLEET_PUBLIC_URL=https://$DOMAIN|" \
     -e "s|^NETFLEET_JWT_SECRET=.*|NETFLEET_JWT_SECRET=$JWT|" \
     -e "s|^NETFLEET_FERNET_KEY=.*|NETFLEET_FERNET_KEY=$FERNET|" \
     -e "s|^NETFLEET_UPDATER_TOKEN=.*|NETFLEET_UPDATER_TOKEN=$UPDATER_TOKEN|" \
     -e "s|^NETFLEET_BOOTSTRAP_TOKEN=.*|NETFLEET_BOOTSTRAP_TOKEN=$BOOTSTRAP_TOKEN|" \
     -e "s|^NETFLEET_DB_PASSWORD=.*|NETFLEET_DB_PASSWORD=$DB_PASS|" \
     -e "s|^NETFLEET_DATABASE_URL=.*|NETFLEET_DATABASE_URL=postgresql+asyncpg://netfleet:$DB_PASS@postgres:5432/netfleet|" \
-    -e "s|^NETFLEET_OIDC_REDIRECT_URI=.*|NETFLEET_OIDC_REDIRECT_URI=https://$DOMAIN/api/v1/auth/oidc/callback|" \
-    -e "s|^NETFLEET_CORS_ORIGINS=.*|NETFLEET_CORS_ORIGINS=https://$DOMAIN|" \
-    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=https://$DOMAIN/api/v1|" \
     "$INSTALL_DIR/.env"
+  set_domain
 
   chmod 600 "$INSTALL_DIR/.env"
   log "generated $INSTALL_DIR/.env with fresh secrets"
 else
   log ".env already exists — keeping current values"
+  # Repair what earlier versions of this script got wrong. Both made the
+  # API fail on its first start, so nothing was ever encrypted with the
+  # bad key and nothing was served on the bad domain: replacing them is safe.
+  if ! valid_fernet "$(env_get NETFLEET_FERNET_KEY)"; then
+    warn "NETFLEET_FERNET_KEY in .env is not a valid Fernet key — generating a new one"
+    sed -i "s|^NETFLEET_FERNET_KEY=.*|NETFLEET_FERNET_KEY=$(gen_fernet)|" "$INSTALL_DIR/.env"
+  fi
+  if ! valid_domain "$(env_get NETFLEET_DOMAIN)"; then
+    warn "NETFLEET_DOMAIN in .env is not a valid domain — asking again"
+    ask_domain
+    set_domain
+  fi
 fi
 
 # --- compose & Caddyfile ---
@@ -110,7 +147,12 @@ cd "$INSTALL_DIR"
 log "pulling images..."
 docker compose pull
 log "starting stack..."
-docker compose up -d
+if ! docker compose up -d; then
+  echo
+  warn "the stack did not start. Last API log lines:"
+  docker compose logs --tail 40 api || true
+  die "start failed — see the log above, or run: docker compose -f $INSTALL_DIR/docker-compose.yml logs api"
+fi
 
 log "waiting for healthchecks..."
 for _ in {1..30}; do
