@@ -27,12 +27,50 @@ needs DNS to issue the Let's Encrypt certificate automatically.
 netfleet.example.com.   A   203.0.113.10
 ```
 
+### Internal-only deployments
+
+If the A record points at a private address (RFC1918) because the host has no
+inbound NAT, Let's Encrypt cannot reach it and the default HTTP-01 challenge
+can never succeed. Caddy will still serve the certificate it already holds, so
+the deployment looks healthy right up to the day that certificate expires.
+
+Use the DNS-01 challenge instead — it proves ownership by writing a TXT record,
+and needs no inbound connectivity at all. For a zone hosted on Cloudflare:
+
+1. Create an API token at https://dash.cloudflare.com/profile/api-tokens with
+   the single permission **Zone → DNS → Edit**, scoped to that zone.
+2. Set both values in `/opt/netfleet/.env`:
+
+   ```
+   NETFLEET_ACME_DNS=cloudflare
+   NETFLEET_CLOUDFLARE_API_TOKEN=<token>
+   ```
+
+3. `docker compose up -d caddy` — Caddy re-issues within a minute or so.
+   Watch it with `docker compose logs -f caddy`.
+
+Caddy waits 60 seconds after writing the TXT record and then asks Let's
+Encrypt to validate. It skips its usual propagation check, which queries the
+zone's nameservers directly on port 53 and times out on hosts with outbound
+DNS blocked. If the host can reach them, set
+`NETFLEET_ACME_PROPAGATION_TIMEOUT=2m` to turn the check back on; if
+validation fails on a slow zone, raise `NETFLEET_ACME_PROPAGATION_DELAY`.
+
+Only the Cloudflare provider is compiled into `netfleet-caddy` (see
+`caddy/Dockerfile`); another provider means adding its module there and
+rebuilding.
+
 ## Firewall
 
 Open inbound:
 - `80/tcp` — Let's Encrypt HTTP-01 challenge + auto-redirect to HTTPS
 - `443/tcp` — HTTPS
 - `443/udp` — HTTP/3 (QUIC), optional
+
+Internal-only deployments on DNS-01 need neither `80/tcp` inbound from the
+internet nor any port-forward — only outbound HTTPS to Let's Encrypt and the
+Cloudflare API. The host clock must also be accurate (NTP, `123/udp` outbound):
+ACME rejects requests signed with a badly skewed clock.
 
 The MikroTik/FortiGate/etc. devices that NetFleet manages must be reachable
 *outbound* from the host on the device's API port (e.g. 8728/8729 for RouterOS).

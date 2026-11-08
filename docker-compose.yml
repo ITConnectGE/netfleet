@@ -46,7 +46,10 @@ x-api-env: &api-env
 services:
 
   caddy:
-    image: caddy:2-alpine
+    # Not the stock caddy image: NetFleet's is rebuilt with the Cloudflare DNS
+    # module so deployments that aren't reachable from the internet can pass
+    # the ACME DNS-01 challenge. See caddy/Dockerfile.
+    image: ghcr.io/itconnectge/netfleet-caddy:${NETFLEET_CADDY_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -58,6 +61,10 @@ services:
       - /opt/netfleet/data/caddy-config:/config
     environment:
       NETFLEET_DOMAIN: ${NETFLEET_DOMAIN}
+      NETFLEET_ACME_DNS: ${NETFLEET_ACME_DNS:-default}
+      NETFLEET_ACME_PROPAGATION_DELAY: ${NETFLEET_ACME_PROPAGATION_DELAY:-60s}
+      NETFLEET_ACME_PROPAGATION_TIMEOUT: ${NETFLEET_ACME_PROPAGATION_TIMEOUT:--1}
+      NETFLEET_CLOUDFLARE_API_TOKEN: ${NETFLEET_CLOUDFLARE_API_TOKEN:-}
     networks:
       - public
       - internal

@@ -22,6 +22,7 @@ jobs:
           - { name: api,     context: ./backend,  target: prod }
           - { name: web,     context: ./frontend, target: prod }
           - { name: updater, context: ./updater,  target: "" }
+          - { name: caddy,   context: ./caddy,    target: "" }
     steps:
       - uses: actions/checkout@v4
 

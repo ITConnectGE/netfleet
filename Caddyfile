@@ -5,6 +5,27 @@
 #  · API at /api/*, Web everywhere else
 # ----------------------------------------------------------------
 
+# ACME challenge, chosen by NETFLEET_ACME_DNS in .env:
+#   (empty)     HTTP-01 / TLS-ALPN-01. The host must be reachable from the
+#               internet on :80/:443.
+#   cloudflare  DNS-01 through the Cloudflare API, for deployments whose
+#               public DNS record points at a private address. Needs
+#               NETFLEET_CLOUDFLARE_API_TOKEN (Zone / DNS / Edit).
+# Caddy normally confirms the TXT record by asking the zone's authoritative
+# nameservers directly on port 53. Internal hosts often have outbound DNS
+# blocked, so that check is off by default and Caddy waits a fixed delay
+# instead. See docs/installation.md.
+(acme_default) {
+}
+
+(acme_cloudflare) {
+	tls {
+		dns cloudflare {env.NETFLEET_CLOUDFLARE_API_TOKEN}
+		propagation_delay {$NETFLEET_ACME_PROPAGATION_DELAY:60s}
+		propagation_timeout {$NETFLEET_ACME_PROPAGATION_TIMEOUT:-1}
+	}
+}
+
 {
 	# Global options
 	email admin@{$NETFLEET_DOMAIN}
@@ -14,6 +35,7 @@
 }
 
 {$NETFLEET_DOMAIN} {
+	import acme_{$NETFLEET_ACME_DNS:default}
 
 	encode zstd gzip
 
