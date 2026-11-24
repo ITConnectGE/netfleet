@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.core.config import settings
+from app.core.paths import safe_child
 from app.models.organization import Organization
 
 log = structlog.get_logger(__name__)
@@ -251,10 +252,10 @@ def list_system_backups() -> list[dict[str, object]]:
 
 def resolve_backup_path(filename: str) -> Path:
     SYSTEM_DIR.mkdir(parents=True, exist_ok=True)
-    base = SYSTEM_DIR.resolve()
-    p = (base / filename).resolve()
-    if not str(p).startswith(str(base)):
-        raise FileNotFoundError("path traversal blocked")
+    try:
+        p = safe_child(SYSTEM_DIR, filename)
+    except ValueError as e:
+        raise FileNotFoundError("path traversal blocked") from e
     if not p.is_file():
         raise FileNotFoundError(filename)
     return p

@@ -1,5 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+// Server-side only (no NEXT_PUBLIC_ prefix): the api service on the compose
+// network, same default as the /api rewrite in next.config.mjs.
+const INTERNAL_API_URL = (
+  process.env.NETFLEET_INTERNAL_API_URL || "http://api:8000"
+).replace(/\/+$/, "");
+
 /**
  * Cheap, edge-side route protection.
  * - /dashboard/** requires a setup-complete system; auth is enforced client-side
@@ -25,12 +31,19 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Probe setup status — Caddy or Next rewrites /api/v1 to the backend
+  // Probe setup status straight at the API on the internal network. Never
+  // derive this from req.nextUrl.origin: that comes from the client's Host
+  // header, which would let anyone point this server-side fetch at an
+  // arbitrary host (SSRF).
   try {
-    const origin = req.nextUrl.origin;
-    const r = await fetch(`${origin}/api/v1/setup/status`, { cache: "no-store" });
+    const r = await fetch(`${INTERNAL_API_URL}/api/v1/setup/status`, {
+      cache: "no-store",
+      redirect: "error",
+    });
     if (r.ok) {
-      const { setup_complete } = (await r.json()) as { setup_complete: boolean };
+      const { setup_complete } = (await r.json()) as {
+        setup_complete: boolean;
+      };
       if (!setup_complete && pathname !== "/setup") {
         const url = req.nextUrl.clone();
         url.pathname = "/setup";

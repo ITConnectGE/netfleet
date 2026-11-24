@@ -12,6 +12,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.paths import safe_child
 from app.drivers import get_driver
 from app.models.device import Device
 from app.models.device_backup import BackupSource, BackupStatus, DeviceBackup
@@ -107,10 +108,10 @@ async def list_history(
 
 def backup_file_path(device_id: UUID, filename: str) -> Path:
     """Resolve a backup filename safely under the device's directory (no traversal)."""
-    base = _device_dir(device_id).resolve()
-    p = (base / filename).resolve()
-    if not str(p).startswith(str(base)):
-        raise BackupError("path traversal blocked")
+    try:
+        p = safe_child(_device_dir(device_id), filename)
+    except ValueError as e:
+        raise BackupError("path traversal blocked") from e
     if not p.is_file():
         raise BackupError("file not found")
     return p
