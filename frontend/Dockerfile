@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ----- Base -----
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY . .
 RUN pnpm build
 
 # ----- Production -----
-FROM node:24-alpine AS prod
+FROM node:26-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 
