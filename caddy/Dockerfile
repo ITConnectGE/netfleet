@@ -9,7 +9,7 @@
 #  Enable it with NETFLEET_ACME_DNS=cloudflare in .env — see .env.example.
 # ----------------------------------------------------------------
 
-ARG CADDY_VERSION=2.11.4
+ARG CADDY_VERSION=2.11.9
 
 FROM caddy:${CADDY_VERSION}-builder AS builder
 RUN xcaddy build --with github.com/caddy-dns/cloudflare

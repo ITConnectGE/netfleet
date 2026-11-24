@@ -70,7 +70,7 @@ async def _verify(session, user, code):
 
 
 def _wrong(secret: str) -> str:
-    good = {pyotp.TOTP(secret).at(datetime.now(UTC), o) for o in (-1, 0, 1)}
+    good = {pyotp.TOTP(secret).at(datetime.now(UTC), counter_offset=o) for o in (-1, 0, 1)}
     return next(c for c in (f"{n:06d}" for n in range(10**6)) if c not in good)
 
 

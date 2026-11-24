@@ -37,7 +37,7 @@ This document captures *what's been built so far*, file-by-file. Pair with
 
 ### Backend (`backend/`)
 - `Dockerfile` â€” multi-stage (base/deps/dev/prod), tini, non-root user
-- `pyproject.toml` â€” FastAPI, SQLAlchemy[asyncio], asyncpg, librouteros, authlib, argon2-cffi, pyotp, cryptography, jose, redis, structlog, casbin (vestigial; not used â€” see `services/rbac.py`)
+- `pyproject.toml` â€” FastAPI, SQLAlchemy[asyncio], asyncpg, librouteros, authlib, argon2-cffi, pyotp, cryptography, PyJWT, redis, structlog, casbin (vestigial; not used â€” see `services/rbac.py`)
 - `docker-entrypoint.sh` â€” runs `alembic upgrade head` then starts uvicorn
 
 #### Core

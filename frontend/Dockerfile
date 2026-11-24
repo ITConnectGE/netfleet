@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
 # ----- Base -----
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 WORKDIR /app
 
 # ----- Deps -----
 FROM base AS deps
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile || pnpm install
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # ----- Dev -----
 FROM base AS dev
@@ -24,7 +24,7 @@ COPY . .
 RUN pnpm build
 
 # ----- Production -----
-FROM node:20-alpine AS prod
+FROM node:24-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 

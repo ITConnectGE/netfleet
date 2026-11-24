@@ -1,0 +1,26 @@
+# Weekly version-update PRs on top of the security alerts GitHub already raises.
+# Minor/patch bumps are grouped per ecosystem so they land as one PR each;
+# majors still come one by one so they can be reviewed on their own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    groups:
+      frontend-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /backend
+    schedule: { interval: weekly }
+    groups:
+      backend-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories: [/backend, /frontend, /updater, /caddy]
+    schedule: { interval: weekly }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

@@ -8,10 +8,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from cryptography.fernet import Fernet, InvalidToken
-from jose import JWTError, jwt
+from jwt import PyJWTError
 
 from app.core.config import settings
 
@@ -94,7 +95,7 @@ def issue_jwt(
 def decode_jwt(token: str, expected_type: TokenType = "access") -> dict[str, Any]:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[JWT_ALG])
-    except JWTError as e:
+    except PyJWTError as e:
         raise ValueError(f"invalid token: {e}") from e
 
     if payload.get("typ") != expected_type:

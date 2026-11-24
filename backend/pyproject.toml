@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netfleet-api"
-version = "0.59.3"
+version = "0.59.4"
 description = "NetFleet — multi-vendor network fleet management API"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -14,6 +14,7 @@ dependencies = []
 [project.optional-dependencies]
 runtime = [
     "fastapi>=0.115",
+    "starlette>=1.3.1",  # transitive via fastapi; floor for 2026 advisories
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -24,15 +25,15 @@ runtime = [
     "httpx>=0.28",
     "authlib>=1.3",
     "itsdangerous>=2.2",
-    "python-jose[cryptography]>=3.3",
+    "PyJWT>=2.10",
     "argon2-cffi>=23.1",
     "pyotp>=2.9",
-    "cryptography>=43.0",
+    "cryptography>=48.0.1",
     "librouteros>=3.4",
-    "paramiko>=3.5",
+    "paramiko>=5.0",
     "psutil>=6.0",
     "structlog>=24.4",
-    "python-multipart>=0.0.20",
+    "python-multipart>=0.0.31",
     "email-validator>=2.2",
 ]
 
@@ -43,7 +44,6 @@ dev = [
     "httpx>=0.28",
     "ruff>=0.8",
     "mypy>=1.13",
-    "types-python-jose",
 ]
 
 [tool.setuptools.packages.find]
