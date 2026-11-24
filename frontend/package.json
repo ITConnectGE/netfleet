@@ -23,7 +23,7 @@
     "lucide-react": "^0.460.0",
     "tailwind-merge": "^2.6.2",
     "@tanstack/react-query": "^5.108.4",
-    "@tanstack/react-table": "^8.20.5",
+    "@tanstack/react-table": "^9.3.1",
     "ky": "^1.14.3",
     "leaflet": "^1.9.4",
     "react-leaflet": "^5.0.0"
