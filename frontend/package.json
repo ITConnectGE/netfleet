@@ -41,7 +41,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.29",
     "prettier": "^3.10.1",
-    "prettier-plugin-tailwindcss": "^0.6.8"
+    "prettier-plugin-tailwindcss": "^0.8.1"
   },
   "pnpm": {
     "overrides": {
